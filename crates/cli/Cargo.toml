@@ -1,0 +1,14 @@
+[package]
+name = "agogo-cli"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["core"]
+core = ["dep:agogo-core"]
+
+[dependencies]
+agogo-core = { workspace = true, optional = true }

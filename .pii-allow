@@ -1,0 +1,11 @@
+# .pii-allow — regexes that suppress scripts/check-pii.sh hits on
+# specific lines. One extended regex per line; blank lines and lines
+# starting with '#' are ignored.
+#
+# The regex matches the offending line's content (not the file path).
+# Adding a pattern here lets a matching line through the scan.
+#
+# Example (uncomment to allow CI-docs examples that mention
+# /Users/runner/ as a canonical CI home path):
+#
+#   /Users/runner/

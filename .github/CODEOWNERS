@@ -1,0 +1,5 @@
+# CODEOWNERS — reviewers auto-requested on PRs touching matching paths.
+#
+# Syntax: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+* @cmk

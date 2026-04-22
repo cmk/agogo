@@ -1,0 +1,49 @@
+# cargo-deny configuration. Run locally with `cargo deny check` (after
+# `cargo install cargo-deny`); CI runs the same via the `deny` job in
+# `.github/workflows/ci.yml`.
+
+[advisories]
+# Fail the build on any unpatched RUSTSEC advisory affecting the
+# dependency graph. Yanked crates are a warning (sometimes unavoidable
+# transitively) rather than an error.
+yanked = "warn"
+ignore = []
+
+[bans]
+# Multiple versions of the same crate usually indicate a dependency
+# that hasn't been updated; warn so it's visible in `cargo deny check`
+# output without blocking unrelated work.
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace-internal crates are declared as `{ path = "..." }` in the
+# root Cargo.toml's `[workspace.dependencies]` and referenced as
+# `{ workspace = true }` in members — cargo-deny reads that as a
+# wildcard version spec. Exempt path-based deps so the `wildcards =
+# deny` rule only fires on external registry crates.
+allow-wildcard-paths = true
+highlight = "all"
+
+[licenses]
+version = 2
+# Permissive licenses that compose cleanly with MIT (the workspace
+# license). Extend as needed, but keep the list explicit — a copyleft
+# surprise should require a conscious decision.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.8
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

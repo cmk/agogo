@@ -1,0 +1,35 @@
+# Build
+debug/
+target/
+__pycache__/
+
+# Editor
+.vscode/
+.idea
+**/*.swp
+**/*.rs.bk
+
+# OS
+**/*.DS_Store
+
+# MCP server config — contains machine-local binary paths
+.mcp.json
+
+# Personal project notes (not shared with agents or CI)
+doc/notes/
+
+# External
+ext/
+
+# /watch-pr dynamic-mode backoff state (per-PR consecutive-quiet-tick counters)
+/.watch-pr/
+
+# Secrets and local environment
+.env
+.env.*
+*.pem
+*.key
+*_rsa
+*_rsa.pub
+*.p12
+*.pfx
