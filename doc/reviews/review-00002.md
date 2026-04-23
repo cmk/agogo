@@ -32,9 +32,10 @@ deliberately deferred (see plan-2026-04-22-01 "Deferred").
 - **Envelopes** — `opening`, `closing`, `s_curve` (Hermite smoothstep),
   all returning `u8` with saturating endpoints.
 - **CLI** — `agogo time schedule --bpm --tbase --swing --bars`
-  prints one tick offset per grid step. The build gate passes:
-  `--tbase t16 --swing 0.54 --bars 2` emits 32 lines with -4-tick
-  offsets on off-beats.
+  prints one absolute tick position per grid step (swing already
+  folded in). The build gate passes: `--tbase t16 --swing 0.54
+  --bars 2` emits 32 lines whose off-beats are scheduled 4 ticks
+  early (e.g. `44`, `140`, …, vs. the straight `48`, `144`, …).
 
 ### Verification
 
@@ -218,3 +219,136 @@ All 12 are present. The substitution of `swing_is_aligned_invariant` with its gu
 - **`time_pair_floor` precondition** (`crates/core/src/time/conn.rs`): Add a `# Panics` doc section documenting the u32-LCM-overflow case.
 - **Upstream `Conn::new` as `const fn`** (already noted in plan Review): the 14-arm match is fine but a const constructor would allow eliminating it.
 - **`serde`, `serde_json`, `thiserror`, `tokio`, `tracing` unused in core** (`crates/core/Cargo.toml`): None of the `time` module files import these. If pre-existing stubs for future sprints, a `debt:` commit to add them only when first used would reduce the dependency surface. Not introduced by this sprint.
+
+<!-- gh-id: 3128842264 -->
+### Copilot on [`crates/cli/src/main.rs:93`](https://github.com/cmk/agogo/pull/2#discussion_r3128842264) (2026-04-23 06:46 UTC)
+
+The CLI/help text and `schedule_ticks` docs say this prints/produces “tick offsets”, but the implementation returns (and prints) absolute tick positions after swing (`effective_tick(nominal)`), not the per-step offset (`effective - nominal`). This also conflicts with the PR/plan wording about “-4-tick offsets on off-beats”. Either change the output to offsets (likely `i32` values like 0 / -4) or update the docs/tests/headers to consistently describe the output as swung tick positions.
+
+<!-- gh-id: 3128842294 -->
+### Copilot on [`crates/core/src/arb.rs:7`](https://github.com/cmk/agogo/pull/2#discussion_r3128842294) (2026-04-23 06:46 UTC)
+
+The module docs say “Import from any crate's test module: use agogo_core::arb”, but `arb` is behind `#[cfg(any(feature = "proptest", test))]` in `lib.rs`, and `cfg(test)` is not enabled for dependencies. Downstream crates won’t be able to import this unless they enable the `agogo-core/proptest` feature. Consider updating this doc comment to mention enabling the feature in dev-dependencies.
+
+<!-- gh-id: 3128842324 -->
+### Copilot on [`doc/plans/plan-2026-04-22-01.md:186`](https://github.com/cmk/agogo/pull/2#discussion_r3128842324) (2026-04-23 06:46 UTC)
+
+In the Spot checks section, `join(T4, T8t) == T8t` is incorrect (LCM(192,64)=192, so join is `T4`). The parenthetical notes this, but the bullet still reads as a contradictory assertion. Since the implementation/test outcome is now known, consider rewriting this spot check to the correct equality to avoid misleading readers.
+
+<!-- gh-id: 3128842352 -->
+### Copilot on [`doc/reviews/review-00002.md:37`](https://github.com/cmk/agogo/pull/2#discussion_r3128842352) (2026-04-23 06:46 UTC)
+
+The review says the CLI “prints one tick offset per grid step” and that `--swing 0.54` produces “-4-tick offsets on off-beats”, but the current CLI implementation prints swung tick *positions* (e.g. 44, 140, …), not per-step offsets (0 / -4). Consider updating this wording to match the actual output format, or changing the CLI output to emit offsets as documented.
+```suggestion
+  prints one swung tick position per grid step. The build gate
+  passes: `--tbase t16 --swing 0.54 --bars 2` emits 32 lines whose
+  off-beats are scheduled 4 ticks early (for example `44`, `140`,
+  ... rather than the unswung `48`, `144`, ...).
+```
+
+<!-- gh-id: 3128842410 -->
+### Copilot on [`crates/core/src/time/tick.rs:49`](https://github.com/cmk/agogo/pull/2#discussion_r3128842410) (2026-04-23 06:46 UTC)
+
+`time_to_tick` multiplies two `u32`s (`beats * tick_count`) without overflow handling. In release builds this will wrap silently, which breaks `Time`'s Eq/Ord/Hash implementations (they all go through tick count) and can corrupt ordering/hashing semantics. Consider using `checked_mul` (panic with a clear message) or doing the math in `u64` and clamping/returning a `Result` if the value can’t fit in `Tick(u32)`.
+```suggestion
+    Tick(
+        t.beats
+            .checked_mul(t.base.tick_count())
+            .expect("time_to_tick overflow: beats * tick_count does not fit in Tick(u32)"),
+    )
+```
+
+<!-- gh-id: 3128842435 -->
+### Copilot on [`crates/core/src/time/tick.rs:63`](https://github.com/cmk/agogo/pull/2#discussion_r3128842435) (2026-04-23 06:46 UTC)
+
+`from_ticks` can overflow when aligning to the T128t grid: `n.0.div_ceil(prec) * prec` overflows `u32` for inputs near `u32::MAX` (e.g. `u32::MAX` rounds up past the max). In release this wraps, producing a much smaller aligned value and an incorrect `Time`. Align using `u64` and clamp to the largest multiple of `prec` ≤ `u32::MAX`, or use checked arithmetic and return/panic explicitly on overflow.
+```suggestion
+    let prec = u64::from(TBase::T128t.tick_count());
+    let rounded_up = u64::from(n.0).div_ceil(prec) * prec;
+    let max_aligned = (u64::from(u32::MAX) / prec) * prec;
+    let aligned = rounded_up.min(max_aligned) as u32;
+```
+
+<!-- gh-id: 3128842454 -->
+### Copilot on [`crates/core/src/time/conn.rs:78`](https://github.com/cmk/agogo/pull/2#discussion_r3128842454) (2026-04-23 06:46 UTC)
+
+`rt_ceil`/`rt_floor` convert an `i64` tick count to `u32` via `as u32`. For values > `u32::MAX`, this truncates/wraps rather than clamping or erroring, which can yield nonsensical tick counts for large rationals. Consider clamping to `u32::MAX` (similar to `effective_tick`), or returning an error if the computed tick count can’t fit in `Tick(u32)`.
+
+<!-- gh-id: 4160244933 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-23 06:46 UTC](https://github.com/cmk/agogo/pull/2#pullrequestreview-4160244933))
+
+## Pull request overview
+
+Adds the `agogo-core::time` layer as a Rust port of Cirklon’s grid/tick algebra (TBase lattice, Tick/Time canonicalization, swing, envelopes, and associated Galois connections), plus a `agogo-cli time schedule` subcommand for emitting a swung schedule.
+
+**Changes:**
+- Introduces `agogo-core::time` module tree (`tbase`, `tick`, `conn`, `swing`, `envelope`) with property tests and shared proptest strategies.
+- Adds CLI subcommand `agogo time schedule` (bpaf-based) to generate schedules in tick space.
+- Adds docs: implementation plan + review record.
+
+### Reviewed changes
+
+Copilot reviewed 15 out of 16 changed files in this pull request and generated 7 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00002.md | Review record describing what landed and verification claims. |
+| doc/plans/plan-2026-04-22-01.md | Implementation plan + review/deviation notes for time/ sprint. |
+| crates/core/src/time.rs | Public module root/re-exports for `agogo-core::time`. |
+| crates/core/src/time/tbase.rs | `TBase` enum, tick counts, divisibility preorder, lattice/Heyting ops + tests. |
+| crates/core/src/time/tick.rs | `Tick` + `Time` types, canonicalization via `from_ticks`, tick-count-based Eq/Ord/Hash + tests. |
+| crates/core/src/time/conn.rs | Five Galois connections (`ticks`, `rat_tick`, `quantize_at`, `time`, `tbase`) + law tests. |
+| crates/core/src/time/swing.rs | Integer swing model (`SwingConfig`, `effective_tick`, alignment helpers) + tests. |
+| crates/core/src/time/envelope.rs | Envelopes (`opening`, `closing`, `s_curve`) + tests. |
+| crates/core/src/lib.rs | Exposes `time` and gates `arb` behind `proptest` feature or crate tests. |
+| crates/core/src/arb.rs | Shared proptest strategies for new time-domain types. |
+| crates/core/proptest-regressions/time/conn.txt | Stores proptest regression seeds for `time/conn` tests. |
+| crates/core/Cargo.toml | Adds `connections`, `num-rational`, optional `proptest` feature wiring. |
+| crates/cli/src/main.rs | Adds `time schedule` subcommand and unit tests (feature-gated on `core`). |
+| crates/cli/Cargo.toml | Adds `bpaf` dependency. |
+| Cargo.toml | Adds workspace deps (`bpaf`, `num-rational`) and sibling `connections` path dep. |
+| Cargo.lock | Locks new dependencies. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3128916548 -->
+#### ↳ cmk ([2026-04-23 07:03 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3128916548))
+
+Fixed in aca20f6: the `time schedule` help, `schedule_ticks` docstring, and the review summary all now describe the output as absolute tick positions (swing folded in), which is what we actually emit. We considered switching to offsets instead but positions are more directly useful for downstream tooling.
+
+<!-- gh-id: 3128916716 -->
+#### ↳ cmk ([2026-04-23 07:03 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3128916716))
+
+Fixed in aca20f6: the `arb.rs` module docstring now explains that downstream crates need `features = ["proptest"]` on `agogo-core` in their dev-dependencies to import the strategies, with an example block.
+
+<!-- gh-id: 3128916878 -->
+#### ↳ cmk ([2026-04-23 07:03 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3128916878))
+
+Fixed in aca20f6: corrected to `join(T4, T8t) == T4` (LCM(192, 64) = 192). The original was a pre-implementation draft guess with the right parenthetical but the wrong bullet.
+
+<!-- gh-id: 3128917015 -->
+#### ↳ cmk ([2026-04-23 07:03 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3128917015))
+
+Fixed in aca20f6 alongside the parallel wording in `main.rs` — using "absolute tick positions (swing folded in)" throughout. Took your suggested wording for the example values.
+
+<!-- gh-id: 3128917866 -->
+#### ↳ cmk ([2026-04-23 07:03 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3128917866))
+
+Fixed in aca20f6: now `beats.checked_mul(tick_count).expect(...)`. A silent wrap would have corrupted `Time`'s Eq/Ord/Hash (all three delegate to tick count), which is worse than a clean panic. Added a `# Panics` section noting the 5_592_405-beat safe ceiling for callers constructing `Time` directly; `arb_time` in the test suite stays well inside at ≤100K beats.
+
+<!-- gh-id: 3128918077 -->
+#### ↳ cmk ([2026-04-23 07:03 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3128918077))
+
+Fixed in aca20f6 — took your suggestion pretty much as-is. Align in u64, clamp to the largest multiple of 4 ≤ u32::MAX. No wrap, no panic on boundary inputs; the `from_ticks` domain is now genuinely total over `u32`.
+
+<!-- gh-id: 3128918323 -->
+#### ↳ cmk ([2026-04-23 07:03 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3128918323))
+
+Fixed in aca20f6: added an `i64_to_tick` helper that saturates the `i64 → u32` cast at both ends, and routed both `rt_ceil` and `rt_floor` through it. Large rationals now clamp to `u32::MAX` ticks instead of silently truncating.

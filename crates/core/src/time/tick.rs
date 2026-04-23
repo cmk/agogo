@@ -45,8 +45,23 @@ pub struct Time {
 }
 
 /// Convert a musical `Time` to absolute ticks. Exact: no rounding.
+///
+/// # Panics
+///
+/// Panics if `beats * tick_count` overflows `u32`. The largest
+/// possible product is `u32::MAX * 768`, so callers constructing
+/// `Time` with beats ≤ `u32::MAX / 768 = 5_592_405` are always
+/// safe. `arb_time` bounds beats at 100K (product ≤ 76.8M), so the
+/// bound is hit only by adversarial direct construction. This path
+/// backs `Time`'s `Eq`/`Ord`/`Hash`, so silent wrap would corrupt
+/// equivalence-class semantics — a checked multiply fails loudly
+/// instead.
 pub fn time_to_tick(t: Time) -> Tick {
-    Tick(t.beats * t.base.tick_count())
+    Tick(
+        t.beats
+            .checked_mul(t.base.tick_count())
+            .expect("time_to_tick overflow: beats * tick_count exceeds u32::MAX"),
+    )
 }
 
 /// Round `n` up to the nicest `Time` representation.
@@ -57,11 +72,15 @@ pub fn time_to_tick(t: Time) -> Tick {
 ///
 /// For aligned `n` (multiples of 4) this is an exact canonicalisation;
 /// for unaligned `n` it rounds up. This is the `ceiling` side of the
-/// `ticks` Galois connection.
+/// `ticks` Galois connection. For inputs within 4 ticks of
+/// `u32::MAX` the ceiling-aligned value would exceed `u32::MAX`; we
+/// clamp to the largest multiple of 4 ≤ `u32::MAX` instead (avoids a
+/// silent wrap that would yield a nonsense canonical form).
 pub fn from_ticks(n: Tick) -> Time {
-    let prec = TBase::T128t.tick_count();
-    let aligned = n.0.div_ceil(prec) * prec;
-    nicest_from_tick_count(aligned)
+    let prec = u64::from(TBase::T128t.tick_count());
+    let rounded_up = u64::from(n.0).div_ceil(prec) * prec;
+    let max_aligned = (u64::from(u32::MAX) / prec) * prec;
+    nicest_from_tick_count(rounded_up.min(max_aligned) as u32)
 }
 
 /// Round `n` down to the nicest `Time` representation (floor side of

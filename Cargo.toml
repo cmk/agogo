@@ -15,8 +15,13 @@ license = "MIT"
 # Internal crates
 agogo-core = { path = "crates/core" }
 
-# Sibling repos (sibling path; see doc/plans/plan-2026-04-22-01.md §T0)
-connections = { path = "../connections" }
+# Sibling crate. Hosted on GitLab; pinned by rev so the build is
+# reproducible across local and CI. Local dev workflow: `cargo` will
+# fetch the rev on first build and cache it. If you're co-developing
+# agogo + connections on the same machine, add a gitignored
+# `.cargo/config.toml` with a `[patch]` override pointing at
+# `../connections` to avoid the cache-round-trip.
+connections = { git = "https://gitlab.com/cmk/connections.git", rev = "85722866bebc62e9912a1c88057d209848528ac8" }
 
 # Shared dependencies
 clap = { version = "4", features = ["derive"] }
