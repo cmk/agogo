@@ -1,60 +1,65 @@
 #![forbid(unsafe_code)]
 
-use clap::{Parser, Subcommand};
+use bpaf::Bpaf;
+use time_sched::schedule_args;
 
-#[derive(Parser)]
-#[command(name = "agogo", about = "agogo workspace CLI")]
+/// agogo workspace CLI
+#[derive(Debug, Clone, Bpaf)]
+#[bpaf(options)]
 struct Cli {
-    #[command(subcommand)]
+    #[bpaf(external(command), optional)]
     command: Option<Command>,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Clone, Bpaf)]
 enum Command {
     /// Audio-clock sync utilities.
+    #[bpaf(command("sync"))]
     Sync {
-        #[command(subcommand)]
+        #[bpaf(external(sync_sub))]
         sub: SyncSub,
     },
     /// Musical-time operations (Cirklon grid algebra).
+    #[bpaf(command("time"))]
     Time {
-        #[command(subcommand)]
+        #[bpaf(external(time_op))]
         op: TimeOp,
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Clone, Bpaf)]
 enum SyncSub {
     /// Synthesise a pulse train and trace the detector + PLL output as CSV.
     ///
     /// One row per detected peak: `sample_index,bpm_estimate,phase_estimate`.
+    #[bpaf(command("trace"))]
     Trace {
-        #[arg(long, value_parser = parse_positive_f32)]
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f32))]
         bpm: f32,
-        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
-        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+        #[bpaf(long, argument("PPQ"), parse(parse_positive_u32))]
         ppq: u32,
-        #[arg(long, default_value_t = 0.0, value_parser = parse_non_negative_f32)]
+        #[bpaf(long, argument("JITTER_US"), parse(parse_non_negative_f32), fallback(0.0))]
         jitter_us: f32,
-        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
+        #[bpaf(long, argument("PULSES"), parse(parse_positive_u32))]
         pulses: u32,
-        #[arg(long, default_value_t = 1)]
+        #[bpaf(long, argument("SEED"), fallback(1))]
         seed: u64,
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug, Clone, Bpaf)]
 enum TimeOp {
     /// Print absolute tick positions for a schedule at a given TBase.
     /// On off-beat 16th-note steps the swing shift (if any) is
     /// applied before printing, so odd steps come out earlier than
     /// their nominal grid position.
-    Schedule(time_sched::ScheduleArgs),
+    #[bpaf(command("schedule"))]
+    Schedule(#[bpaf(external(schedule_args))] time_sched::ScheduleArgs),
 }
 
-fn parse_positive_f32(s: &str) -> Result<f32, String> {
-    let v: f32 = s.parse().map_err(|e| format!("not a number: {e}"))?;
+fn parse_positive_f32(v: f32) -> Result<f32, String> {
     if v.is_finite() && v > 0.0 {
         Ok(v)
     } else {
@@ -62,8 +67,7 @@ fn parse_positive_f32(s: &str) -> Result<f32, String> {
     }
 }
 
-fn parse_non_negative_f32(s: &str) -> Result<f32, String> {
-    let v: f32 = s.parse().map_err(|e| format!("not a number: {e}"))?;
+fn parse_non_negative_f32(v: f32) -> Result<f32, String> {
     if v.is_finite() && v >= 0.0 {
         Ok(v)
     } else {
@@ -71,8 +75,16 @@ fn parse_non_negative_f32(s: &str) -> Result<f32, String> {
     }
 }
 
+fn parse_positive_u32(v: u32) -> Result<u32, String> {
+    if v == 0 {
+        Err("must be ≥ 1, got 0".to_string())
+    } else {
+        Ok(v)
+    }
+}
+
 fn main() {
-    let cli = Cli::parse();
+    let cli = cli().run();
     match cli.command {
         Some(Command::Sync {
             sub:
@@ -180,22 +192,22 @@ pub mod time_sched {
     use agogo_core::time::swing::{self, SwingConfig};
     use agogo_core::time::tbase::TBase;
     use agogo_core::time::tick::Tick;
-    use clap::Args;
+    use bpaf::Bpaf;
 
-    #[derive(Args, Debug, Clone)]
+    #[derive(Bpaf, Debug, Clone)]
     pub struct ScheduleArgs {
         /// Tempo in beats per minute. Informational only — scheduling
         /// happens in tick space, tempo-independently.
-        #[arg(long)]
+        #[bpaf(long, argument("BPM"))]
         pub bpm: f32,
 
         /// Grid resolution (e.g. `t16`, `t8t`, `t128t`).
-        #[arg(long, value_parser = str::parse::<TBase>)]
+        #[bpaf(long, argument::<String>("TBASE"), parse(parse_tbase))]
         pub tbase: TBase,
 
         /// Swing ratio in `[0.5, 0.75]`: 0.5 = straight, 0.75 = full
         /// triplet swing.
-        #[arg(long, default_value_t = 0.5)]
+        #[bpaf(long, argument("SWING"), fallback(0.5))]
         pub swing: f32,
 
         /// Number of 4/4 bars to schedule. Bounded to `u16` (≤ 65535)
@@ -203,8 +215,12 @@ pub mod time_sched {
         /// tick positions ≈ 50 MB Vec at the finest grid. The plan
         /// specified `u32`; narrowing the type is the simplest honest
         /// bound (see plan's Review section).
-        #[arg(long)]
+        #[bpaf(long, argument("BARS"))]
         pub bars: u16,
+    }
+
+    fn parse_tbase(s: String) -> Result<TBase, String> {
+        s.parse()
     }
 
     /// Convert a `0.5..=0.75` swing ratio into a `SwingConfig`. The

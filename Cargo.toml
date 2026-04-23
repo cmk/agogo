@@ -24,7 +24,7 @@ agogo-core = { path = "crates/core" }
 connections = { git = "https://gitlab.com/cmk/connections.git", rev = "85722866bebc62e9912a1c88057d209848528ac8" }
 
 # Shared dependencies
-clap = { version = "4", features = ["derive"] }
+bpaf = { version = "0.9", features = ["derive"] }
 num-rational = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
