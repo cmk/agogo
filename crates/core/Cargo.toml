@@ -6,10 +6,17 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+default = []
+# Enable shared proptest strategies (`arb::arb_*`) for downstream
+# crates' tests. Pulls in proptest as a non-dev dependency.
+testkit = ["dep:proptest"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
