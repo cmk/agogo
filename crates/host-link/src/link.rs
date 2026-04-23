@@ -7,9 +7,12 @@
 //!
 //! RT-safety in brief: construction, enable, and disable are **not**
 //! RT-safe — they open a UDP socket and spawn Link's internal
-//! networking threads. Every other method here is RT-safe: peer and
-//! tempo reads go through `capture_audio_session_state`, which is
-//! lock-free on Link's C++ side.
+//! networking threads. The remaining read-only queries are RT-safe;
+//! `tempo()` captures audio session state via
+//! `capture_audio_session_state` (lock-free on Link's C++ side);
+//! `is_enabled()` and `num_peers()` call the matching `AblLink`
+//! methods, which are documented by rusty_link as RT-safe atomic
+//! reads on the Link C++ handle.
 
 use agogo_core::sync::PhaseSourceImpl;
 use rusty_link::{AblLink, SessionState};
@@ -99,7 +102,9 @@ mod tests {
     #[test]
     fn new_does_not_panic_across_bpm_range() {
         // Construct at representative BPMs; drop without enabling so
-        // no network I/O happens.
+        // peer discovery / multicast join never starts. (Link's C++
+        // side still opens a UDP socket on construction; we just
+        // don't announce presence to the LAN.)
         for bpm in [60.0, 90.0, 120.0, 137.0, 200.0] {
             let _c = LinkClock::new(bpm);
         }

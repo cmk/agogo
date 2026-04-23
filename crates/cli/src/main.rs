@@ -274,9 +274,9 @@ fn main() {
                 },
         }) => {
             println!("t_ms,peers,tempo_bpm");
-            for row in link_probe::probe(initial_bpm, duration_ms, period_ms) {
+            link_probe::probe(initial_bpm, duration_ms, period_ms, |row| {
                 println!("{},{},{:.4}", row.t_ms, row.peers, row.tempo_bpm);
-            }
+            });
         }
         None => {
             #[cfg(feature = "core")]
@@ -305,19 +305,25 @@ pub mod link_probe {
     }
 
     /// Run a probe loop for `duration_ms`, sampling every `period_ms`.
-    /// Peer discovery is enabled for the duration of the call and
-    /// disabled before return. Blocks the calling thread; intended for
-    /// the CLI, not the audio callback.
+    /// Each sampled row is passed to `on_row` synchronously so callers
+    /// can stream directly to stdout (or collect into a Vec for
+    /// tests). Peer discovery is enabled for the duration of the call
+    /// and disabled before return. Blocks the calling thread; intended
+    /// for the CLI, not the audio callback.
     ///
     /// `period_ms` is clamped to a minimum of 1 — a zero period would
     /// turn the `sleep(Duration::ZERO)` inside the loop into a no-op
-    /// and spin-OOM on row allocation.
-    pub fn probe(initial_bpm: f64, duration_ms: u32, period_ms: u32) -> Vec<ProbeRow> {
+    /// and starve the row consumer if it can't keep up.
+    pub fn probe<F: FnMut(ProbeRow)>(
+        initial_bpm: f64,
+        duration_ms: u32,
+        period_ms: u32,
+        mut on_row: F,
+    ) {
         let period_ms = period_ms.max(1);
         let mut clock = LinkClock::new(initial_bpm);
         clock.enable(true);
         let start = Instant::now();
-        let mut rows = Vec::new();
         let duration = Duration::from_millis(u64::from(duration_ms));
         let period = Duration::from_millis(u64::from(period_ms));
         loop {
@@ -325,7 +331,7 @@ pub mod link_probe {
             if elapsed > duration {
                 break;
             }
-            rows.push(ProbeRow {
+            on_row(ProbeRow {
                 t_ms: elapsed.as_millis() as u64,
                 peers: clock.num_peers(),
                 tempo_bpm: clock.tempo(),
@@ -333,7 +339,6 @@ pub mod link_probe {
             sleep(period);
         }
         clock.enable(false);
-        rows
     }
 
     #[cfg(test)]
@@ -350,7 +355,8 @@ pub mod link_probe {
         /// `fixture_or_skip!`-style network gate.
         #[test]
         fn probe_emits_rows_and_keeps_initial_tempo() {
-            let rows = probe(125.0, 100, 50);
+            let mut rows = Vec::new();
+            probe(125.0, 100, 50, |row| rows.push(row));
             assert!(!rows.is_empty(), "probe returned no rows");
             let first = rows[0];
             assert_eq!(first.peers, 0);

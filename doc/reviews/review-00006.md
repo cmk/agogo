@@ -228,3 +228,130 @@ does what the table row says it must do.
   a "property" while the plan body says "No property tests this sprint."
   Worth retitling the table column to "Spot checks / delegation proofs"
   in Plan 07-b.
+
+<!-- gh-id: 3130342096 -->
+### Copilot on [`crates/host-link/src/link.rs:12`](https://github.com/cmk/agogo/pull/6#discussion_r3130342096) (2026-04-23 11:12 UTC)
+
+The module-level docs say peer/tempo reads go through `capture_audio_session_state` and are lock-free, but `is_enabled()` and `num_peers()` currently call `AblLink::{is_enabled,num_peers}` directly and don't use the `SessionState` scratch buffer. Either update the docs to match the implementation, or route these reads through the captured `SessionState` (and adjust method signatures as needed) so the RT-safety story is consistent.
+```suggestion
+//! networking threads. The remaining read-only queries are RT-safe;
+//! `tempo()` captures audio session state via
+//! `capture_audio_session_state`, which is lock-free on Link's C++
+//! side.
+```
+
+<!-- gh-id: 3130342170 -->
+### Copilot on [`crates/host-link/src/lib.rs:9`](https://github.com/cmk/agogo/pull/6#discussion_r3130342170) (2026-04-23 11:12 UTC)
+
+Crate docs say `LinkClock` "in later sprints — will implement `agogo_core::sync::PhaseSourceImpl`", but `LinkClock` already implements `PhaseSourceImpl` in this PR (with `phase_at_sample` deferred via `todo!()`). Update the rustdoc to avoid misleading readers about the current API surface.
+```suggestion
+//! a `LinkClock` that implements `agogo_core::sync::PhaseSourceImpl`.
+//! This sprint ships the lifecycle surface (enable / tempo /
+//! num_peers); the `phase_at_sample` bridge remains deferred post-fxp.
+```
+
+<!-- gh-id: 3130342198 -->
+### Copilot on [`crates/cli/src/main.rs:337`](https://github.com/cmk/agogo/pull/6#discussion_r3130342198) (2026-04-23 11:12 UTC)
+
+`link_probe::probe` buffers the entire run into a `Vec<ProbeRow>` and `main` prints after the probe completes. That means the command doesn't actually *emit* CSV at the requested period (no incremental output), and long `duration_ms/period_ms` combinations can cause very large allocations/OOM. Consider streaming rows directly to stdout inside the loop (or accept a writer/callback/iterator) so output is produced in real time and memory stays bounded.
+
+<!-- gh-id: 3130342220 -->
+### Copilot on [`doc/plans/plan-2026-04-23-04.md:27`](https://github.com/cmk/agogo/pull/6#discussion_r3130342220) (2026-04-23 11:12 UTC)
+
+The plan references a local absolute path (`/Users/cmk/.claude/plans/lets-do-a-bit-hashed-dream.md`) as the "approved design doc" (also repeated later in the recommendations section). This link won't resolve for other contributors/CI artifacts; please replace it with a repo-relative path/URL, or inline the relevant design points so the plan is self-contained.
+```suggestion
+This sprint lands Sprint A of the Link integration's structural slice.
+The approved design constraints relevant to this sprint are summarized
+below so the plan remains self-contained. Full Sprint A would also
+implement the phase bridge (host-time anchor, `phase_at_sample(n)`,
+monotonicity property tests). That path touches `f32`/`f64` arithmetic
+on phase values — the same surface the concurrent fxp refactor
+(`plan/2026-04-23-03`, commits `6251586 plan:` and `ed03f9e feat(core): fxp shim`)
+is replacing with rate-typed sample + decimal time tiers. Shipping both
+against each other risks conflict; **this plan ships only the
+non-numerical parts**, leaves `LinkClock::phase_at_sample` as a
+`todo!()` stub, and queues the numerical slice for a "Plan 07-b"
+sprint once fxp merges.
+```
+
+<!-- gh-id: 3130342250 -->
+### Copilot on [`crates/host-link/src/link.rs:102`](https://github.com/cmk/agogo/pull/6#discussion_r3130342250) (2026-04-23 11:12 UTC)
+
+In `new_does_not_panic_across_bpm_range`, the comment says dropping without enabling means "no network I/O happens", but earlier docs in this module state `LinkClock::new` opens a UDP socket and spawns Link threads. Consider rewording to something more precise (e.g., no peer discovery / multicast join) to avoid contradicting the RT-safety notes.
+```suggestion
+        // peer discovery / multicast join never starts.
+```
+
+<!-- gh-id: 3130342280 -->
+### Copilot on [`Cargo.toml`](https://github.com/cmk/agogo/pull/6#discussion_r3130342280) (2026-04-23 11:12 UTC)
+
+`crates/host-link` is a workspace member and depends on `rusty_link = { path = "ext/rusty_link" }`, but `ext/` is gitignored. As a result, a fresh clone (and current GitHub Actions CI which runs `cargo test --workspace`) will fail unless `ext/rusty_link` is manually populated and a C++/CMake toolchain is present. To keep default CI/builds lean as described, either (a) remove `crates/host-link` from `workspace.members` (build it only when pulled in via the CLI `link` feature), (b) change CI to exclude this crate from default workspace builds, or (c) switch `rusty_link` to a fetchable dependency (git rev) so `cargo` can obtain it automatically.
+
+<!-- gh-id: 4161890133 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-23 11:12 UTC](https://github.com/cmk/agogo/pull/6#pullrequestreview-4161890133))
+
+## Pull request overview
+
+Introduces scaffolding for a read-only Ableton Link integration, adding a new host-side crate and extending `agogo-core`’s phase source abstraction to allow sibling-crate clock sources, plus a feature-gated CLI probe command.
+
+**Changes:**
+- Add `agogo-host-link` crate (LinkClock lifecycle + tests) and workspace wiring for the `rusty_link` binding.
+- Add `PhaseSourceImpl` trait and `PhaseSource::Custom(...)` variant with delegation + a unit test in `agogo-core`.
+- Add `agogo link probe` CLI subcommand behind `--features link`.
+
+### Reviewed changes
+
+Copilot reviewed 11 out of 12 changed files in this pull request and generated 6 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| `Cargo.toml` | Adds `crates/host-link` to workspace + introduces `ext/` exclusion and `rusty_link` path dep. |
+| `crates/cli/Cargo.toml` | Adds `link` feature and optional dependency on `agogo-host-link`. |
+| `crates/cli/src/main.rs` | Adds `link probe` command and the `link_probe` module. |
+| `crates/core/src/sync/source.rs` | Adds `PhaseSourceImpl` + `Custom` variant and delegates calls; adds a dispatch test. |
+| `crates/core/src/sync.rs` | Re-exports `PhaseSourceImpl`. |
+| `crates/host-link/Cargo.toml` | Defines new `agogo-host-link` crate and dependencies. |
+| `crates/host-link/src/lib.rs` | New crate root; exports `LinkClock`. |
+| `crates/host-link/src/link.rs` | Implements `LinkClock` lifecycle + deferred `phase_at_sample` + tests. |
+| `crates/host-link/README.md` | Documents how to populate `ext/rusty_link` and build with the feature gate. |
+| `doc/plans/plan-2026-04-23-04.md` | Adds Plan 07 implementation plan and review notes. |
+| `doc/reviews/review-00005.md` | Adds PR review record / summary of the change set. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3130475328 -->
+#### ↳ cmk ([2026-04-23 11:39 UTC](https://github.com/cmk/agogo/pull/6#discussion_r3130475328))
+
+Updated the module-level RT-safety doc to distinguish `tempo()` (which does go through `capture_audio_session_state`) from `is_enabled()` / `num_peers()` (which call AblLink's own RT-safe atomic reads). Commit b67f9b3.
+
+<!-- gh-id: 3130475756 -->
+#### ↳ cmk ([2026-04-23 11:39 UTC](https://github.com/cmk/agogo/pull/6#discussion_r3130475756))
+
+Applied — the crate doc now says LinkClock implements `PhaseSourceImpl` (with `phase_at_sample` `todo!()`-deferred until fxp lands). Commit b67f9b3.
+
+<!-- gh-id: 3130476110 -->
+#### ↳ cmk ([2026-04-23 11:39 UTC](https://github.com/cmk/agogo/pull/6#discussion_r3130476110))
+
+Good catch. Refactored `link_probe::probe` to take a `FnMut(ProbeRow)` callback so the CLI streams rows to stdout as they land; memory stays bounded regardless of duration/period. Test threads a `Vec::push`-ing closure. Commit b67f9b3.
+
+<!-- gh-id: 3130476549 -->
+#### ↳ cmk ([2026-04-23 11:39 UTC](https://github.com/cmk/agogo/pull/6#discussion_r3130476549))
+
+Right, the `/Users/cmk/...` path was an artifact of the planning session. Inlined the design constraints directly into the plan's Context section, and rewrote the Plan 07-b recommendations to spell out the bridge math rather than linking to an external file. Commit b67f9b3.
+
+<!-- gh-id: 3130477251 -->
+#### ↳ cmk ([2026-04-23 11:39 UTC](https://github.com/cmk/agogo/pull/6#discussion_r3130477251))
+
+Applied the suggested rewording. The comment now clarifies that "no network I/O" means no peer discovery / multicast join, while acknowledging that Link's C++ side still opens a UDP socket on construction. Commit b67f9b3.
+
+<!-- gh-id: 3130477741 -->
+#### ↳ cmk ([2026-04-23 11:39 UTC](https://github.com/cmk/agogo/pull/6#discussion_r3130477741))
+
+Good diagnosis — already landed in commit 3f19519 (one behind this review). Applied option (a): removed `crates/host-link` from `[workspace].members` so default `cargo test --workspace` never resolves its deps. Also switched from the `ext/rusty_link` path dep to the crates.io release `rusty_link = "=0.4.8"` (the published crate bundles the Ableton Link C++ submodule, so local `ext/` population is no longer needed). The remaining deny failure (GPL-2.0-or-later on rusty_link) is addressed here in b67f9b3 via an explicit per-crate exception in `deny.toml`.

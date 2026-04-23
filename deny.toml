@@ -41,6 +41,16 @@ allow = [
     "CC0-1.0",
     "MPL-2.0",
 ]
+# Per-crate exception: `rusty_link` is GPL-2.0-or-later because it
+# wraps Ableton Link (also GPL-2.0-or-later). The crate is optional
+# and feature-gated behind `agogo-cli --features link` — default
+# builds (including the workspace + CI lanes) never link it in. Users
+# who enable the `link` feature are opting into GPL terms for that
+# build; this exception encodes the conscious decision described in
+# the `allow` comment above.
+exceptions = [
+    { name = "rusty_link", allow = ["GPL-2.0-or-later"] },
+]
 confidence-threshold = 0.8
 
 [sources]
