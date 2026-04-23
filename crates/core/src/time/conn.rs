@@ -230,6 +230,83 @@ pub fn tbase() -> Conn<(TBase, TBase), TBase> {
     Conn::new(tbase_pair_ceil, tbase_pair_inner, tbase_pair_floor)
 }
 
+// ── SampleTickConn: Sample ↔ Tick (runtime-parameterised) ────────
+//
+// `connections::Conn<A, B>` uses bare `fn` pointers that cannot close
+// over runtime state, so the natural `Conn<Sample, Tick>` parameterised
+// on `(sr, bpm, ppqn)` is not expressible today (see agogo.md §7). The
+// pragmatic workaround is a struct mirroring `Conn`'s shape and laws.
+
+/// Sample ↔ Tick bridge parameterised by sample rate, tempo, and PPQN.
+///
+/// Mirrors `connections::Conn<Sample, Tick>`'s `(ceil, inner, floor)`
+/// triple. The laws — round-trip on aligned inputs, monotonicity — are
+/// verified by proptest. Not a real `Conn` because its conversion
+/// depends on runtime `(sr, bpm)`; see agogo.md §7 for the migration
+/// plan if `connections` gains a closure-capturing variant.
+#[derive(Copy, Clone, Debug)]
+pub struct SampleTickConn {
+    sr: u32,
+    bpm: f64,
+    ppqn: u32,
+}
+
+impl SampleTickConn {
+    /// # Panics
+    ///
+    /// Panics if `sr == 0`, `ppqn == 0`, or `bpm` is non-positive /
+    /// non-finite. These are programming errors — every call site
+    /// either ships fixed constants or validates at a CLI/config
+    /// boundary.
+    pub fn new(sr: u32, bpm: f64, ppqn: u32) -> Self {
+        assert!(sr > 0, "sample rate must be positive");
+        assert!(ppqn > 0, "ppqn must be positive");
+        assert!(
+            bpm.is_finite() && bpm > 0.0,
+            "bpm must be positive and finite, got {bpm}"
+        );
+        Self { sr, bpm, ppqn }
+    }
+
+    pub fn sr(&self) -> u32 {
+        self.sr
+    }
+    pub fn bpm(&self) -> f64 {
+        self.bpm
+    }
+    pub fn ppqn(&self) -> u32 {
+        self.ppqn
+    }
+
+    /// Tick → Sample. Exact when `tick × sr × 60` is divisible by
+    /// `bpm × ppqn` (e.g. integer BPM on standard rates); otherwise
+    /// rounded to the nearest `u64`.
+    pub fn inner(&self, tick: Tick) -> u64 {
+        let num = u128::from(tick.0) * u128::from(self.sr) * 60;
+        let denom = self.bpm * f64::from(self.ppqn);
+        ((num as f64) / denom).round().max(0.0) as u64
+    }
+
+    /// Sample → Tick, rounding down (latest tick at-or-before `sample`).
+    pub fn floor(&self, sample: u64) -> Tick {
+        let num = (sample as f64) * self.bpm * f64::from(self.ppqn);
+        let denom = f64::from(self.sr) * 60.0;
+        Self::to_tick((num / denom).floor())
+    }
+
+    /// Sample → Tick, rounding up (next tick at-or-after `sample`).
+    pub fn ceil(&self, sample: u64) -> Tick {
+        let num = (sample as f64) * self.bpm * f64::from(self.ppqn);
+        let denom = f64::from(self.sr) * 60.0;
+        Self::to_tick((num / denom).ceil())
+    }
+
+    fn to_tick(x: f64) -> Tick {
+        let clamped = x.clamp(0.0, f64::from(u32::MAX));
+        Tick(clamped as u32)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -791,6 +868,91 @@ mod tests {
                 prop_assert!(time_refine_le(x1, x2));
                 prop_assert!(time_refine_le(y1, y2));
             }
+        }
+    }
+
+    // ── SampleTickConn ───────────────────────────────────────────
+    //
+    // Runtime-parameterised Sample ↔ Tick bridge. Laws mirror
+    // `connections::Conn`'s `(ceil, inner, floor)` triple but are
+    // asserted in-module because `SampleTickConn` is not a genuine
+    // `Conn` (cannot capture runtime `(sr, bpm)`).
+
+    #[test]
+    fn sample_tick_inner_120bpm_48k_one_beat() {
+        // 120 BPM, 192 PPQN, 48 kHz: one quarter note (tick 192) is
+        // 0.5 s = 24 000 samples. Plan spot check.
+        let stc = SampleTickConn::new(48_000, 120.0, 192);
+        assert_eq!(stc.inner(Tick(192)), 24_000);
+    }
+
+    #[test]
+    fn sample_tick_floor_and_ceil_bracket_inner() {
+        let stc = SampleTickConn::new(48_000, 120.0, 192);
+        // Halfway between tick 192 and 193: sample ≈ 24 062.5.
+        // floor → 192, ceil → 193.
+        let s = 24_062;
+        assert_eq!(stc.floor(s), Tick(192));
+        assert_eq!(stc.ceil(s), Tick(193));
+    }
+
+    #[test]
+    fn sample_tick_zero_is_zero() {
+        let stc = SampleTickConn::new(48_000, 120.0, 192);
+        assert_eq!(stc.inner(Tick(0)), 0);
+        assert_eq!(stc.floor(0), Tick(0));
+        assert_eq!(stc.ceil(0), Tick(0));
+    }
+
+    /// Sample-rate / BPM / PPQN ranges that keep integer samples-per-tick
+    /// exact (`sr * 60` divisible by `bpm * ppqn`) for the round-trip
+    /// property. 120 / 48 000 / 192 → 125; 60 / 44 100 / 96 → 459.375
+    /// (not exact), so the strategy sticks to combinations that are.
+    fn arb_integer_stc() -> impl Strategy<Value = SampleTickConn> {
+        prop_oneof![
+            Just(SampleTickConn::new(48_000, 120.0, 192)),
+            Just(SampleTickConn::new(48_000, 60.0, 192)),
+            Just(SampleTickConn::new(48_000, 240.0, 192)),
+            Just(SampleTickConn::new(96_000, 120.0, 192)),
+            Just(SampleTickConn::new(192_000, 120.0, 192)),
+            Just(SampleTickConn::new(48_000, 120.0, 24)),
+        ]
+    }
+
+    proptest! {
+        /// Plan property `sample_tick_round_trip`:
+        /// `floor(inner(t)) == t` for any tick in range. Holds exactly
+        /// when `sr * 60` is divisible by `bpm * ppqn`; `arb_integer_stc`
+        /// restricts to configurations where it is.
+        #[test]
+        fn sample_tick_round_trip(
+            stc in arb_integer_stc(),
+            t in 0u32..=1_000_000,
+        ) {
+            let tick = Tick(t);
+            let sample = stc.inner(tick);
+            prop_assert_eq!(stc.floor(sample), tick);
+        }
+
+        /// Plan property `sample_tick_monotonic`:
+        /// `s1 ≤ s2 ⇒ floor(s1) ≤ floor(s2)`.
+        #[test]
+        fn sample_tick_monotonic(
+            stc in arb_integer_stc(),
+            s1 in 0u64..=10_000_000,
+            s2 in 0u64..=10_000_000,
+        ) {
+            let (lo, hi) = if s1 <= s2 { (s1, s2) } else { (s2, s1) };
+            prop_assert!(stc.floor(lo).0 <= stc.floor(hi).0);
+        }
+
+        /// Ceil is at-or-after floor for every sample.
+        #[test]
+        fn sample_tick_ceil_ge_floor(
+            stc in arb_integer_stc(),
+            s in 0u64..=10_000_000,
+        ) {
+            prop_assert!(stc.floor(s).0 <= stc.ceil(s).0);
         }
     }
 }
