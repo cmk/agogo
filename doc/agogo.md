@@ -59,7 +59,7 @@ agogo/
 │       ├── callback.rs  # audio-thread hot loop (no alloc, no locks)
 │       └── control.rs   # control-thread → SPSC → RT
 └── bin/
-    └── multiclock.rs
+    └── agogo.rs
 ```
 
 ## 4. Precision budget
@@ -104,9 +104,9 @@ Feature-gated backends: `cpal-audio`, `coremidi`, `alsa-midi`, `jack`, `winmm`. 
 
 ## 6. Mapping to music-time (the Cirklon port)
 
-`src/time/` is a Rust port of `Control.Cirklon.Type.Time` from `Software/Haskell/recologic/client/src/Control/Cirklon/Type/Time.hs`. Most multiclock features land directly on its primitives:
+`src/time/` is a Rust port of `Control.Cirklon.Type.Time` from `Software/Haskell/recologic/client/src/Control/Cirklon/Type/Time.hs`. Most agogo features land directly on its primitives:
 
-| Multiclock feature | time module |
+| agogo feature | time module |
 |---|---|
 | Channel Divider (1/2/3/…/96 + triplets) | **TBase choice** (T4t/T8t/T16t/T32t/T64t correspond to 1/3/6/12/24) |
 | Shuffle | **SwingConfig + effective_tick** |
@@ -120,7 +120,7 @@ Two ops stay **outside** the grid lattice, at the Sample layer: **Shift (±300 m
 
 The `Conn<A, B>` type in `connections/src/conn.rs` uses bare `fn` pointers, which cannot close over runtime state. The natural shape `fn conn_sample_tick(sr, bpm) -> Conn<Sample, Tick>` is therefore not expressible today — a `Conn` value cannot depend on runtime `(sr, bpm)`.
 
-Pragmatic resolution: introduce a parallel `SampleTickConn { sr, bpm, ppqn }` struct with `floor/ceil/inner` methods mirroring `Conn`'s shape and laws. Tick↔Time connections (tempo-independent) use genuine `Conn` from the connections crate. If connections later ships a closure-capturing variant (`ConnBox` or similar), the multiclock migrates — the laws and test fixtures port unchanged.
+Pragmatic resolution: introduce a parallel `SampleTickConn { sr, bpm, ppqn }` struct with `floor/ceil/inner` methods mirroring `Conn`'s shape and laws. Tick↔Time connections (tempo-independent) use genuine `Conn` from the connections crate. If connections later ships a closure-capturing variant (`ConnBox` or similar), agogo migrates — the laws and test fixtures port unchanged.
 
 ## 8. Libraries
 
@@ -139,7 +139,7 @@ Pragmatic resolution: introduce a parallel `SampleTickConn { sr, bpm, ppqn }` st
 
 ## 9. Proposed first sprint
 
-Plan 01 inside the multiclock crate delivers the **pure-logic core**, no audio I/O:
+Plan 01 inside the agogo crate delivers the **pure-logic core**, no audio I/O:
 
 - `time/` — full port of Cirklon Time.hs: TBase lattice, Time/Tick, `quantize_at`, SwingConfig, envelopes. Proptests for lattice laws (LCM/GCD absorption, Heyting) and Galois-connection adjointness.
 - `channel/transform.rs` — pure divider/shuffle/shift/offset composition. Proptests: tick monotonicity, divider rate preservation, shuffle zero-mean over a beat, shift clamping.
@@ -168,4 +168,4 @@ Cargo.toml includes feature gates for future backends; none enabled. Zero platfo
 
 ---
 
-*Companion conversation: this file captures the design synthesis of a multi-turn discussion from 2026-04-22. The multiclock crate's own `doc/design.md` — once scaffolded — will be the polished spec; this is the seed.*
+*Companion conversation: this file captures the design synthesis of a multi-turn discussion from 2026-04-22. The agogo crate's own `doc/design.md` — once scaffolded — will be the polished spec; this is the seed.*
