@@ -2,11 +2,12 @@
 //!
 //! Two kinds of items live here:
 //!
-//! - **Strategies** (`arb_bpm`, `arb_sample_rate`, `arb_jitter_sigma_us`)
-//!   return `impl proptest::strategy::Strategy<...>` and are gated behind
-//!   `#[cfg(any(test, feature = "testkit"))]` so production builds don't
-//!   pull in proptest. Downstream crates that want them in their own
-//!   tests should depend on `agogo-core` with the `testkit` feature.
+//! - **Strategies** (`arb_bpm`, `arb_sample_rate`, `arb_jitter_sigma_us`,
+//!   `arb_tbase`) return `impl proptest::strategy::Strategy<...>` and
+//!   are gated behind `#[cfg(any(test, feature = "testkit"))]` so
+//!   production builds don't pull in proptest. Downstream crates that
+//!   want them in their own tests should depend on `agogo-core` with
+//!   the `testkit` feature.
 //! - **Synthetic generators** (`pulse_train`) are pure functions of
 //!   `(params, seed)` and ship unconditionally so non-test code (e.g.
 //!   the CLI) can use the same fixture as the proptests.
@@ -143,6 +144,8 @@ fn next_gaussian(state: &mut u64) -> f64 {
 mod strategies {
     use proptest::prelude::*;
 
+    use crate::time::tbase::TBase;
+
     /// BPM strategy biased toward common musical tempos with some
     /// boundary spice.
     pub fn arb_bpm() -> impl Strategy<Value = f32> {
@@ -176,10 +179,24 @@ mod strategies {
             1 => 200.0_f32..500.0_f32,
         ]
     }
+
+    /// Strategy over all 14 `TBase` variants.
+    ///
+    /// Biased toward the lattice top (`T1`) and bottom (`T128t`) so
+    /// property tests exercising divisibility, join, and meet see
+    /// boundary elements regularly. The uniform-sample arm covers the
+    /// remaining middle of the lattice.
+    pub fn arb_tbase() -> impl Strategy<Value = TBase> {
+        prop_oneof![
+            1 => Just(TBase::T1),
+            1 => Just(TBase::T128t),
+            4 => prop::sample::select(TBase::ALL.as_slice()),
+        ]
+    }
 }
 
 #[cfg(any(test, feature = "testkit"))]
-pub use strategies::{arb_bpm, arb_jitter_sigma_us, arb_sample_rate};
+pub use strategies::{arb_bpm, arb_jitter_sigma_us, arb_sample_rate, arb_tbase};
 
 // ---------------------------------------------------------------------
 // Self-tests for the synthetic generator.
