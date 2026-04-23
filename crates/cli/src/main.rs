@@ -296,7 +296,10 @@ pub mod link_probe {
 
     #[derive(Debug, Clone, Copy)]
     pub struct ProbeRow {
-        pub t_ms: u32,
+        /// Milliseconds since probe start. `u64` so a
+        /// `--duration-ms u32::MAX` probe (~49 days) still represents
+        /// monotonically-increasing timestamps end-to-end.
+        pub t_ms: u64,
         pub peers: u64,
         pub tempo_bpm: f64,
     }
@@ -305,7 +308,12 @@ pub mod link_probe {
     /// Peer discovery is enabled for the duration of the call and
     /// disabled before return. Blocks the calling thread; intended for
     /// the CLI, not the audio callback.
+    ///
+    /// `period_ms` is clamped to a minimum of 1 — a zero period would
+    /// turn the `sleep(Duration::ZERO)` inside the loop into a no-op
+    /// and spin-OOM on row allocation.
     pub fn probe(initial_bpm: f64, duration_ms: u32, period_ms: u32) -> Vec<ProbeRow> {
+        let period_ms = period_ms.max(1);
         let mut clock = LinkClock::new(initial_bpm);
         clock.enable(true);
         let start = Instant::now();
@@ -318,7 +326,7 @@ pub mod link_probe {
                 break;
             }
             rows.push(ProbeRow {
-                t_ms: elapsed.as_millis() as u32,
+                t_ms: elapsed.as_millis() as u64,
                 peers: clock.num_peers(),
                 tempo_bpm: clock.tempo(),
             });
@@ -335,6 +343,11 @@ pub mod link_probe {
         /// Smoke-test: probing for 100ms at 50ms period emits at
         /// least one row; first row has t_ms ≈ 0, peers = 0 (no LAN
         /// peer in test), and tempo equal to the initial BPM.
+        ///
+        /// Touches the network via `LinkClock::enable(true)` under
+        /// the hood. `peers == 0` fails if a real Link peer is
+        /// reachable on the test LAN; Plan 08 adds a
+        /// `fixture_or_skip!`-style network gate.
         #[test]
         fn probe_emits_rows_and_keeps_initial_tempo() {
             let rows = probe(125.0, 100, 50);
