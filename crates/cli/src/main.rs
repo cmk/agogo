@@ -200,7 +200,9 @@ pub mod time_sched {
 
         /// Number of 4/4 bars to schedule. Bounded to `u16` (≤ 65535)
         /// so memory and stdout stay reasonable — 65535 × 192 ≈ 12.6M
-        /// tick offsets ≈ 50 MB Vec at the finest grid.
+        /// tick offsets ≈ 50 MB Vec at the finest grid. The plan
+        /// specified `u32`; narrowing the type is the simplest honest
+        /// bound (see plan's Review section).
         #[arg(long)]
         pub bars: u16,
     }
