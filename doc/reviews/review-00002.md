@@ -352,3 +352,123 @@ Fixed in aca20f6 — took your suggestion pretty much as-is. Align in u64, clamp
 #### ↳ cmk ([2026-04-23 07:03 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3128918323))
 
 Fixed in aca20f6: added an `i64_to_tick` helper that saturates the `i64 → u32` cast at both ends, and routed both `rt_ceil` and `rt_floor` through it. Large rationals now clamp to `u32::MAX` ticks instead of silently truncating.
+
+<!-- gh-id: 3129143479 -->
+### Copilot on [`crates/cli/src/main.rs:203`](https://github.com/cmk/agogo/pull/2#discussion_r3129143479) (2026-04-23 07:47 UTC)
+
+This comment says “tick offsets” but `schedule_ticks` produces absolute tick positions (swing folded in). Renaming this to “tick positions” would avoid reintroducing the earlier offsets-vs-positions confusion.
+```suggestion
+        /// tick positions ≈ 50 MB Vec at the finest grid. The plan
+```
+
+<!-- gh-id: 3129143529 -->
+### Copilot on [`crates/cli/src/main.rs:312`](https://github.com/cmk/agogo/pull/2#discussion_r3129143529) (2026-04-23 07:47 UTC)
+
+Test name says “offsets” but the assertions (and `schedule_ticks` docs) treat these as absolute tick positions. Consider renaming the test to avoid misleading future readers (and to stay consistent with the decided output format).
+```suggestion
+    fn schedule_ticks_two_bars_t16_yields_32_absolute_tick_positions() {
+```
+
+<!-- gh-id: 3129143561 -->
+### Copilot on [`deny.toml:52`](https://github.com/cmk/agogo/pull/2#discussion_r3129143561) (2026-04-23 07:47 UTC)
+
+`allow-git` entry likely won’t match the actual dependency URL used for `connections` (`https://gitlab.com/cmk/connections.git` in `Cargo.toml` / `Cargo.lock`). With `unknown-git = "deny"`, this can cause `cargo deny check` to fail even though the dependency is intended/allowed. Consider listing the exact URL (and/or both with and without the `.git` suffix) to match what cargo-deny sees.
+```suggestion
+allow-git = [
+    "https://gitlab.com/cmk/connections.git",
+    "https://gitlab.com/cmk/connections",
+]
+```
+
+<!-- gh-id: 3129143584 -->
+### Copilot on [`doc/plans/plan-2026-04-22-01.md:29`](https://github.com/cmk/agogo/pull/2#discussion_r3129143584) (2026-04-23 07:47 UTC)
+
+The plan states the `connections` crate is a sibling path dependency (`../connections`), but the workspace now depends on it via a pinned Git URL in `Cargo.toml`. This is a factual mismatch that could mislead someone following the plan or trying to reproduce the setup; update this section to describe the Git dependency (and optionally the local `[patch]` override workflow).
+
+<!-- gh-id: 3129143606 -->
+### Copilot on [`doc/plans/plan-2026-04-22-01.md:47`](https://github.com/cmk/agogo/pull/2#discussion_r3129143606) (2026-04-23 07:47 UTC)
+
+T0 still instructs adding `connections = { path = "../connections" }` to `[workspace.dependencies]`, but the actual change uses a Git dependency pinned by `rev` in the root `Cargo.toml`. To keep the plan actionable and consistent with the repo state, update these steps to reflect the Git dependency (and any intended local override mechanism).
+
+<!-- gh-id: 3129143631 -->
+### Copilot on [`doc/plans/plan-2026-04-22-01.md:148`](https://github.com/cmk/agogo/pull/2#discussion_r3129143631) (2026-04-23 07:47 UTC)
+
+T7 still specifies `--bars <u32>` and says the command outputs “one tick offset per line”, but the implementation has `bars: u16` and prints absolute tick positions (swing folded in). Since the plan later records the `u16` deviation, consider updating this task description to match the final API/output so the plan is self-consistent.
+```suggestion
+helper), `--bars <u16>`. Output one absolute tick position per line
+for the resulting schedule, with swing folded in. Pure compute; no
+audio.
+```
+
+<!-- gh-id: 3129143655 -->
+### Copilot on [`doc/plans/plan-2026-04-22-01.md:197`](https://github.com/cmk/agogo/pull/2#discussion_r3129143655) (2026-04-23 07:47 UTC)
+
+Build gate E2E line still says the CLI prints “one tick offset per 16th”, but the CLI now prints absolute tick positions (consistent with `time schedule` help/tests). Update this gate text so that someone running the gate knows what output format to expect.
+```suggestion
+  --swing 0.54 --bars 2` prints 32 lines of absolute tick positions,
+```
+
+<!-- gh-id: 4160575707 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-23 07:47 UTC](https://github.com/cmk/agogo/pull/2#pullrequestreview-4160575707))
+
+## Pull request overview
+
+Copilot reviewed 15 out of 16 changed files in this pull request and generated 8 comments.
+
+
+
+
+
+<!-- gh-id: 3129143669 -->
+### Copilot on [`doc/plans/plan-2026-04-22-01.md:274`](https://github.com/cmk/agogo/pull/2#discussion_r3129143669) (2026-04-23 07:47 UTC)
+
+The plan’s Review section says a `proptest` feature was added and that `arb` is gated by `#[cfg(any(feature = "proptest", test))]`, but the actual crate feature is named `testkit` (`crates/core/Cargo.toml`) and the strategies module is gated with `#[cfg(any(test, feature = "testkit"))]` (`crates/core/src/arb.rs`). Update this section to use the correct feature name / gating so downstream users don’t try enabling a non-existent feature.
+```suggestion
+5. **`proptest` as an optional dependency behind `testkit`.** `arb.rs`
+   is compiled as part of the library, so `proptest` must be visible
+   outside `dev-dependencies`. Added `proptest = { workspace = true,
+   optional = true }` in core's `[dependencies]` and a `testkit`
+   feature that activates it; `#[cfg(any(test, feature = "testkit"))]`
+   on the `arb` module keeps strategies available to our internal
+   tests without forcing `proptest` on downstream release builds.
+```
+
+<!-- gh-id: 3129199291 -->
+#### ↳ cmk ([2026-04-23 07:57 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3129199291))
+
+Fixed in 4bc850c: changed `tick offsets` → `tick positions` in the `--bars` docstring to match the consistent wording from round-1.
+
+<!-- gh-id: 3129199740 -->
+#### ↳ cmk ([2026-04-23 07:57 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3129199740))
+
+Fixed in 4bc850c: renamed to `schedule_ticks_two_bars_t16_yields_32_positions` (slightly shorter than your suggestion but same intent — matches the `positions, not offsets` language we settled on).
+
+<!-- gh-id: 3129200044 -->
+#### ↳ cmk ([2026-04-23 07:57 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3129200044))
+
+Fixed in 4bc850c: added both `.git` and bare URL forms to `allow-git`. The `deny` job actually passed CI, so cargo-deny did match one form, but hardening both against future canonicalisation changes is the right call.
+
+<!-- gh-id: 3129200387 -->
+#### ↳ cmk ([2026-04-23 07:57 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3129200387))
+
+Fixed in 4bc850c: updated the Context paragraph to describe the GitLab git dep + pinned rev + optional `[patch]` override workflow.
+
+<!-- gh-id: 3129202776 -->
+#### ↳ cmk ([2026-04-23 07:57 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3129202776))
+
+Fixed in 4bc850c: T0 now specifies the git dep and the `allow-git` deny.toml update, with a note that the original path-dep form was swapped during PR-2 review.
+
+<!-- gh-id: 3129203039 -->
+#### ↳ cmk ([2026-04-23 07:57 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3129203039))
+
+Fixed in 4bc850c: T7 now says `--bars <u16>` and 'one absolute tick position per line (swing folded in)', with a pointer to Review deviation #6 explaining why the type was narrowed.
+
+<!-- gh-id: 3129203377 -->
+#### ↳ cmk ([2026-04-23 07:57 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3129203377))
+
+Fixed in 4bc850c: E2E gate text now reads 'prints 32 lines of absolute tick positions (one per 16th; swing folded in on off-beats)'.
+
+<!-- gh-id: 3129203772 -->
+#### ↳ cmk ([2026-04-23 07:57 UTC](https://github.com/cmk/agogo/pull/2#discussion_r3129203772))
+
+Fixed in 4bc850c: rewrote deviation #5 to reference the `testkit` feature (the actual name, coming from the sync branch) and the correct `#[cfg(any(test, feature = "testkit"))]` gate on the `strategies` submodule. The stale `proptest` feature name was a leftover from my original draft that didn't get updated during the rebase onto sync/.
