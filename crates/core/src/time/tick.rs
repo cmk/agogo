@@ -56,10 +56,20 @@ pub fn time_to_tick(t: Time) -> Tick {
 /// aligned value is selected, giving the smallest possible `beats`.
 ///
 /// For aligned `n` (multiples of 4) this is an exact canonicalisation;
-/// for unaligned `n` it rounds up.
+/// for unaligned `n` it rounds up. This is the `ceiling` side of the
+/// `ticks` Galois connection.
 pub fn from_ticks(n: Tick) -> Time {
     let prec = TBase::T128t.tick_count();
     let aligned = n.0.div_ceil(prec) * prec;
+    nicest_from_tick_count(aligned)
+}
+
+/// Round `n` down to the nicest `Time` representation (floor side of
+/// the `ticks` Galois connection). For aligned `n` this equals
+/// [`from_ticks`]; for unaligned `n` it rounds down.
+pub fn from_ticks_floor(n: Tick) -> Time {
+    let prec = TBase::T128t.tick_count();
+    let aligned = (n.0 / prec) * prec;
     nicest_from_tick_count(aligned)
 }
 
@@ -196,6 +206,25 @@ mod tests {
                 base: TBase::T128t
             }
         );
+    }
+
+    #[test]
+    fn from_ticks_floor_unaligned_rounds_down() {
+        // 50 ticks: round down to 48, which is T16 (48-tick grid).
+        assert_eq!(
+            from_ticks_floor(Tick(50)),
+            Time {
+                beats: 1,
+                base: TBase::T16
+            }
+        );
+    }
+
+    #[test]
+    fn from_ticks_floor_and_ceil_agree_on_aligned() {
+        for n in [0, 4, 8, 48, 96, 192, 256, 768] {
+            assert_eq!(from_ticks_floor(Tick(n)), from_ticks(Tick(n)));
+        }
     }
 
     #[test]
