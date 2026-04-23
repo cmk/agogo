@@ -187,9 +187,18 @@ impl Pll {
             }
         }
 
+        // `state.phase` is f64 in [0, 1). The f32 cast can round up to
+        // exactly 1.0 when phase is within f32 epsilon of 1.0, which
+        // would violate the "phase in [0, 1)" invariant downstream
+        // consumers rely on. Wrap-to-zero instead — semantically the
+        // same since phase is cyclic.
+        let phase_f32 = {
+            let p = self.state.phase as f32;
+            if p >= 1.0 { 0.0 } else { p }
+        };
         PllOutput {
             bpm: self.smoothed_bpm(),
-            phase: self.state.phase as f32,
+            phase: phase_f32,
         }
     }
 }
