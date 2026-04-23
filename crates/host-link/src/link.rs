@@ -78,7 +78,7 @@ impl PhaseSourceImpl for LinkClock {
     /// §Deferred. Panics on call so misuse surfaces immediately
     /// rather than silently returning 0.0.
     fn phase_at_sample(&mut self, _n: u64) -> f32 {
-        unimplemented!(
+        todo!(
             "LinkClock::phase_at_sample is deferred to Plan 07-b; \
              requires the fxp Phase / Sample types"
         )
@@ -125,6 +125,11 @@ mod tests {
 
     #[test]
     fn is_enabled_tracks_enable_call() {
+        // Touches the network: `enable(true)` opens Link's UDP
+        // multicast listener. Fine on a dev box and GitHub-hosted
+        // CI runners, but sandboxed / multicast-less environments
+        // may fail. Plan 08 adds a `fixture_or_skip!`-style network
+        // gate when the multicast-dependent integration tests land.
         let c = LinkClock::new(120.0);
         assert!(!c.is_enabled());
         c.enable(true);
@@ -134,8 +139,12 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "deferred to Plan 07-b")]
+    #[should_panic(expected = "not yet implemented")]
     fn phase_at_sample_panics_until_plan_07b() {
+        // `todo!()` panics with "not yet implemented" regardless of
+        // the message argument (as of stable Rust). Our custom message
+        // appears in the panic payload but not the `expected` prefix;
+        // match on the stable prefix instead.
         let mut c = LinkClock::new(120.0);
         let _ = c.phase_at_sample(0);
     }
