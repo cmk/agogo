@@ -13,15 +13,19 @@
 //!   `nominal_freq_hz * (1 + integrator) * 60 / ppq`. This is the
 //!   smoothed estimate downstream consumers want — it tracks the
 //!   underlying tempo without per-pulse jitter modulation.
+//!
+//! ## PI-exempt state
+//!
+//! `PllSettings { kp, ki, clamp_hz, interp }` and `PllState
+//! { phase, freq_hz, integrator }` stay `f64` — they are the analog
+//! control-law quantities the user explicitly exempted from the
+//! no-float rule. The only f64→fxp casts live in
+//! [`crate::fxp::f64_bpm_to_micro_bpm`] / [`crate::fxp::f64_phase_to_phase`]
+//! at the `PllOutput` boundary.
+
+use crate::fxp::{MicroBpm, Phase, SampleTime, f64_bpm_to_micro_bpm, f64_phase_to_phase};
 
 /// Loop-filter tuning.
-///
-/// Field shape mirrors `clocked::PidSettings` where it fits, with the
-/// derivative term stripped (Type-II = PI, not PID). `prop_factor →
-/// kp`, `integ_factor → ki`. `clamp_hz` bounds how far the integrator
-/// is allowed to push the frequency from `nominal_freq_hz` (in Hz).
-/// `interp` is reserved for future smoothing of the NCO output between
-/// updates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PllSettings {
     pub kp: f64,
@@ -32,11 +36,6 @@ pub struct PllSettings {
 
 impl PllSettings {
     /// Default tuning sized for tracking 24-PPQ audio-sync at 48 kHz.
-    /// `kp = 0.1`, `ki = 0.002` gives natural frequency ω_n ≈ 0.045
-    /// cycles/pulse and damping ζ ≈ 1.1 (slightly overdamped). Picked
-    /// to keep integrator-driven BPM RMS under ~0.04 BPM at 200 µs
-    /// input jitter while still settling within ~5 seconds of audio
-    /// from a tempo step.
     pub const DEFAULT: PllSettings = PllSettings {
         kp: 0.1,
         ki: 0.002,
@@ -51,7 +50,7 @@ impl Default for PllSettings {
     }
 }
 
-/// Loop state. `phase` is in cycles \[0, 1); `freq_hz` is the PI-driven
+/// Loop state. `phase` is in cycles [0, 1); `freq_hz` is the PI-driven
 /// prediction rate (in pulses per second).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PllState {
@@ -63,35 +62,35 @@ pub struct PllState {
 /// One PLL update result.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PllOutput {
-    pub bpm: f32,
-    pub phase: f32,
+    pub bpm: MicroBpm,
+    pub phase: Phase,
 }
 
 /// Phase-locked loop instance.
 ///
-/// `sr` and `ppq` are fixed at construction. The plan signature passed
-/// them per `step` call; storing them in the struct removes the
-/// possibility of a caller silently changing them between updates and
-/// matches how every real-world consumer uses a PLL.
+/// Parameterised by sample-rate type `R: SampleTime`. The f64 control-
+/// law arithmetic uses `R::HZ` as the sample rate, so construction
+/// doesn't need a separate `sr` argument.
 #[derive(Debug, Clone)]
-pub struct Pll {
+pub struct Pll<R: SampleTime> {
     cfg: PllSettings,
     state: PllState,
-    sr: u32,
     ppq: u32,
-    last_pulse_sample: Option<f64>,
+    last_pulse_sample: Option<R>,
     nominal_freq_hz: f64,
 }
 
-impl Pll {
-    /// Construct a PLL seeded at the nominal BPM. The loop pulls
-    /// toward the measured rate from there; the integrator's clamp
-    /// bounds how far it can roam.
-    pub fn new(cfg: PllSettings, nominal_bpm: f32, sr: u32, ppq: u32) -> Self {
-        assert!(nominal_bpm > 0.0, "nominal bpm must be positive");
-        assert!(sr > 0, "sample rate must be positive");
+impl<R: SampleTime> Pll<R> {
+    /// Construct a PLL seeded at the nominal BPM. The loop pulls toward
+    /// the measured rate from there; the integrator's clamp bounds how
+    /// far it can roam.
+    pub fn new(cfg: PllSettings, nominal_bpm: MicroBpm, ppq: u32) -> Self {
+        assert!(nominal_bpm.0 > 0, "nominal bpm must be positive");
         assert!(ppq > 0, "ppq must be positive");
-        let nominal_freq_hz = nominal_bpm as f64 * ppq as f64 / 60.0;
+        // PI-exempt: convert the argv/µBPM nominal into f64 Hz for the
+        // control law.
+        let nominal_bpm_f = nominal_bpm.0 as f64 / 1.0e6;
+        let nominal_freq_hz = nominal_bpm_f * ppq as f64 / 60.0;
         Self {
             cfg,
             state: PllState {
@@ -99,7 +98,6 @@ impl Pll {
                 freq_hz: nominal_freq_hz,
                 integrator: 0.0,
             },
-            sr,
             ppq,
             last_pulse_sample: None,
             nominal_freq_hz,
@@ -113,7 +111,7 @@ impl Pll {
         self.state
     }
     pub fn sr(&self) -> u32 {
-        self.sr
+        R::HZ
     }
     pub fn ppq(&self) -> u32 {
         self.ppq
@@ -121,37 +119,46 @@ impl Pll {
     pub fn nominal_freq_hz(&self) -> f64 {
         self.nominal_freq_hz
     }
-    /// Stream-global sample index of the most-recent observed pulse,
-    /// or `None` if no pulse has been seen yet. Lets external phase
-    /// queries anchor analytic projections without driving the NCO
-    /// per-sample through silent intervals.
-    pub fn last_pulse_sample(&self) -> Option<f64> {
+    pub fn last_pulse_sample(&self) -> Option<R> {
         self.last_pulse_sample
     }
 
-    /// Smoothed BPM derived from the integrator only. This is the
-    /// running mean — no per-pulse `kp * e` modulation.
-    fn smoothed_bpm(&self) -> f32 {
+    /// Smoothed BPM derived from the integrator only.
+    fn smoothed_bpm(&self) -> MicroBpm {
+        // PI-exempt: integrator-driven f64 BPM → µBPM at the output boundary.
         let f = self.nominal_freq_hz * (1.0 + self.state.integrator);
-        (f * 60.0 / self.ppq as f64) as f32
+        f64_bpm_to_micro_bpm(f * 60.0 / self.ppq as f64)
     }
 
-    /// Advance one step. With `Some(observed_sample)`, run a phase-
-    /// detector update against the observed pulse arrival; with
-    /// `None`, free-run the NCO at the current prediction frequency.
-    pub fn step(&mut self, measured_pulse_sample: Option<f64>) -> PllOutput {
+    /// Project the current NCO phase forward by `elapsed` samples —
+    /// encapsulates the one f64 phase-advance for external consumers
+    /// (e.g. `PhaseSource::External`) so the f64 stays inside the
+    /// PI-exempt zone.
+    pub fn predicted_phase_at(&self, elapsed: R) -> Phase {
+        // PI-exempt.
+        let elapsed_samples = elapsed.to_bits_q48_16() as f64 / 65_536.0;
+        let cycles_per_sample = self.state.freq_hz / R::HZ as f64;
+        let projected = self.state.phase + elapsed_samples * cycles_per_sample;
+        f64_phase_to_phase(projected)
+    }
+
+    /// Advance one step.
+    pub fn step(&mut self, measured_pulse_sample: Option<R>) -> PllOutput {
         if let Some(observed) = measured_pulse_sample {
+            // PI-exempt: phase error computed in seconds (f64) from the
+            // Q48.16-bits sample positions of prev and observed.
             let phase_error = match self.last_pulse_sample {
                 Some(prev) => {
-                    let observed_spacing = observed - prev;
-                    let expected_spacing = self.sr as f64 / self.state.freq_hz;
-                    if expected_spacing < f64::EPSILON {
+                    let prev_s = prev.to_bits_q48_16() as f64
+                        / (65_536.0 * R::HZ as f64);
+                    let observed_s = observed.to_bits_q48_16() as f64
+                        / (65_536.0 * R::HZ as f64);
+                    let observed_spacing_s = observed_s - prev_s;
+                    let expected_spacing_s = 1.0 / self.state.freq_hz;
+                    if expected_spacing_s < f64::EPSILON {
                         0.0
                     } else {
-                        // e > 0 means observed arrived earlier than
-                        // expected, i.e. true rate is faster than our
-                        // estimate, so push freq up.
-                        (expected_spacing - observed_spacing) / expected_spacing
+                        (expected_spacing_s - observed_spacing_s) / expected_spacing_s
                     }
                 }
                 None => 0.0,
@@ -159,10 +166,6 @@ impl Pll {
 
             self.state.integrator += self.cfg.ki * phase_error;
             let clamp_frac = self.cfg.clamp_hz / self.nominal_freq_hz;
-            // `clamp_hz / nominal_freq_hz` can exceed 1.0 (e.g. 50/48
-            // at default settings), which would let `integrator <=
-            // -1.0` and drive the smoothed BPM negative. Floor the
-            // lower bound just above -1 so `1 + integrator > 0`.
             let min_integrator = (-clamp_frac).max(-1.0 + f64::EPSILON);
             self.state.integrator =
                 self.state.integrator.clamp(min_integrator, clamp_frac);
@@ -177,7 +180,7 @@ impl Pll {
             self.state.phase = 0.0;
             self.last_pulse_sample = Some(observed);
         } else {
-            let inc = self.state.freq_hz / self.sr as f64;
+            let inc = self.state.freq_hz / R::HZ as f64;
             self.state.phase = (self.state.phase + inc).rem_euclid(1.0);
             if !self.state.phase.is_finite() {
                 self.state.phase = 0.0;
@@ -187,18 +190,9 @@ impl Pll {
             }
         }
 
-        // `state.phase` is f64 in [0, 1). The f32 cast can round up to
-        // exactly 1.0 when phase is within f32 epsilon of 1.0, which
-        // would violate the "phase in [0, 1)" invariant downstream
-        // consumers rely on. Wrap-to-zero instead — semantically the
-        // same since phase is cyclic.
-        let phase_f32 = {
-            let p = self.state.phase as f32;
-            if p >= 1.0 { 0.0 } else { p }
-        };
         PllOutput {
             bpm: self.smoothed_bpm(),
-            phase: phase_f32,
+            phase: f64_phase_to_phase(self.state.phase),
         }
     }
 }
@@ -207,114 +201,132 @@ impl Pll {
 mod tests {
     use super::*;
     use crate::arb::pulse_train;
+    use crate::fxp::{Pico, S48, SampleRate};
     use proptest::prelude::*;
 
     /// PLL initialised at the true BPM under jitter — tracks the rate
-    /// to within 0.05 BPM after a 32-pulse warm-up.
-    fn assert_bpm_converges(bpm: f32, jitter_us: f32, seed: u64) {
-        let sr = 48_000u32;
+    /// to within 50_000 µBPM after a 32-pulse warm-up.
+    fn assert_bpm_converges(bpm: MicroBpm, jitter: Pico, seed: u64) {
         let ppq = 24u32;
         let n_pulses = 64u32;
-        let (_, peaks) = pulse_train(bpm, sr, ppq, jitter_us, n_pulses, seed);
-        let mut pll = Pll::new(PllSettings::DEFAULT, bpm, sr, ppq);
+        let (_, peaks): (Vec<f32>, Vec<S48>) =
+            pulse_train::<S48>(bpm, ppq, jitter, n_pulses, seed);
+        let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, ppq);
         let mut last = bpm;
         for &p in &peaks {
             last = pll.step(Some(p)).bpm;
         }
-        let err = (last - bpm).abs();
-        assert!(err < 0.05, "bpm err {err} > 0.05 (last={last}, target={bpm})");
+        let err = (last.0 as i64 - bpm.0 as i64).unsigned_abs();
+        assert!(
+            err < 50_000,
+            "bpm err {err} µBPM > 50_000 (last={} µBPM, target={} µBPM)",
+            last.0,
+            bpm.0
+        );
     }
 
     #[test]
     fn default_settings_track_120_at_48k() {
-        // Spot check from the plan: default PllSettings at 120/48k/24
-        // converges in under 1 second of audio (48 PLL ticks).
-        let sr = 48_000u32;
         let ppq = 24u32;
-        let (_, peaks) = pulse_train(120.0, sr, ppq, 0.0, 48, 1);
-        let mut pll = Pll::new(PllSettings::DEFAULT, 120.0, sr, ppq);
-        let mut last = 0.0_f32;
+        let bpm = MicroBpm::from_bpm_integer(120);
+        let (_, peaks): (Vec<f32>, Vec<S48>) =
+            pulse_train::<S48>(bpm, ppq, Pico(0), 48, 1);
+        let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, ppq);
+        let mut last = MicroBpm::ZERO;
         for &p in &peaks {
             last = pll.step(Some(p)).bpm;
         }
-        assert!((last - 120.0).abs() < 0.001, "{last}");
+        let err = (last.0 as i64 - 120_000_000).unsigned_abs();
+        assert!(err < 1_000, "{last:?}");
     }
 
     #[test]
     fn jitter_free_tracks_perfectly() {
-        assert_bpm_converges(120.0, 0.0, 1);
+        assert_bpm_converges(MicroBpm::from_bpm_integer(120), Pico(0), 1);
     }
 
     #[test]
     fn integrator_clamp_keeps_bpm_positive() {
-        // Drive a sustained negative phase error so the integrator
-        // saturates against its lower clamp; the smoothed BPM must
-        // stay strictly positive (regression for a bug where
-        // `clamp_hz / nominal_freq_hz > 1.0` allowed
-        // `1 + integrator <= 0`).
-        let sr = 48_000u32;
+        // Regression: when `clamp_hz / nominal_freq_hz > 1.0` the
+        // integrator could reach `-1.0` and drive `1 + integrator` to
+        // zero or below. Check the f64 control-law state stays in the
+        // valid range — the MicroBpm output may legitimately round to
+        // 0 when smoothed_bpm is well below 1 µBPM without indicating
+        // the regression.
         let ppq = 24u32;
-        let nominal_bpm = 120.0_f32;
-        let mut pll = Pll::new(PllSettings::DEFAULT, nominal_bpm, sr, ppq);
-        // Pretend pulses arrive at 100× the expected spacing (extremely
-        // late) for many steps — this would push the integrator
-        // negative without bound if unclamped.
-        let huge_spacing = sr as f64 * 100.0; // ~100 s between pulses
-        let mut t = 0.0_f64;
+        let nominal_bpm = MicroBpm::from_bpm_integer(120);
+        let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, nominal_bpm, ppq);
+        let huge_spacing_samples: f64 = S48::HZ as f64 * 100.0;
+        let mut t: f64 = 0.0;
         for _ in 0..1000 {
-            let out = pll.step(Some(t));
-            assert!(out.bpm > 0.0, "smoothed bpm went non-positive: {}", out.bpm);
-            assert!(out.bpm.is_finite());
-            t += huge_spacing;
+            let bits_q16 = (t * 65_536.0).round() as i64;
+            let obs = S48::from_bits_q48_16(bits_q16);
+            let _out = pll.step(Some(obs));
+            assert!(
+                pll.state().integrator > -1.0,
+                "integrator fell to -1.0 or below: {}",
+                pll.state().integrator
+            );
+            assert!(
+                pll.state().freq_hz > 0.0 && pll.state().freq_hz.is_finite(),
+                "freq_hz went non-positive: {}",
+                pll.state().freq_hz
+            );
+            t += huge_spacing_samples;
         }
     }
 
     proptest! {
-        // P: pll_bpm_converges
         #[test]
         fn pll_bpm_converges(
-            bpm in 60.0_f32..200.0_f32,
-            jitter_us in 0.0_f32..200.0_f32,
+            bpm_mbpm in 60_000_000u32..200_000_000,
+            jitter_us in 0u32..200,
             seed in any::<u64>(),
         ) {
-            let sr = 48_000u32;
+            let bpm = MicroBpm(bpm_mbpm);
+            let jitter = Pico(jitter_us as i64 * 1_000_000);
             let ppq = 24u32;
             let n_pulses = 64u32;
-            let (_, peaks) = pulse_train(bpm, sr, ppq, jitter_us, n_pulses, seed);
-            let mut pll = Pll::new(PllSettings::DEFAULT, bpm, sr, ppq);
+            let (_, peaks): (Vec<f32>, Vec<S48>) =
+                pulse_train::<S48>(bpm, ppq, jitter, n_pulses, seed);
+            let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, ppq);
             let mut last = bpm;
             for &p in &peaks {
                 last = pll.step(Some(p)).bpm;
             }
+            let err = (last.0 as i64 - bpm.0 as i64).unsigned_abs();
             prop_assert!(
-                (last - bpm).abs() < 0.05,
-                "bpm err {} > 0.05 (last={}, target={}, jitter={})",
-                (last - bpm).abs(), last, bpm, jitter_us
+                err < 50_000,
+                "bpm err {} µBPM > 50_000 (last={} µBPM, target={} µBPM, jitter_us={})",
+                err, last.0, bpm.0, jitter_us
             );
         }
 
-        // P: pll_phase_converges
-        // Phase error here = the time gap between PLL-predicted spacing
-        // and true spacing, RMS over a steady-state window.
         #[test]
         fn pll_phase_converges(
-            bpm in 60.0_f32..200.0_f32,
-            jitter_us in 0.0_f32..200.0_f32,
+            bpm_mbpm in 60_000_000u32..200_000_000,
+            jitter_us in 0u32..200,
             seed in any::<u64>(),
         ) {
-            let sr = 48_000u32;
+            let bpm = MicroBpm(bpm_mbpm);
+            let jitter = Pico(jitter_us as i64 * 1_000_000);
             let ppq = 24u32;
             let n_pulses = 64u32;
-            let (_, peaks) = pulse_train(bpm, sr, ppq, jitter_us, n_pulses, seed);
-            let mut pll = Pll::new(PllSettings::DEFAULT, bpm, sr, ppq);
-            let true_freq = bpm as f64 * ppq as f64 / 60.0;
+            let (_, peaks): (Vec<f32>, Vec<S48>) =
+                pulse_train::<S48>(bpm, ppq, jitter, n_pulses, seed);
+            let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, ppq);
+            // True pulse spacing in seconds (for error computation only;
+            // test-local f64).
+            let bpm_f = bpm.0 as f64 / 1.0e6;
+            let true_freq = bpm_f * ppq as f64 / 60.0;
             let true_spacing_secs = 1.0 / true_freq;
             let mut sum_sq_us = 0.0_f64;
             let mut count = 0;
             for (i, &p) in peaks.iter().enumerate() {
                 let out = pll.step(Some(p));
                 if i >= 32 {
-                    let est_freq = out.bpm as f64 * ppq as f64 / 60.0;
+                    let est_bpm_f = out.bpm.0 as f64 / 1.0e6;
+                    let est_freq = est_bpm_f * ppq as f64 / 60.0;
                     let est_spacing_secs = 1.0 / est_freq;
                     let err_us = (est_spacing_secs - true_spacing_secs) * 1e6;
                     sum_sq_us += err_us * err_us;
@@ -324,71 +336,58 @@ mod tests {
             let rms_us = (sum_sq_us / count as f64).sqrt();
             prop_assert!(
                 rms_us < 50.0,
-                "phase rms {} µs > 50 µs (bpm={}, jitter={})",
-                rms_us, bpm, jitter_us
+                "phase rms {} µs > 50 µs (bpm={}, jitter_us={})",
+                rms_us, bpm.0, jitter_us
             );
         }
 
-        // P: pll_rejects_outliers
-        // Inject a single 10×-jitter spike on pulse 40; smoothed BPM
-        // immediately before vs. after the rest of the run must drift
-        // by less than 0.5 BPM.
         #[test]
         fn pll_rejects_outliers(
-            bpm in 90.0_f32..160.0_f32,
+            bpm_mbpm in 90_000_000u32..160_000_000,
             seed in any::<u64>(),
         ) {
-            let sr = 48_000u32;
+            let bpm = MicroBpm(bpm_mbpm);
             let ppq = 24u32;
             let n_pulses = 96u32;
-            let jitter_us = 50.0_f32;
-            let (_, mut peaks) = pulse_train(bpm, sr, ppq, jitter_us, n_pulses, seed);
-            let mut pll = Pll::new(PllSettings::DEFAULT, bpm, sr, ppq);
+            let jitter = Pico(50_000_000); // 50 µs
+            let (_, mut peaks): (Vec<f32>, Vec<S48>) =
+                pulse_train::<S48>(bpm, ppq, jitter, n_pulses, seed);
+            let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, ppq);
             let mut pre_bpm = bpm;
             for &p in peaks.iter().take(40) {
                 pre_bpm = pll.step(Some(p)).bpm;
             }
-            // 10×σ = 500 µs in samples.
-            let spike_samples = 500.0 * sr as f64 / 1e6;
-            peaks[40] += spike_samples;
+            // 10×σ = 500 µs in samples at S48. Spike the 40th peak.
+            let spike_samples = 500.0 * S48::HZ as f64 / 1e6;
+            let spike_bits = (spike_samples * 65_536.0).round() as i64;
+            peaks[40] = S48::from_bits_q48_16(peaks[40].to_bits_q48_16() + spike_bits);
             let mut last_post = pre_bpm;
             for &p in &peaks[40..] {
                 last_post = pll.step(Some(p)).bpm;
             }
-            let drift = (last_post - pre_bpm).abs();
+            let drift = (last_post.0 as i64 - pre_bpm.0 as i64).unsigned_abs();
+            // 0.5 BPM = 500_000 µBPM.
             prop_assert!(
-                drift < 0.5,
-                "post-spike drift {} > 0.5 (pre={}, post={}, bpm={})",
-                drift, pre_bpm, last_post, bpm
+                drift < 500_000,
+                "post-spike drift {} µBPM > 500_000 (pre={}, post={}, bpm={})",
+                drift, pre_bpm.0, last_post.0, bpm.0
             );
         }
 
-        // P: pll_no_panic_on_silence
         #[test]
         fn pll_no_panic_on_silence(
-            bpm in 60.0_f32..200.0_f32,
+            bpm_mbpm in 60_000_000u32..200_000_000,
         ) {
-            let mut pll = Pll::new(PllSettings::DEFAULT, bpm, 48_000, 24);
+            let bpm = MicroBpm(bpm_mbpm);
+            let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, 24);
             for _ in 0..1000 {
-                let out = pll.step(None);
-                prop_assert!(out.bpm.is_finite());
-                prop_assert!(out.phase.is_finite());
-                prop_assert!(out.phase >= 0.0 && out.phase < 1.0);
+                let _ = pll.step(None);
+                // Phase and bpm are integer types — no NaN to worry about.
+                // Just assert no panic; integer invariants hold trivially.
             }
         }
     }
 
-    /// Regression check, not a proptest: increasing the loop natural
-    /// frequency ω_n (with critical damping held by `kp = 2 * ω_n`,
-    /// `ki = ω_n²`) reduces the number of pulses needed to settle a
-    /// step input.
-    ///
-    /// The plan phrased this as "increasing kp at fixed ki", but in
-    /// our smoothed-BPM design (output is integrator-only) the slow
-    /// pole near `1 - ki` dominates output convergence — `kp` only
-    /// shifts the fast pole, which barely shows up at the output.
-    /// Probing ω_n while holding damping ratio constant is the
-    /// faithful "loop-bandwidth monotone" check; see Review.
     #[test]
     fn pll_bandwidth_monotone() {
         let pulses_to_settle = |omega_n: f64| -> usize {
@@ -400,15 +399,17 @@ mod tests {
                 clamp_hz: 1000.0,
                 interp: 0.0,
             };
-            let nominal = 120.0_f32;
-            let actual = 130.0_f32;
-            let sr = 48_000u32;
+            let nominal = MicroBpm::from_bpm_integer(120);
+            let actual = MicroBpm::from_bpm_integer(130);
             let ppq = 24u32;
-            let (_, peaks) = pulse_train(actual, sr, ppq, 0.0, 800, 1);
-            let mut pll = Pll::new(cfg, nominal, sr, ppq);
+            let (_, peaks): (Vec<f32>, Vec<S48>) =
+                pulse_train::<S48>(actual, ppq, Pico(0), 800, 1);
+            let mut pll = Pll::<S48>::new(cfg, nominal, ppq);
             for (i, &p) in peaks.iter().enumerate() {
                 let out = pll.step(Some(p));
-                if (out.bpm - actual).abs() < 0.5 {
+                let err = (out.bpm.0 as i64 - actual.0 as i64).unsigned_abs();
+                if err < 500_000 {
+                    // 0.5 BPM
                     return i;
                 }
             }
