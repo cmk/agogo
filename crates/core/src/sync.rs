@@ -15,3 +15,4 @@ pub mod pll;
 pub mod source;
 
 pub use detect::{DetectorConfig, Peak, PeakDetector};
+pub use pll::{Pll, PllOutput, PllSettings, PllState};
