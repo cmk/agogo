@@ -25,6 +25,12 @@ enum Command {
         #[bpaf(external(time_op))]
         op: TimeOp,
     },
+    /// Per-channel scheduler utilities.
+    #[bpaf(command("channel"))]
+    Channel {
+        #[bpaf(external(channel_sub))]
+        sub: ChannelSub,
+    },
 }
 
 #[derive(Debug, Clone, Bpaf)]
@@ -59,6 +65,41 @@ enum TimeOp {
     Schedule(#[bpaf(external(schedule_args))] time_sched::ScheduleArgs),
 }
 
+#[derive(Debug, Clone, Bpaf)]
+enum ChannelSub {
+    /// Run the per-channel scheduler over a sequence of audio buffers
+    /// and print the resulting events as CSV:
+    /// `buffer_index,sample_index,tick`.
+    #[bpaf(command("trace"))]
+    Trace {
+        /// Tempo in beats per minute.
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f64))]
+        bpm: f64,
+        /// Sample rate in Hz.
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
+        sr: u32,
+        /// Per-channel divider (e.g. `t4`, `t16`, `t8t`).
+        #[bpaf(long, argument("TBASE"))]
+        divider: String,
+        /// `SwingConfig::amount` with `multiplier = 1`.
+        #[bpaf(long, argument("AMOUNT"), fallback(0))]
+        shuffle: i32,
+        /// Positive latency shift in ms; clamped to `[0, 300]` inside
+        /// the transform.
+        #[bpaf(long, argument("SHIFT_MS"), fallback(0.0))]
+        shift_ms: f32,
+        /// Signed calibration offset in ms.
+        #[bpaf(long, argument("OFFSET_MS"), fallback(0.0))]
+        offset_ms: f32,
+        /// Audio buffer length in samples.
+        #[bpaf(long, argument("FRAMES"))]
+        frames: usize,
+        /// Number of consecutive buffers to schedule.
+        #[bpaf(long, argument("BUFFERS"), parse(parse_positive_u32))]
+        buffers: u32,
+    },
+}
+
 fn parse_positive_f32(v: f32) -> Result<f32, String> {
     if v.is_finite() && v > 0.0 {
         Ok(v)
@@ -80,6 +121,14 @@ fn parse_positive_u32(v: u32) -> Result<u32, String> {
         Err("must be ≥ 1, got 0".to_string())
     } else {
         Ok(v)
+    }
+}
+
+fn parse_positive_f64(v: f64) -> Result<f64, String> {
+    if v.is_finite() && v > 0.0 {
+        Ok(v)
+    } else {
+        Err(format!("must be a positive finite number, got {v}"))
     }
 }
 
@@ -109,6 +158,50 @@ fn main() {
             {
                 let _ = (bpm, sr, ppq, jitter_us, pulses, seed);
                 eprintln!("error: build with --features core to enable `sync trace`");
+                std::process::exit(2);
+            }
+        }
+        Some(Command::Channel {
+            sub:
+                ChannelSub::Trace {
+                    bpm,
+                    sr,
+                    divider,
+                    shuffle,
+                    shift_ms,
+                    offset_ms,
+                    frames,
+                    buffers,
+                },
+        }) => {
+            #[cfg(feature = "core")]
+            {
+                let args = channel_trace::TraceArgs {
+                    bpm,
+                    sr,
+                    divider,
+                    shuffle,
+                    shift_ms,
+                    offset_ms,
+                    frames,
+                    buffers,
+                };
+                let rows = match channel_trace::trace(&args) {
+                    Ok(rows) => rows,
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::exit(2);
+                    }
+                };
+                println!("buffer_index,sample_index,tick");
+                for row in rows {
+                    println!("{},{},{}", row.buffer_index, row.sample_index, row.tick);
+                }
+            }
+            #[cfg(not(feature = "core"))]
+            {
+                let _ = (bpm, sr, divider, shuffle, shift_ms, offset_ms, frames, buffers);
+                eprintln!("error: build with --features core to enable `channel trace`");
                 std::process::exit(2);
             }
         }
@@ -188,6 +281,66 @@ mod sync_trace {
     }
 }
 
+#[cfg(feature = "core")]
+pub mod channel_trace {
+    use agogo_core::channel::{Channel, ChannelMode, tick_stream};
+    use agogo_core::time::conn::SampleTickConn;
+    use agogo_core::time::swing::SwingConfig;
+    use agogo_core::time::tbase::TBase;
+    use agogo_core::time::tick::PPQN;
+
+    #[derive(Debug, Clone)]
+    pub struct TraceArgs {
+        pub bpm: f64,
+        pub sr: u32,
+        pub divider: String,
+        pub shuffle: i32,
+        pub shift_ms: f32,
+        pub offset_ms: f32,
+        pub frames: usize,
+        pub buffers: u32,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct TraceRow {
+        pub buffer_index: u32,
+        pub sample_index: u64,
+        pub tick: u32,
+    }
+
+    /// Pure CPU scheduling trace — useful for testing without capturing
+    /// stdout. Returns an error if `divider` isn't a valid `TBase`.
+    pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
+        let divider: TBase = args
+            .divider
+            .parse()
+            .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
+        let stc = SampleTickConn::new(args.sr, args.bpm, PPQN);
+        let channel = Channel {
+            mode: ChannelMode::MidiClock,
+            divider,
+            shuffle: SwingConfig {
+                amount: args.shuffle,
+                multiplier: 1,
+            },
+            shift_ms: args.shift_ms,
+            offset_ms: args.offset_ms,
+        };
+        let mut rows = Vec::new();
+        for b in 0..args.buffers {
+            let start = u64::from(b) * args.frames as u64;
+            for ev in tick_stream(&channel, &stc, start, args.frames) {
+                rows.push(TraceRow {
+                    buffer_index: b,
+                    sample_index: ev.sample_index,
+                    tick: ev.tick.0,
+                });
+            }
+        }
+        Ok(rows)
+    }
+}
+
 pub mod time_sched {
     use agogo_core::time::swing::{self, SwingConfig};
     use agogo_core::time::tbase::TBase;
@@ -262,6 +415,7 @@ pub mod time_sched {
 
 #[cfg(all(test, feature = "core"))]
 mod tests {
+    use super::channel_trace::{self, TraceArgs};
     use super::sync_trace::trace;
     use super::time_sched::{ScheduleArgs, schedule_ticks, swing_to_config};
     use agogo_core::time::swing::SwingConfig;
@@ -364,6 +518,44 @@ mod tests {
             bars: 1,
         });
         assert_eq!(ticks.len(), 192);
+    }
+
+    /// Plan build gate: the trace command at 120 BPM / 48 kHz / T4
+    /// divider / 4 096-frame buffers must produce events at
+    /// samples 0, 24 000, 48 000, … (one quarter note = 24 000
+    /// samples) across the first few buffers.
+    #[test]
+    fn channel_trace_t4_120bpm_matches_expected_samples() {
+        let args = TraceArgs {
+            bpm: 120.0,
+            sr: 48_000,
+            divider: "t4".to_string(),
+            shuffle: 0,
+            shift_ms: 0.0,
+            offset_ms: 0.0,
+            frames: 4_096,
+            buffers: 16,
+        };
+        let rows = channel_trace::trace(&args).expect("valid args");
+        // 16 buffers × 4096 frames = 65 536 samples. Quarter notes at
+        // 24 000 samples: 0, 24 000, 48 000 fit.
+        let samples: Vec<u64> = rows.iter().map(|r| r.sample_index).collect();
+        assert_eq!(samples, vec![0, 24_000, 48_000]);
+    }
+
+    #[test]
+    fn channel_trace_rejects_invalid_divider() {
+        let args = TraceArgs {
+            bpm: 120.0,
+            sr: 48_000,
+            divider: "nope".to_string(),
+            shuffle: 0,
+            shift_ms: 0.0,
+            offset_ms: 0.0,
+            frames: 4_096,
+            buffers: 1,
+        };
+        assert!(channel_trace::trace(&args).is_err());
     }
 
     #[test]
