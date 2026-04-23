@@ -8,10 +8,14 @@
 //! lifecycle surface (enable / tempo / num_peers); the phase-at-sample
 //! bridge lands post-fxp.
 //!
-//! This crate is feature-gated out of the CLI via
-//! `agogo-cli --features link`. Default builds do not pull it in,
-//! keeping the CMake + C++ toolchain off the critical path.
+//! The `link` submodule (and the `rusty_link` dependency) is gated
+//! behind the `rusty-link` feature. Default builds produce an empty
+//! crate so `cargo test --workspace` can resolve the dep graph
+//! without `ext/rusty_link` being present — CI relies on this.
+//! `agogo-cli --features link` activates `rusty-link` transitively.
 
+#[cfg(feature = "rusty-link")]
 pub mod link;
 
+#[cfg(feature = "rusty-link")]
 pub use link::LinkClock;

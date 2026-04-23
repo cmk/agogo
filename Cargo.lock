@@ -28,7 +28,6 @@ name = "agogo-host-link"
 version = "0.1.0"
 dependencies = [
  "agogo-core",
- "proptest",
  "rusty_link",
 ]
 
@@ -571,6 +570,8 @@ dependencies = [
 [[package]]
 name = "rusty_link"
 version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "431fec7d301f2c3668244fe013938073ef33eb39615696bfd659111d4b4d1089"
 dependencies = [
  "bindgen",
  "cmake",

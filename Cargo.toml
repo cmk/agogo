@@ -2,12 +2,19 @@
 members = [
     "crates/core",
     "crates/cli",
-    "crates/host-link",
 ]
-# `ext/` holds third-party path deps (rusty_link and friends). Exclude
-# it so cargo treats them as external libraries rather than workspace
-# members — their tests / examples stay out of `cargo test --workspace`.
-exclude = ["ext"]
+# `crates/host-link` is intentionally NOT a workspace member — it
+# lives as an optional path dep from `crates/cli` (activated by
+# `agogo-cli --features link`). Keeping it out of `[workspace].members`
+# prevents `cargo test --workspace` (default CI) from eagerly
+# resolving its `rusty_link` path dep to `ext/rusty_link`, which is
+# gitignored and absent on CI runners. See
+# `crates/host-link/README.md` for the dev workflow.
+#
+# `ext/` similarly holds third-party path deps (rusty_link and
+# friends) and is excluded so their tests / examples stay out of
+# `cargo test --workspace`.
+exclude = ["crates/host-link", "ext"]
 resolver = "3"
 
 [workspace.package]
@@ -19,15 +26,12 @@ license = "MIT"
 [workspace.dependencies]
 # Internal crates
 agogo-core = { path = "crates/core" }
-agogo-host-link = { path = "crates/host-link" }
 
-# Ableton Link binding — thin FFI over abl_link (C wrapper) with
-# vendored Link C++ via a submodule. `ext/rusty_link` is gitignored
-# and populated per-worktree by cloning upstream. See
-# `crates/host-link/README.md` for setup + the pinned rev
-# (5b3f44e81b0aa30dae4b0650b2f5882048c0b842). Feature-gated out of
-# CI default builds because it requires CMake + a C++ toolchain.
-rusty_link = { path = "ext/rusty_link" }
+# `agogo-host-link` + `rusty_link` are intentionally NOT workspace
+# deps — they live as direct path deps from `crates/cli/Cargo.toml`
+# (optional, behind the `link` feature). See
+# `crates/host-link/README.md` for the setup instructions + pinned
+# rusty_link rev.
 
 # Sibling crate. Hosted on GitLab; pinned by rev so the build is
 # reproducible across local and CI. Local dev workflow: `cargo` will

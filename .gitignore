@@ -21,6 +21,11 @@ doc/notes/
 # External
 ext/
 
+# `crates/host-link` is a detached crate (not a workspace member); its
+# own Cargo.lock is auto-generated on standalone `cargo test` runs.
+# The workspace Cargo.lock is the authoritative one for CI/cli builds.
+crates/host-link/Cargo.lock
+
 # /watch-pr dynamic-mode backoff state (per-PR consecutive-quiet-tick counters)
 /.watch-pr/
 

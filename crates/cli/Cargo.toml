@@ -9,9 +9,12 @@ publish = false
 [features]
 default = ["core"]
 core = ["dep:agogo-core"]
-link = ["dep:agogo-host-link"]
+link = ["dep:agogo-host-link", "agogo-host-link/rusty-link"]
 
 [dependencies]
 agogo-core = { workspace = true, optional = true }
-agogo-host-link = { workspace = true, optional = true }
+# Direct path dep (not a workspace dep) — `crates/host-link` lives
+# outside `[workspace].members` so CI never resolves `ext/rusty_link`
+# unless `--features link` is explicitly requested.
+agogo-host-link = { path = "../host-link", optional = true }
 bpaf = { workspace = true }

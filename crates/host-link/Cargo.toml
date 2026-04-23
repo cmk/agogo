@@ -1,14 +1,32 @@
 [package]
 name = "agogo-host-link"
-edition.workspace = true
-version.workspace = true
-rust-version.workspace = true
-license.workspace = true
+edition = "2024"
+version = "0.1.0"
+rust-version = "1.85"
+license = "MIT"
 publish = false
 
+# `agogo-host-link` is NOT a `[workspace].members` entry — it's pulled
+# in only as an optional path dep from `crates/cli/Cargo.toml` when
+# `agogo-cli --features link` is on. The detached status is what keeps
+# `cargo test --workspace` from eagerly resolving `rusty_link`'s path
+# on CI runners that don't have `ext/rusty_link` populated.
+
+[features]
+# Default build contains no rusty_link dependency. The `rusty-link`
+# feature pulls in the FFI binding and exposes the `link` submodule;
+# `agogo-cli --features link` activates it transitively.
+default = []
+rusty-link = ["dep:rusty_link"]
+
 [dependencies]
-agogo-core = { workspace = true }
-rusty_link = { workspace = true }
+agogo-core = { path = "../core" }
+# Pinned at 0.4.8 (same rev as the local `ext/rusty_link` clone used
+# for offline dev). Registry-fetched so CI doesn't need the local
+# `ext/` tree populated. Local co-dev can still override via a
+# gitignored `.cargo/config.toml` `[patch.crates-io]` section, see
+# `crates/host-link/README.md`.
+rusty_link = { version = "=0.4.8", optional = true }
 
 [dev-dependencies]
-proptest = { workspace = true }
+proptest = "1"
