@@ -24,6 +24,54 @@ pub use connections::fixed::{Centi, Deci, HasResolution, Micro, Milli, Nano, Pic
 pub use connections::sample::{S44, S48, S88, S96, S176, S192, SampleRate};
 
 // ────────────────────────────────────────────────────────────────────
+// SampleTime — agogo-local convenience trait over the rate types.
+//
+// Provides uniform `from_bits` / `to_bits` / `from_sample` / `sample`
+// methods so generic code (notably `arb::pulse_train` and `sync::*`)
+// can construct and read any rate type without a match arm.
+// ────────────────────────────────────────────────────────────────────
+
+/// Common Q48.16-bits interface over the `Sxx` rate types from
+/// `connections::sample`. Lets generic DSP code accept an arbitrary
+/// `R: SampleTime` rather than committing to a single rate.
+pub trait SampleTime: SampleRate + Copy + Default + Ord + core::fmt::Debug {
+    /// Construct from raw Q48.16 bits.
+    fn from_bits_q48_16(bits: i64) -> Self;
+    /// Extract raw Q48.16 bits.
+    fn to_bits_q48_16(self) -> i64;
+
+    /// Construct from an integer sample count.
+    fn from_sample(n: i64) -> Self {
+        Self::from_bits_q48_16(n << 16)
+    }
+
+    /// Integer sample part (arithmetic shift, rounds toward −∞ for negatives).
+    fn sample(self) -> i64 {
+        self.to_bits_q48_16() >> 16
+    }
+}
+
+macro_rules! impl_sample_time {
+    ($Rate:ident) => {
+        impl SampleTime for $Rate {
+            fn from_bits_q48_16(bits: i64) -> Self {
+                <$Rate>::from_bits(bits)
+            }
+            fn to_bits_q48_16(self) -> i64 {
+                self.to_bits()
+            }
+        }
+    };
+}
+
+impl_sample_time!(S44);
+impl_sample_time!(S48);
+impl_sample_time!(S88);
+impl_sample_time!(S96);
+impl_sample_time!(S176);
+impl_sample_time!(S192);
+
+// ────────────────────────────────────────────────────────────────────
 // Phase — Q0.32 cycles.
 //
 // The whole u32 range maps to [0, 1) cycles; wrapping_add IS modular
