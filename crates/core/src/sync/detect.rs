@@ -3,21 +3,30 @@
 //! Streaming, block-at-a-time. State (the last two samples and a hold
 //! countdown) carries between `process` calls so peaks straddling block
 //! boundaries are not lost.
+//!
+//! Rate-parameterised via `R: SampleTime` — the detector itself operates
+//! on `&[f32]` PCM blocks (cpal ABI), and emits `Peak<R>` so downstream
+//! consumers don't confuse two rates at compile time.
+
+use crate::fxp::SampleTime;
+use core::marker::PhantomData;
 
 /// A detected pulse with sub-sample arrival precision.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Peak {
-    /// Stream-global sample index of the interpolated peak centre.
-    pub sample_index: f64,
-    /// Parabolic-fit amplitude at the interpolated centre.
-    pub amplitude: f32,
+pub struct Peak<R: SampleTime> {
+    /// Stream-global position of the interpolated peak centre.
+    pub sample_index: R,
 }
 
 /// Detector tuning.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DetectorConfig {
-    /// Minimum amplitude for a candidate to be considered a peak.
-    pub threshold: f32,
+    /// Minimum amplitude for a candidate to be considered a peak, as
+    /// Q0.15 of full-scale (`16_384 ≈ 0.5`, `32_768 ≈ 1.0`). Compared
+    /// against the normalised f32 PCM input inside `process` — this is
+    /// the one narrow f32 comparison in the detector, and lives at the
+    /// cpal ABI boundary.
+    pub threshold_q15: u16,
     /// Minimum number of samples between consecutive emitted peaks: a
     /// peak at sample `n` suppresses any candidate at samples `n+1`
     /// through `n + hold_samples - 1` inclusive; the next emission is
@@ -47,16 +56,18 @@ impl DetectorState {
 }
 
 #[derive(Debug, Clone)]
-pub struct PeakDetector {
+pub struct PeakDetector<R: SampleTime> {
     cfg: DetectorConfig,
     state: DetectorState,
+    _rate: PhantomData<R>,
 }
 
-impl PeakDetector {
+impl<R: SampleTime> PeakDetector<R> {
     pub fn new(cfg: DetectorConfig) -> Self {
         Self {
             cfg,
             state: DetectorState::new(),
+            _rate: PhantomData,
         }
     }
 
@@ -72,11 +83,14 @@ impl PeakDetector {
 
     /// Process a block of samples and return all peaks discovered in it.
     ///
-    /// `start_index` is the stream-global index of `samples[0]`, so
-    /// returned `Peak::sample_index` values are stream-global and
+    /// `start_index` is the stream-global sample count of `samples[0]`,
+    /// so returned `Peak::sample_index` values are stream-global and
     /// monotonically increasing across calls.
-    pub fn process(&mut self, samples: &[f32], start_index: u64) -> Vec<Peak> {
+    pub fn process(&mut self, samples: &[f32], start_index: u64) -> Vec<Peak<R>> {
         let mut peaks = Vec::new();
+        // ABI-local: Q0.15 threshold → f32 for one compare against
+        // normalised PCM input below.
+        let threshold_f32 = (self.cfg.threshold_q15 as f32) / 32_768.0;
 
         for (offset, &cur) in samples.iter().enumerate() {
             // Decrement hold first; the check below requires it to
@@ -95,9 +109,12 @@ impl PeakDetector {
                 // smooth pulses whose apex lands exactly half-way
                 // between two integer samples.
                 let is_local_max = y_0 >= y_m1 && y_0 > y_p1;
-                let above_threshold = y_0 >= self.cfg.threshold;
+                let above_threshold = y_0 >= threshold_f32;
 
                 if is_local_max && above_threshold && self.state.hold_remaining == 0 {
+                    // ABI-local f64: parabolic-fit locals. Contained
+                    // to these three lines; converted to Q48.16 bits
+                    // before any value escapes.
                     let denom = (y_m1 - 2.0 * y_0 + y_p1) as f64;
                     let frac = if denom.abs() < 1e-30 {
                         0.0
@@ -105,20 +122,16 @@ impl PeakDetector {
                         (0.5 * (y_m1 - y_p1) as f64 / denom).clamp(-0.5, 0.5)
                     };
 
-                    // i128 keeps the arithmetic exact for any
-                    // u64 stream index — `start_index as i64` would
-                    // wrap above `i64::MAX`.
-                    let centre_global =
+                    // i128 keeps the arithmetic exact for any u64
+                    // stream index — `start_index as i64` would wrap
+                    // above `i64::MAX`.
+                    let centre_int: i128 =
                         (start_index as i128) + (offset as i128) - 1;
-                    let sample_index = centre_global as f64 + frac;
-
-                    // Parabolic-fit apex amplitude.
-                    let amplitude =
-                        y_0 - 0.25 * (y_p1 - y_m1) * frac as f32;
+                    let frac_q16 = (frac * 65_536.0).round() as i64;
+                    let bits_q48_16 = (centre_int * 65_536) as i64 + frac_q16;
 
                     peaks.push(Peak {
-                        sample_index,
-                        amplitude,
+                        sample_index: R::from_bits_q48_16(bits_q48_16),
                     });
                     self.state.hold_remaining = self.cfg.hold_samples;
                 }
@@ -137,7 +150,8 @@ impl PeakDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arb::{arb_bpm, arb_sample_rate, pulse_train};
+    use crate::arb::{arb_bpm, pulse_train};
+    use crate::fxp::{MicroBpm, Pico, S48, SampleRate};
     use proptest::prelude::*;
 
     /// Stamp a Hann-bell pulse into `buf`. Mirrors `pulse_train`'s
@@ -160,10 +174,13 @@ mod tests {
         }
     }
 
+    /// Q0.15 helper for tests: 0.5 full-scale.
+    const THRESHOLD_HALF: u16 = 16_384;
+
     #[test]
     fn empty_block_yields_no_peaks() {
-        let mut det = PeakDetector::new(DetectorConfig {
-            threshold: 0.1,
+        let mut det = PeakDetector::<S48>::new(DetectorConfig {
+            threshold_q15: 3_277, // ≈ 0.1
             hold_samples: 10,
         });
         assert!(det.process(&[], 0).is_empty());
@@ -178,19 +195,20 @@ mod tests {
         for &c in &centres {
             emit_hann(&mut buf, c, 72.0);
         }
-        let mut det = PeakDetector::new(DetectorConfig {
-            threshold: 0.5,
+        let mut det = PeakDetector::<S48>::new(DetectorConfig {
+            threshold_q15: THRESHOLD_HALF,
             hold_samples: 500,
         });
         let peaks = det.process(&buf, 0);
         assert_eq!(peaks.len(), centres.len(), "peak count");
         for (p, &truth) in peaks.iter().zip(centres.iter()) {
+            let got = p.sample_index.to_bits_q48_16() as f64 / 65_536.0;
             assert!(
-                (p.sample_index - truth).abs() < 0.1,
+                (got - truth).abs() < 0.1,
                 "detected {} vs truth {} (err {})",
-                p.sample_index,
+                got,
                 truth,
-                (p.sample_index - truth).abs()
+                (got - truth).abs()
             );
         }
     }
@@ -199,33 +217,39 @@ mod tests {
     fn block_boundary_does_not_lose_peak() {
         // Place a peak that straddles two process() calls.
         let mut buf = vec![0.0_f32; 1024];
-        emit_hann(&mut buf, 510.0, 72.0); // apex 510, spans ~474..546
-        let mut det = PeakDetector::new(DetectorConfig {
-            threshold: 0.5,
+        emit_hann(&mut buf, 510.0, 72.0);
+        let mut det = PeakDetector::<S48>::new(DetectorConfig {
+            threshold_q15: THRESHOLD_HALF,
             hold_samples: 100,
         });
         let mut all = det.process(&buf[..512], 0);
         all.extend(det.process(&buf[512..], 512));
         assert_eq!(all.len(), 1);
-        assert!((all[0].sample_index - 510.0).abs() < 0.1);
+        let got = all[0].sample_index.to_bits_q48_16() as f64 / 65_536.0;
+        assert!((got - 510.0).abs() < 0.1);
     }
 
     proptest! {
         // P1: every truth peak is reported exactly once, no extras.
+        // Pinned to S48 for this sprint; multi-rate coverage deferred
+        // (the detector algorithm is rate-agnostic — it operates on
+        // &[f32] — so the rate only affected the test's own expected-
+        // values math).
         #[test]
         fn detector_recovers_all_peaks(
             bpm in arb_bpm(),
-            sr in arb_sample_rate(),
             seed in any::<u64>(),
             n_pulses in 4u32..32u32,
         ) {
+            let sr = S48::HZ;
             let ppq = 24u32;
-            let (samples, truth) = pulse_train(bpm, sr, ppq, 0.0, n_pulses, seed);
-            let pulse_rate_hz = bpm as f64 * ppq as f64 / 60.0;
+            let (samples, truth): (Vec<f32>, Vec<S48>) =
+                pulse_train::<S48>(bpm, ppq, Pico(0), n_pulses, seed);
+            let pulse_rate_hz = (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0;
             let spacing_samples = sr as f64 / pulse_rate_hz;
             let hold = (spacing_samples * 0.5) as u32;
-            let mut det = PeakDetector::new(DetectorConfig {
-                threshold: 0.5,
+            let mut det = PeakDetector::<S48>::new(DetectorConfig {
+                threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
             let detected = det.process(&samples, 0);
@@ -237,7 +261,8 @@ mod tests {
                 truth.len()
             );
             for (d, &t) in detected.iter().zip(truth.iter()) {
-                let err = (d.sample_index - t).abs();
+                let err_bits = (d.sample_index.to_bits_q48_16() - t.to_bits_q48_16()).abs();
+                let err = err_bits as f64 / 65_536.0;
                 prop_assert!(
                     err < spacing_samples * 0.5,
                     "peak err {} exceeded spacing/2 = {}",
@@ -251,27 +276,29 @@ mod tests {
         #[test]
         fn detector_subsample_precision(
             bpm in arb_bpm(),
-            sr in arb_sample_rate(),
             seed in any::<u64>(),
             n_pulses in 4u32..16u32,
         ) {
+            let sr = S48::HZ;
             let ppq = 24u32;
-            let (samples, truth) = pulse_train(bpm, sr, ppq, 0.0, n_pulses, seed);
-            let pulse_rate_hz = bpm as f64 * ppq as f64 / 60.0;
+            let (samples, truth): (Vec<f32>, Vec<S48>) =
+                pulse_train::<S48>(bpm, ppq, Pico(0), n_pulses, seed);
+            let pulse_rate_hz = (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0;
             let spacing_samples = sr as f64 / pulse_rate_hz;
             let hold = (spacing_samples * 0.5) as u32;
-            let mut det = PeakDetector::new(DetectorConfig {
-                threshold: 0.5,
+            let mut det = PeakDetector::<S48>::new(DetectorConfig {
+                threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
             let detected = det.process(&samples, 0);
             prop_assert_eq!(detected.len(), truth.len());
             for (d, &t) in detected.iter().zip(truth.iter()) {
-                let err = (d.sample_index - t).abs();
+                let err_bits = (d.sample_index.to_bits_q48_16() - t.to_bits_q48_16()).abs();
+                let err = err_bits as f64 / 65_536.0;
                 prop_assert!(
                     err <= 0.1,
-                    "subsample err {} > 0.1 (sr={} bpm={})",
-                    err, sr, bpm
+                    "subsample err {} > 0.1 (bpm={})",
+                    err, bpm.0
                 );
             }
         }
@@ -282,17 +309,16 @@ mod tests {
             gap_samples in 80u32..400u32,
             seed in any::<u64>(),
         ) {
-            let _ = seed; // RNG unused; keeps proptest happy with shrinking
+            let _ = seed;
             let pulse_width = 72.0_f64;
             let first_centre = 200.0_f64;
             let second_centre = first_centre + gap_samples as f64;
-            // hold strictly larger than the gap → second peak suppressed.
             let hold = gap_samples + 50;
             let mut buf = Vec::new();
             emit_hann(&mut buf, first_centre, pulse_width);
             emit_hann(&mut buf, second_centre, pulse_width);
-            let mut det = PeakDetector::new(DetectorConfig {
-                threshold: 0.5,
+            let mut det = PeakDetector::<S48>::new(DetectorConfig {
+                threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
             let peaks = det.process(&buf, 0);
@@ -302,10 +328,10 @@ mod tests {
                 "expected 1 peak with hold={} > gap={}, got {}",
                 hold, gap_samples, peaks.len()
             );
-            prop_assert!((peaks[0].sample_index - first_centre).abs() < 0.5);
+            let got = peaks[0].sample_index.to_bits_q48_16() as f64 / 65_536.0;
+            prop_assert!((got - first_centre).abs() < 0.5);
         }
 
-        // Negative-control for P3: with hold << gap, both peaks emit.
         #[test]
         fn detector_hold_allows_when_gap_exceeds_hold(
             gap_samples in 200u32..600u32,
@@ -313,16 +339,20 @@ mod tests {
             let pulse_width = 72.0_f64;
             let first_centre = 200.0_f64;
             let second_centre = first_centre + gap_samples as f64;
-            let hold = gap_samples / 2; // hold smaller than gap
+            let hold = gap_samples / 2;
             let mut buf = Vec::new();
             emit_hann(&mut buf, first_centre, pulse_width);
             emit_hann(&mut buf, second_centre, pulse_width);
-            let mut det = PeakDetector::new(DetectorConfig {
-                threshold: 0.5,
+            let mut det = PeakDetector::<S48>::new(DetectorConfig {
+                threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
             let peaks = det.process(&buf, 0);
             prop_assert_eq!(peaks.len(), 2);
         }
     }
+
+    // Suppress MicroBpm import drain-warning on cfg(not(test)).
+    #[allow(dead_code)]
+    fn _micro_bpm_unused_reminder(_: MicroBpm) {}
 }

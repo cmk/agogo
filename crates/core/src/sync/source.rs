@@ -1,5 +1,6 @@
 //! Unified phase source: internal free-running clock or external PLL.
 
+use crate::fxp::{MicroBpm, Phase, SampleTime};
 use crate::sync::detect::PeakDetector;
 use crate::sync::pll::Pll;
 
@@ -15,7 +16,7 @@ use crate::sync::pll::Pll;
 /// apply, though an implementation whose tempo source is external to
 /// the audio stream (Link, DIN) is free to treat it as a no-op.
 pub trait PhaseSourceImpl: Send {
-    fn phase_at_sample(&mut self, n: u64) -> f32;
+    fn phase_at_sample(&mut self, n: u64) -> Phase;
     fn feed_samples(&mut self, samples: &[f32], start: u64);
 }
 
@@ -23,27 +24,25 @@ pub trait PhaseSourceImpl: Send {
 /// beat-phase at any stream-global sample index.
 ///
 /// `Internal` is a stateless free-running clock — phase is purely
-/// `(bpm, sr, n)`. `External` wraps a peak detector + PLL pair driven
-/// by audio samples handed in via [`PhaseSource::feed_samples`].
-/// `Custom` holds an arbitrary [`PhaseSourceImpl`] — the extension
-/// point for host integrations (Ableton Link, DIN sync, etc.) that
-/// live in sibling crates to keep their build dependencies out of
-/// `agogo-core`.
+/// `(bpm, R::HZ, n)`. `External` wraps a peak detector + PLL pair
+/// driven by audio samples handed in via
+/// [`PhaseSource::feed_samples`]. `Custom` holds an arbitrary
+/// [`PhaseSourceImpl`] — the extension point for host integrations
+/// (Ableton Link, DIN sync, etc.) that live in sibling crates to
+/// keep their build dependencies out of `agogo-core`.
 ///
-/// **Unit caveat**: `Internal::phase_at_sample` returns *beat-phase*
-/// (cycles per quarter-note ∈ [0, 1)), while `External::phase_at_sample`
-/// returns the PLL's *pulse-phase* (cycles per PPQ pulse). Sprint 3
-/// integration will reconcile these via a SampleTickConn shim that
-/// counts pulses-within-a-beat; this sprint exposes the raw PLL phase.
-pub enum PhaseSource {
+/// Rate-parameterised via `R: SampleTime` so the `PeakDetector` and
+/// `Pll` share one rate — mixing rates is a type error. (The
+/// `Custom` variant is rate-opaque; its implementor is responsible
+/// for matching the host rate however its backend defines it.)
+pub enum PhaseSource<R: SampleTime> {
     /// Free-running internal clock. Phase is deterministic from
-    /// `(bpm, sr, n)` — no state, no drift, no jitter.
-    Internal { bpm: f32, sr: u32 },
-    /// External pulse train run through detector → PLL. Caller drives
-    /// it via [`PhaseSource::feed_samples`].
+    /// `(bpm, R::HZ, n)` — no state, no drift, no jitter.
+    Internal { bpm: MicroBpm },
+    /// External pulse train run through detector → PLL.
     External {
-        detector: PeakDetector,
-        pll: Pll,
+        detector: PeakDetector<R>,
+        pll: Pll<R>,
     },
     /// Arbitrary user-provided clock. Lives behind a box to keep the
     /// enum `Sized` and to allow sibling crates (like
@@ -52,30 +51,38 @@ pub enum PhaseSource {
     Custom(Box<dyn PhaseSourceImpl + Send>),
 }
 
-impl PhaseSource {
-    /// Phase in cycles \[0, 1) at the given absolute sample index `n`.
+impl<R: SampleTime> PhaseSource<R> {
+    /// Phase in cycles [0, 1) at the given absolute sample index `n`.
     ///
-    /// `Internal` computes deterministically from `(bpm, sr, n)`.
+    /// `Internal` computes deterministically from `(bpm, R::HZ, n)`.
     ///
-    /// `External` projects analytically from the PLL's last observed
-    /// pulse: `phase = ((n - last_pulse_sample) * freq_hz / sr) mod 1`.
-    /// Works for `n` before, at, or after the last pulse, and does not
-    /// require [`feed_samples`] to free-run the PLL through silent
-    /// intervals. Returns `0.0` if no pulse has been observed yet.
-    pub fn phase_at_sample(&mut self, n: u64) -> f32 {
+    /// `External` delegates to `Pll::predicted_phase_at`, which keeps
+    /// the f64 phase-advance contained inside the PI-exempt zone.
+    /// Returns `Phase::ZERO` if no pulse has been observed yet.
+    ///
+    /// `Custom` delegates to the boxed `PhaseSourceImpl`.
+    pub fn phase_at_sample(&mut self, n: u64) -> Phase {
         match self {
-            PhaseSource::Internal { bpm, sr } => {
-                let beats_per_sec = *bpm as f64 / 60.0;
-                (n as f64 * beats_per_sec / *sr as f64).rem_euclid(1.0) as f32
+            PhaseSource::Internal { bpm } => {
+                // Compute phase exactly (modulo the final u32 truncation)
+                // by keeping `n · bpm · 2^32` together in u128 before
+                // dividing, so rounding doesn't accumulate per-sample
+                // via a precomputed inc_q32.
+                let num: u128 = n as u128 * bpm.0 as u128 * (1u128 << 32);
+                let den: u128 = 60_000_000u128 * R::HZ as u128;
+                Phase((num / den) as u32)
             }
             PhaseSource::External { pll, .. } => match pll.last_pulse_sample() {
-                None => 0.0,
+                None => Phase::ZERO,
                 Some(last) => {
-                    let elapsed = n as f64 - last;
-                    let cycles_per_sample = pll.state().freq_hz / pll.sr() as f64;
-                    let projected =
-                        (pll.state().phase + elapsed * cycles_per_sample).rem_euclid(1.0);
-                    projected as f32
+                    // Elapsed samples since the last observed pulse,
+                    // represented in R's Q48.16. Signed is fine because
+                    // `n` can be earlier than `last`.
+                    let last_bits = last.to_bits_q48_16();
+                    let n_bits = (n as i128 * 65_536) as i64;
+                    let elapsed_bits = n_bits.wrapping_sub(last_bits);
+                    let elapsed = R::from_bits_q48_16(elapsed_bits);
+                    pll.predicted_phase_at(elapsed)
                 }
             },
             PhaseSource::Custom(inner) => inner.phase_at_sample(n),
@@ -84,11 +91,9 @@ impl PhaseSource {
 
     /// Feed a block of audio samples into the clock. No-op for
     /// `Internal`; routes to detector → PLL for `External`; delegates
-    /// to the `PhaseSourceImpl` for `Custom`. Silent blocks (no peaks
-    /// detected) leave the PLL untouched —
-    /// [`phase_at_sample`] projects analytically from the last
-    /// observed pulse and does not need the PLL to be free-run
-    /// through silence.
+    /// to the `PhaseSourceImpl` for `Custom`. Silent blocks leave the
+    /// PLL untouched — [`phase_at_sample`] projects analytically from
+    /// the last observed pulse.
     pub fn feed_samples(&mut self, samples: &[f32], start: u64) {
         match self {
             PhaseSource::Internal { .. } => {}
@@ -105,115 +110,117 @@ impl PhaseSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fxp::{MicroBpm, Pico, S48, SampleRate};
     use crate::sync::detect::DetectorConfig;
     use crate::sync::pll::PllSettings;
     use proptest::prelude::*;
 
     #[test]
     fn internal_120bpm_at_half_beat() {
-        // Spot check (adjusted from the plan): at 120 BPM and 48 kHz,
-        // a beat is 24 000 samples, so half a beat is 12 000 samples
-        // and phase = 0.5. The plan's text stated `phase_at_sample
-        // (24000) == 0.5`, but n=24 000 is one full beat — phase
-        // wraps to 0.0 there. Documented in the sprint Review.
-        let mut src = PhaseSource::Internal {
-            bpm: 120.0,
-            sr: 48_000,
+        // At 120 BPM and 48 kHz, a beat is 24 000 samples; half a beat
+        // is 12 000 samples → phase = 0.5 → Phase = 2^31.
+        let mut src = PhaseSource::<S48>::Internal {
+            bpm: MicroBpm::from_bpm_integer(120),
         };
-        assert!((src.phase_at_sample(12_000) - 0.5).abs() < 1e-6);
-        assert!(src.phase_at_sample(24_000).abs() < 1e-6);
-        assert!(src.phase_at_sample(0).abs() < 1e-6);
+        let p_half = src.phase_at_sample(12_000);
+        // Allow ±1 ULP (integer arithmetic rounding of 2^32 / bpm quotient).
+        assert!((p_half.0 as i64 - (1i64 << 31)).abs() < 4);
+        assert_eq!(src.phase_at_sample(24_000).0, 0);
+        assert_eq!(src.phase_at_sample(0).0, 0);
     }
 
     #[test]
     fn external_feed_samples_advances_pll() {
-        // Smoke check: feeding a synthetic pulse-train block makes
-        // External's PLL state move (last_pulse_sample becomes Some).
-        let detector = PeakDetector::new(DetectorConfig {
-            threshold: 0.5,
+        let detector = PeakDetector::<S48>::new(DetectorConfig {
+            threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::new(PllSettings::DEFAULT, 120.0, 48_000, 24);
-        let mut src = PhaseSource::External { detector, pll };
-        let (samples, _) = crate::arb::pulse_train(120.0, 48_000, 24, 0.0, 4, 1);
+        let pll = Pll::<S48>::new(PllSettings::DEFAULT, MicroBpm::from_bpm_integer(120), 24);
+        let mut src = PhaseSource::<S48>::External { detector, pll };
+        let (samples, _): (Vec<f32>, Vec<S48>) = crate::arb::pulse_train::<S48>(
+            MicroBpm::from_bpm_integer(120),
+            24,
+            Pico(0),
+            4,
+            1,
+        );
         src.feed_samples(&samples, 0);
-        let p = src.phase_at_sample(samples.len() as u64);
-        assert!(p.is_finite() && (0.0..1.0).contains(&p));
+        let _p = src.phase_at_sample(samples.len() as u64);
+        // Phase(u32) is always a valid [0, 2^32) value — no NaN / non-finite.
     }
 
     #[test]
     fn external_phase_at_sample_projects_analytically() {
-        // After feeding a pulse train, queries for `n` between or
-        // beyond observed pulses should return analytically projected
-        // phase, not just the last-step snapshot.
-        let detector = PeakDetector::new(DetectorConfig {
-            threshold: 0.5,
+        let detector = PeakDetector::<S48>::new(DetectorConfig {
+            threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::new(PllSettings::DEFAULT, 120.0, 48_000, 24);
-        let mut src = PhaseSource::External { detector, pll };
-        let (samples, peaks) = crate::arb::pulse_train(120.0, 48_000, 24, 0.0, 4, 1);
+        let pll = Pll::<S48>::new(PllSettings::DEFAULT, MicroBpm::from_bpm_integer(120), 24);
+        let mut src = PhaseSource::<S48>::External { detector, pll };
+        let bpm = MicroBpm::from_bpm_integer(120);
+        let (samples, peaks): (Vec<f32>, Vec<S48>) =
+            crate::arb::pulse_train::<S48>(bpm, 24, Pico(0), 4, 1);
         src.feed_samples(&samples, 0);
 
-        // Halfway between the last observed pulse and the next
-        // expected pulse, phase should be ≈ 0.5.
-        let last = *peaks.last().unwrap();
-        let spacing = 48_000.0 / (120.0 * 24.0 / 60.0);
-        let halfway = (last + spacing * 0.5) as u64;
+        let last_samples = peaks.last().unwrap().to_bits_q48_16() as f64 / 65_536.0;
+        let spacing = S48::HZ as f64 / (120.0 * 24.0 / 60.0);
+        let halfway = (last_samples + spacing * 0.5) as u64;
         let p_half = src.phase_at_sample(halfway);
+        let p_half_frac = p_half.0 as f64 / (1u64 << 32) as f64;
         assert!(
-            (p_half - 0.5).abs() < 0.01,
+            (p_half_frac - 0.5).abs() < 0.01,
             "halfway phase {} not ≈ 0.5",
-            p_half
+            p_half_frac
         );
 
-        // At an integer number of cycles past the last pulse, phase
-        // should wrap back to ≈ 0.
-        let one_cycle_later = (last + spacing) as u64;
+        let one_cycle_later = (last_samples + spacing) as u64;
         let p_full = src.phase_at_sample(one_cycle_later);
+        let p_full_frac = p_full.0 as f64 / (1u64 << 32) as f64;
         assert!(
-            !(0.02..=0.98).contains(&p_full),
+            !(0.02..=0.98).contains(&p_full_frac),
             "one-cycle-later phase {} not ≈ 0/1",
-            p_full
+            p_full_frac
         );
     }
 
     #[test]
     fn external_phase_zero_before_first_pulse() {
-        // No pulse seen yet → phase_at_sample returns 0.0.
-        let detector = PeakDetector::new(DetectorConfig {
-            threshold: 0.5,
+        let detector = PeakDetector::<S48>::new(DetectorConfig {
+            threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::new(PllSettings::DEFAULT, 120.0, 48_000, 24);
-        let mut src = PhaseSource::External { detector, pll };
-        assert_eq!(src.phase_at_sample(0), 0.0);
-        assert_eq!(src.phase_at_sample(48_000), 0.0);
+        let pll = Pll::<S48>::new(PllSettings::DEFAULT, MicroBpm::from_bpm_integer(120), 24);
+        let mut src = PhaseSource::<S48>::External { detector, pll };
+        assert_eq!(src.phase_at_sample(0).0, 0);
+        assert_eq!(src.phase_at_sample(48_000).0, 0);
     }
 
     proptest! {
-        // P: source_internal_is_linear
-        // The first difference of phase_at_sample(n) is constant
-        // (modulo the wrap at 1.0).
+        // The first difference of phase_at_sample(n) is constant mod
+        // wrap — confirms purely-linear internal advance.
         #[test]
         fn source_internal_is_linear(
-            bpm in 30.0_f32..400.0_f32,
-            sr in prop_oneof![Just(44_100u32), Just(48_000), Just(96_000), Just(192_000)],
+            bpm_mbpm in 30_000_000u32..=400_000_000,
             n in 0u64..10_000_000u64,
         ) {
-            let mut src = PhaseSource::Internal { bpm, sr };
+            // The implementation keeps `n · bpm · 2^32` together to avoid
+            // precomputed-inc rounding accumulation, so the first
+            // difference `p(n+1) - p(n)` may vary by ±1 Q0.32 ULP around
+            // the "ideal" increment. Assert that tolerance.
+            let bpm = MicroBpm(bpm_mbpm);
+            let mut src = PhaseSource::<S48>::Internal { bpm };
             let p1 = src.phase_at_sample(n);
             let p2 = src.phase_at_sample(n + 1);
-            let expected_inc = bpm as f64 / 60.0 / sr as f64;
-            let observed_inc = if p2 >= p1 {
-                (p2 - p1) as f64
-            } else {
-                (p2 + 1.0 - p1) as f64
-            };
+            let diff = p2.0.wrapping_sub(p1.0);
+            // Ideal per-sample increment:
+            //   inc = (µBPM · 2^32) / (60·10^6 · HZ).
+            let ideal_inc: u128 =
+                (bpm.0 as u128 * (1u128 << 32)) / (60_000_000u128 * S48::HZ as u128);
+            let err = (diff as u128).abs_diff(ideal_inc);
             prop_assert!(
-                (observed_inc - expected_inc).abs() < 1e-5,
-                "expected inc {} got {} (n={}, bpm={}, sr={})",
-                expected_inc, observed_inc, n, bpm, sr
+                err <= 1,
+                "|p2-p1 - ideal| = {} > 1 ULP (n={}, bpm={}, diff={}, ideal={})",
+                err, n, bpm_mbpm, diff, ideal_inc
             );
         }
     }
@@ -232,10 +239,10 @@ mod tests {
             last_n: Arc<AtomicU64>,
         }
         impl PhaseSourceImpl for Mock {
-            fn phase_at_sample(&mut self, n: u64) -> f32 {
+            fn phase_at_sample(&mut self, n: u64) -> Phase {
                 self.phase_calls.fetch_add(1, Ordering::SeqCst);
                 self.last_n.store(n, Ordering::SeqCst);
-                0.42
+                Phase(0x4000_0000) // arbitrary non-zero sentinel
             }
             fn feed_samples(&mut self, _samples: &[f32], _start: u64) {
                 self.feed_calls.fetch_add(1, Ordering::SeqCst);
@@ -251,9 +258,9 @@ mod tests {
             last_n: Arc::clone(&last_n),
         };
 
-        let mut src = PhaseSource::Custom(Box::new(mock));
-        assert_eq!(src.phase_at_sample(42), 0.42);
-        assert_eq!(src.phase_at_sample(100), 0.42);
+        let mut src = PhaseSource::<S48>::Custom(Box::new(mock));
+        assert_eq!(src.phase_at_sample(42), Phase(0x4000_0000));
+        assert_eq!(src.phase_at_sample(100), Phase(0x4000_0000));
         src.feed_samples(&[0.1, 0.2], 7);
 
         assert_eq!(phase_calls.load(Ordering::SeqCst), 2);

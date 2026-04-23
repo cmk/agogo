@@ -1,99 +1,81 @@
 //! Shared proptest strategies and synthetic test signals.
-//!
-//! Two kinds of items live here:
-//!
-//! - **Strategies** (`arb_bpm`, `arb_sample_rate`, `arb_jitter_sigma_us`,
-//!   `arb_tbase`, `arb_tick`, `arb_time`, `arb_small_time`,
-//!   `arb_rational_nonneg`, `arb_swing`) return
-//!   `impl proptest::strategy::Strategy<...>` and are gated behind
-//!   `#[cfg(any(test, feature = "testkit"))]` so production builds
-//!   don't pull in proptest. Downstream crates that want them in their
-//!   own tests should depend on `agogo-core` with the `testkit`
-//!   feature.
-//! - **Synthetic generators** (`pulse_train`) are pure functions of
-//!   `(params, seed)` and ship unconditionally so non-test code (e.g.
-//!   the CLI) can use the same fixture as the proptests.
-//!
-//! Define strategies as functions returning `impl Strategy<Value = T>`,
-//! not via `Arbitrary` derive. Use `prop_oneof!` with frequency weights
-//! to bias toward boundary values and edge cases.
 
-// ---------------------------------------------------------------------
-// Synthetic pulse train (always available).
-// ---------------------------------------------------------------------
+use crate::fxp::{MicroBpm, Pico, SampleRate, SampleTime};
+use rand::SeedableRng;
+use rand_distr::{Distribution, Normal};
 
-/// Width of a synthetic pulse, in seconds. Matches the design brief's
-/// "~1.5 ms wide" target — wide enough to span several samples at every
-/// sample rate we test, narrow enough that pulses don't overlap at the
-/// fastest reasonable BPM.
-pub const PULSE_WIDTH_SECS: f64 = 0.0015;
+/// Width of a synthetic pulse, in picoseconds. Matches the design brief's
+/// "~1.5 ms wide" target (1 500 000 ns = 1 500 000 000 ps).
+pub const PULSE_WIDTH_PS: Pico = Pico(1_500_000_000);
 
 /// Generate a synthetic audio buffer containing `n_pulses` Hann-bell
 /// pulses arriving at the given BPM/PPQ, with optional Gaussian timing
 /// jitter, and return both the buffer and the ground-truth pulse-centre
-/// positions (post-jitter, in samples).
+/// positions (post-jitter) in the target rate's Q48.16.
 ///
-/// Pulses are Hann bells `0.5 * (1 - cos(2πt/W))` across a window of
-/// `W = sr * PULSE_WIDTH_SECS` samples. (The plan called for triangles;
-/// Hann bells share the width but have a smooth apex, which is
-/// necessary for parabolic sub-sample interpolation to converge —
-/// see the sprint Review for details.)
+/// Pulses are Hann bells `cos²(π · dx / W)` across a window of
+/// `W = R::HZ · PULSE_WIDTH_PS / 10¹²` samples.
 ///
-/// `seed` deterministically seeds an internal xorshift64 PRNG used to
-/// draw Box-Muller Gaussian timing offsets. Passing `seed = 0` selects
+/// `seed` deterministically seeds a PCG-64 PRNG used to draw Gaussian
+/// timing offsets via `rand_distr::Normal`. Passing `seed = 0` selects
 /// a fixed non-zero fallback.
 ///
 /// # Panics
-/// Panics if `bpm <= 0`, `sr == 0`, `ppq == 0`, or `jitter_sigma_us < 0`.
-pub fn pulse_train(
-    bpm: f32,
-    sr: u32,
+/// Panics if `bpm == 0`, `ppq == 0`, or `jitter_sigma.0 < 0`.
+pub fn pulse_train<R: SampleTime>(
+    bpm: MicroBpm,
     ppq: u32,
-    jitter_sigma_us: f32,
+    jitter_sigma: Pico,
     n_pulses: u32,
     seed: u64,
-) -> (Vec<f32>, Vec<f64>) {
-    assert!(bpm > 0.0, "bpm must be positive, got {bpm}");
-    assert!(sr > 0, "sample rate must be positive");
+) -> (Vec<f32>, Vec<R>) {
+    assert!(bpm.0 > 0, "bpm must be positive, got {:?}", bpm);
     assert!(ppq > 0, "ppq must be positive");
     assert!(
-        jitter_sigma_us >= 0.0,
-        "jitter sigma must be non-negative, got {jitter_sigma_us}"
+        jitter_sigma.0 >= 0,
+        "jitter sigma must be non-negative, got {:?}",
+        jitter_sigma
     );
 
     if n_pulses == 0 {
         return (Vec::new(), Vec::new());
     }
 
-    let pulse_rate_hz = bpm as f64 * ppq as f64 / 60.0;
+    // Test-fixture f64 derived quantities. These don't escape this
+    // function; the returned peaks are already in Q48.16.
+    let bpm_f = bpm.0 as f64 / 1.0e6;
+    let sr = R::HZ;
+    let pulse_rate_hz = bpm_f * ppq as f64 / 60.0;
     let spacing_samples = sr as f64 / pulse_rate_hz;
-    let width_samples = (sr as f64 * PULSE_WIDTH_SECS).max(4.0);
+    let width_samples = (sr as f64 * (PULSE_WIDTH_PS.0 as f64 / 1.0e12)).max(4.0);
     let half_width = width_samples * 0.5;
-    let sigma_samples = jitter_sigma_us as f64 * sr as f64 / 1e6;
+    // σ in samples: sigma_ps / 10^12 × sr.
+    let sigma_samples = jitter_sigma.0 as f64 / 1.0e12 * sr as f64;
 
-    // Reserve enough buffer for the last (jittered) pulse plus its tail.
     let last_nominal = spacing_samples * n_pulses as f64;
-    // Tail headroom: enough for late-jittered last pulse + parabolic
-    // interp window + a few extra samples. Generous on purpose so
-    // detector callers can pass `samples` straight through without
-    // worrying about end-of-buffer truncation.
     let pad = half_width + 6.0 * sigma_samples + 256.0;
     let total_len = (last_nominal + pad).ceil() as usize;
     let mut samples = vec![0.0_f32; total_len];
     let mut peaks = Vec::with_capacity(n_pulses as usize);
 
-    let mut rng = if seed == 0 { 0xdead_beef_cafe_babe } else { seed };
+    let seed = if seed == 0 { 0xdead_beef_cafe_babe } else { seed };
+    let mut rng = rand_pcg::Pcg64::seed_from_u64(seed);
+    let normal = if sigma_samples > 0.0 {
+        Some(Normal::new(0.0_f64, sigma_samples).expect("finite sigma"))
+    } else {
+        None
+    };
 
     for i in 1..=n_pulses {
         let nominal_centre = spacing_samples * i as f64;
-        let jitter = if sigma_samples > 0.0 {
-            next_gaussian(&mut rng) * sigma_samples
-        } else {
-            0.0
-        };
+        let jitter = normal.as_ref().map(|n| n.sample(&mut rng)).unwrap_or(0.0);
         let centre = nominal_centre + jitter;
-        peaks.push(centre);
 
+        // Q48.16 bits of the (possibly fractional) centre position.
+        let centre_bits = (centre * 65_536.0).round() as i64;
+        peaks.push(R::from_bits_q48_16(centre_bits));
+
+        // Waveform synthesis still writes into f32 PCM (cpal ABI).
         let start = ((centre - half_width).floor() as i64).max(0) as usize;
         let end = ((centre + half_width).ceil() as i64).max(0) as usize;
         for n in start..=end.min(samples.len().saturating_sub(1)) {
@@ -101,9 +83,6 @@ pub fn pulse_train(
             if dx.abs() > half_width {
                 continue;
             }
-            // Hann bell: 0.5 * (1 - cos(2π * (dx + half_width) / W))
-            //         = sin²(π * (dx + half_width) / W)
-            // Simplify centred form: cos²(π * dx / W).
             let v = (std::f64::consts::PI * dx / width_samples).cos();
             samples[n] += (v * v) as f32;
         }
@@ -112,38 +91,13 @@ pub fn pulse_train(
     (samples, peaks)
 }
 
-#[inline]
-fn xorshift64(state: &mut u64) -> u64 {
-    let mut x = *state;
-    x ^= x << 13;
-    x ^= x >> 7;
-    x ^= x << 17;
-    *state = x;
-    x
-}
-
-#[inline]
-fn next_uniform(state: &mut u64) -> f64 {
-    // Top 53 bits → uniform in [0, 1).
-    let bits = xorshift64(state) >> 11;
-    bits as f64 * (1.0 / ((1u64 << 53) as f64))
-}
-
-#[inline]
-fn next_gaussian(state: &mut u64) -> f64 {
-    // Single-sample Box-Muller. Discarding the second draw is wasteful
-    // but keeps the helper stateless from the caller's perspective.
-    let u1 = next_uniform(state).max(f64::MIN_POSITIVE);
-    let u2 = next_uniform(state);
-    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
-}
-
 // ---------------------------------------------------------------------
 // Proptest strategies (testkit-gated).
 // ---------------------------------------------------------------------
 
 #[cfg(any(test, feature = "testkit"))]
 mod strategies {
+    use crate::fxp::{MicroBpm, Pico};
     use num_rational::Rational64;
     use proptest::prelude::*;
 
@@ -151,19 +105,22 @@ mod strategies {
     use crate::time::tbase::TBase;
     use crate::time::tick::{Tick, Time};
 
-    /// BPM strategy biased toward common musical tempos with some
-    /// boundary spice.
-    pub fn arb_bpm() -> impl Strategy<Value = f32> {
+    /// BPM strategy as `MicroBpm` (BPM × 10⁶). Biased toward common
+    /// musical tempos with some boundary spice.
+    pub fn arb_bpm() -> impl Strategy<Value = MicroBpm> {
         prop_oneof![
-            1 => Just(60.0_f32),
-            1 => Just(120.0_f32),
-            1 => Just(200.0_f32),
-            5 => 60.0_f32..200.0_f32,
-            1 => 30.0_f32..400.0_f32,
+            1 => Just(MicroBpm::from_bpm_integer(60)),
+            1 => Just(MicroBpm::from_bpm_integer(120)),
+            1 => Just(MicroBpm::from_bpm_integer(200)),
+            5 => (60_000_000u32..200_000_000).prop_map(MicroBpm),
+            1 => (30_000_000u32..400_000_000).prop_map(MicroBpm),
         ]
     }
 
-    /// Sample rate strategy: standard audio rates only.
+    /// Sample rate strategy: standard audio rates only. (u32 so it can
+    /// be used by callers that pick a rate type at the callsite; the
+    /// typed variants S44/S48/... expose the same values via
+    /// `SampleRate::HZ`.)
     pub fn arb_sample_rate() -> impl Strategy<Value = u32> {
         prop_oneof![
             Just(44_100u32),
@@ -173,24 +130,17 @@ mod strategies {
         ]
     }
 
-    /// Jitter σ in microseconds. Heavy bias toward small values so the
-    /// PLL convergence properties usually fire on inputs they can lock
-    /// to, with rarer excursions toward stress-test territory.
-    pub fn arb_jitter_sigma_us() -> impl Strategy<Value = f32> {
+    /// Jitter σ as `Pico`. Heavy bias toward small values so the PLL
+    /// convergence properties usually fire on inputs they can lock to.
+    pub fn arb_jitter_sigma() -> impl Strategy<Value = Pico> {
         prop_oneof![
-            1 => Just(0.0_f32),
-            5 => 0.0_f32..50.0_f32,
-            2 => 50.0_f32..200.0_f32,
-            1 => 200.0_f32..500.0_f32,
+            1 => Just(Pico(0)),
+            5 => (0i64..50_000_000).prop_map(Pico),          // 0..50 µs in ps
+            2 => (50_000_000i64..200_000_000).prop_map(Pico),
+            1 => (200_000_000i64..500_000_000).prop_map(Pico),
         ]
     }
 
-    /// Strategy over all 14 `TBase` variants.
-    ///
-    /// Biased toward the lattice top (`T1`) and bottom (`T128t`) so
-    /// property tests exercising divisibility, join, and meet see
-    /// boundary elements regularly. The uniform-sample arm covers the
-    /// remaining middle of the lattice.
     pub fn arb_tbase() -> impl Strategy<Value = TBase> {
         prop_oneof![
             1 => Just(TBase::T1),
@@ -199,11 +149,6 @@ mod strategies {
         ]
     }
 
-    /// Strategy over `Tick` values. Bounded at 1M so that downstream
-    /// arithmetic — including `beats × tick_count` where
-    /// `tick_count ≤ 768` — stays well inside `u32`. 1M ticks ≈ 1300
-    /// whole notes ≈ 325 bars at 4/4, plenty of musical range for the
-    /// property tests.
     pub fn arb_tick() -> impl Strategy<Value = Tick> {
         prop_oneof![
             1 => Just(Tick(0)),
@@ -213,35 +158,23 @@ mod strategies {
         ]
     }
 
-    /// Strategy over `Time` values. Beats bounded at 100K so the tick
-    /// count stays inside `u32` for every `TBase` (max product ≈ 77M).
     pub fn arb_time() -> impl Strategy<Value = Time> {
         (0u32..=100_000, arb_tbase()).prop_map(|(beats, base)| Time { beats, base })
     }
 
-    /// Narrower `Time` strategy for lattice tests. Beats bounded at 50
-    /// so LCM of any two tick counts stays inside `u32` (max tick
-    /// count ≈ 38400, LCM ≤ 1.47e9 ≪ u32::MAX).
     pub fn arb_small_time() -> impl Strategy<Value = Time> {
         (0u32..=50, arb_tbase()).prop_map(|(beats, base)| Time { beats, base })
     }
 
-    /// Non-negative rational whole-note duration for `rat_tick` tests.
-    /// Numerator ≤ 10_000 and denominator ∈ [1, 768] keeps the product
-    /// `r * 768` well inside `i64` for ceil/floor conversions.
     pub fn arb_rational_nonneg() -> impl Strategy<Value = Rational64> {
         prop_oneof![
             1 => Just(Rational64::new(0, 1)),
-            1 => Just(Rational64::new(1, 4)),  // quarter note
-            1 => Just(Rational64::new(1, 1)),  // whole note
+            1 => Just(Rational64::new(1, 4)),
+            1 => Just(Rational64::new(1, 1)),
             4 => (0i64..=10_000, 1i64..=768).prop_map(|(n, d)| Rational64::new(n, d)),
         ]
     }
 
-    /// Strategy over `SwingConfig`. Biased toward boundary values:
-    /// `amount = 0` (no swing), `amount = 16` (Cirklon maximum), and
-    /// `multiplier = 1` (the finest unit). The sampled arm covers
-    /// signed ranges so negative displacements are exercised too.
     pub fn arb_swing() -> impl Strategy<Value = SwingConfig> {
         prop_oneof![
             1 => Just(SwingConfig { amount: 0, multiplier: 1 }),
@@ -255,58 +188,66 @@ mod strategies {
 
 #[cfg(any(test, feature = "testkit"))]
 pub use strategies::{
-    arb_bpm, arb_jitter_sigma_us, arb_rational_nonneg, arb_sample_rate, arb_small_time, arb_swing,
+    arb_bpm, arb_jitter_sigma, arb_rational_nonneg, arb_sample_rate, arb_small_time, arb_swing,
     arb_tbase, arb_tick, arb_time,
 };
 
-// ---------------------------------------------------------------------
-// Self-tests for the synthetic generator.
-// ---------------------------------------------------------------------
+// Fallback to satisfy the unused-trait import on non-testkit builds.
+#[allow(dead_code)]
+fn _sample_rate_sealed() -> u32 {
+    S48_HZ
+}
+const S48_HZ: u32 = <crate::fxp::S48 as SampleRate>::HZ;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fxp::S48;
     use proptest::prelude::*;
 
     #[test]
     fn pulse_train_shape_basic() {
-        let (samples, peaks) = pulse_train(120.0, 48_000, 24, 0.0, 4, 1);
+        let bpm = MicroBpm::from_bpm_integer(120);
+        let (samples, peaks): (Vec<f32>, Vec<S48>) =
+            pulse_train::<S48>(bpm, 24, Pico(0), 4, 1);
         assert_eq!(peaks.len(), 4);
         // 120 BPM × 24 PPQ = 48 pps → 1000 samples between pulses at 48 kHz.
-        let expected_spacing = 48_000.0 / (120.0 * 24.0 / 60.0);
+        let expected_spacing_bits = 1000i64 << 16;
         for w in peaks.windows(2) {
-            assert!((w[1] - w[0] - expected_spacing).abs() < 1e-6);
+            let diff = w[1].to_bits_q48_16() - w[0].to_bits_q48_16();
+            assert!((diff - expected_spacing_bits).abs() < 1);
         }
-        // Every centre sits inside the buffer.
-        let last = *peaks.last().unwrap();
-        assert!(last + 100.0 < samples.len() as f64);
+        let last_samples = peaks.last().unwrap().sample();
+        assert!((last_samples as u64) + 100 < samples.len() as u64);
         // Hann apex amplitude should be ≈ 1.0 at the integer nearest each centre.
         for c in &peaks {
-            let n = c.round() as usize;
+            let n = c.sample() as usize;
             assert!(samples[n] > 0.95, "amp at {n} = {}", samples[n]);
         }
     }
 
     #[test]
     fn pulse_train_zero_pulses_is_empty() {
-        let (samples, peaks) = pulse_train(120.0, 48_000, 24, 0.0, 0, 0);
+        let (samples, peaks): (Vec<f32>, Vec<S48>) =
+            pulse_train::<S48>(MicroBpm::from_bpm_integer(120), 24, Pico(0), 0, 0);
         assert!(samples.is_empty());
         assert!(peaks.is_empty());
     }
 
     #[test]
     fn pulse_train_is_deterministic_in_seed() {
-        let a = pulse_train(140.0, 48_000, 24, 100.0, 8, 42);
-        let b = pulse_train(140.0, 48_000, 24, 100.0, 8, 42);
+        let bpm = MicroBpm::from_bpm_integer(140);
+        let jitter = Pico(100_000_000); // 100 µs
+        let a: (Vec<f32>, Vec<S48>) = pulse_train::<S48>(bpm, 24, jitter, 8, 42);
+        let b: (Vec<f32>, Vec<S48>) = pulse_train::<S48>(bpm, 24, jitter, 8, 42);
         assert_eq!(a.0, b.0);
         assert_eq!(a.1, b.1);
     }
 
     proptest! {
-        // Smoke: strategies produce values in their declared ranges.
         #[test]
         fn arb_bpm_in_range(bpm in arb_bpm()) {
-            prop_assert!((30.0..=400.0).contains(&bpm));
+            prop_assert!((30_000_000..=400_000_000).contains(&bpm.0));
         }
 
         #[test]
@@ -315,8 +256,8 @@ mod tests {
         }
 
         #[test]
-        fn arb_jitter_in_range(j in arb_jitter_sigma_us()) {
-            prop_assert!((0.0..=500.0).contains(&j));
+        fn arb_jitter_in_range(j in arb_jitter_sigma()) {
+            prop_assert!((0..=500_000_000).contains(&j.0));
         }
     }
 }
