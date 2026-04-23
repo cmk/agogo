@@ -311,6 +311,7 @@ fn main() {
 pub mod link_probe {
     use agogo_core::sync::PhaseSourceImpl;
     use agogo_host_link::{HostTimeAnchor, LinkClock};
+    use std::num::NonZeroU32;
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
@@ -345,7 +346,10 @@ pub mod link_probe {
         mut on_row: F,
     ) {
         let period_ms = period_ms.max(1);
-        let sr = sr.max(1);
+        // `sr` is already `>= 1` from the CLI parser (parse_positive_u32);
+        // coerce to `NonZeroU32` so the anchor's type-level invariant
+        // holds without an `unwrap` that suggests the path can fail.
+        let sr = NonZeroU32::new(sr.max(1)).expect("sr.max(1) is non-zero");
         // Capture Link's current host-time once and use it as the
         // anchor origin so the phase column reads as "cycles elapsed
         // since probe start" rather than against an arbitrary epoch.
@@ -363,7 +367,6 @@ pub mod link_probe {
             host_origin_micros: clock.clock_micros(),
             sample_rate: sr,
         });
-        let anchor = clock.anchor();
         clock.enable(true);
         let start = Instant::now();
         let duration = Duration::from_millis(u64::from(duration_ms));
@@ -376,7 +379,7 @@ pub mod link_probe {
             let t_ms = elapsed.as_millis() as u64;
             // Convert t_ms → sample index using the anchor's sample
             // rate, then query phase.
-            let n = t_ms * u64::from(anchor.sample_rate) / 1_000;
+            let n = t_ms * u64::from(sr.get()) / 1_000;
             let phase_u32 = clock.phase_at_sample(n).0;
             on_row(ProbeRow {
                 t_ms,

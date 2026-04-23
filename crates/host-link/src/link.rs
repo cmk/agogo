@@ -15,6 +15,8 @@
 //! methods, which are documented by rusty_link as RT-safe atomic
 //! reads on the Link C++ handle.
 
+use std::num::NonZeroU32;
+
 use agogo_core::fxp::{Phase, f64_phase_to_phase};
 use agogo_core::sync::PhaseSourceImpl;
 use rusty_link::{AblLink, SessionState};
@@ -32,10 +34,12 @@ pub struct HostTimeAnchor {
     /// Link host-time (microseconds, `i64`) corresponding to absolute
     /// sample index 0.
     pub host_origin_micros: i64,
-    /// Sample rate used as the denominator in `n → host-µs`. `u32`
-    /// because Link's time domain is microseconds; the rate is just
-    /// a scalar denominator here, not a typed sample-rate.
-    pub sample_rate: u32,
+    /// Sample rate used as the denominator in `n → host-µs`.
+    /// `NonZeroU32` rather than `u32` so the division in
+    /// [`LinkClock::phase_at_sample`] can't panic on a zero anchor —
+    /// the invariant is enforced at the type level rather than via a
+    /// runtime check on the RT-safe read path.
+    pub sample_rate: NonZeroU32,
 }
 
 /// agogo's wrapper around an Ableton Link session.
@@ -71,8 +75,10 @@ impl LinkClock {
     /// here so later tests + integration paths don't need an API
     /// change.
     ///
-    /// RT-safety: the setter writes two scalar fields; safe to call
-    /// from any thread. Plan 09 will promote the anchor to an
+    /// RT-safety: the setter writes two scalar fields and does not
+    /// block, but it requires exclusive `&mut self` access, so it is
+    /// not concurrently callable with readers without external
+    /// synchronization. Plan 09 will promote the anchor to an
     /// atomic-packed variant for torn-read safety on the audio
     /// thread.
     pub fn set_anchor(&mut self, anchor: HostTimeAnchor) {
@@ -137,7 +143,7 @@ impl PhaseSourceImpl for LinkClock {
     /// RT-safe. `capture_audio_session_state` is lock-free per
     /// rusty_link's docs; the rest is arithmetic on owned state.
     fn phase_at_sample(&mut self, n: u64) -> Phase {
-        let offset = (i128::from(n) * 1_000_000) / i128::from(self.anchor.sample_rate);
+        let offset = (i128::from(n) * 1_000_000) / i128::from(self.anchor.sample_rate.get());
         let host_micros = (i128::from(self.anchor.host_origin_micros) + offset)
             .clamp(i128::from(i64::MIN), i128::from(i64::MAX))
             as i64;
@@ -160,10 +166,14 @@ mod tests {
 
     /// 48 kHz / `host_origin_micros = 0` — convenient for tests that
     /// don't care about wall-clock alignment.
+    fn sr_48k() -> NonZeroU32 {
+        NonZeroU32::new(48_000).expect("48 000 is non-zero")
+    }
+
     fn zero_anchor_48k() -> HostTimeAnchor {
         HostTimeAnchor {
             host_origin_micros: 0,
-            sample_rate: 48_000,
+            sample_rate: sr_48k(),
         }
     }
 
@@ -250,7 +260,7 @@ mod tests {
         let mut c = LinkClock::new(120.0, zero_anchor_48k());
         c.set_anchor(HostTimeAnchor {
             host_origin_micros: c.clock_micros(),
-            sample_rate: 48_000,
+            sample_rate: sr_48k(),
         });
 
         let p0 = c.phase_at_sample(0);
@@ -279,7 +289,7 @@ mod tests {
             let mut c = LinkClock::new(bpm, zero_anchor_48k());
             c.set_anchor(HostTimeAnchor {
                 host_origin_micros: c.clock_micros(),
-                sample_rate: 48_000,
+                sample_rate: sr_48k(),
             });
             for n in (0u64..100_000).step_by(37) {
                 let p = c.phase_at_sample(n);
@@ -316,7 +326,7 @@ mod tests {
             let bpm = f64::from(bpm_mbpm) / 1_000_000.0;
             let mut c = LinkClock::new(
                 bpm,
-                HostTimeAnchor { host_origin_micros: host_origin, sample_rate: 48_000 },
+                HostTimeAnchor { host_origin_micros: host_origin, sample_rate: sr_48k() },
             );
             let p0 = c.phase_at_sample(0);
             let p1 = c.phase_at_sample(stride);
@@ -354,7 +364,7 @@ mod tests {
         // probes host-time (now + 48 000 * 10⁶ / 48 000) = now + 10⁶.
         c.set_anchor(HostTimeAnchor {
             host_origin_micros: now,
-            sample_rate: 48_000,
+            sample_rate: sr_48k(),
         });
         let a = c.phase_at_sample(48_000);
 
@@ -362,7 +372,7 @@ mod tests {
         // n = 0 — this probes host-time now + 10⁶, the same moment.
         c.set_anchor(HostTimeAnchor {
             host_origin_micros: now + 1_000_000,
-            sample_rate: 48_000,
+            sample_rate: sr_48k(),
         });
         let b = c.phase_at_sample(0);
 

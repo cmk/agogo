@@ -15,11 +15,13 @@ path is fully functional.
   `LinkClock::new(initial_bpm, anchor)` is the new constructor;
   `set_anchor` is the runtime setter Plan 09 will promote to an
   atomic-packed per-buffer path.
-- **`phase_at_sample` bridge**: `host_micros = anchor.origin + n ×
-  10⁶ / sample_rate` in `i128` (multi-day-safe), feeds
+- **`phase_at_sample` bridge**: `host_micros =
+  anchor.host_origin_micros + n × 10⁶ /
+  anchor.sample_rate.get()` in `i128` (multi-day-safe), feeds
   `session.phase_at_time(host_micros, 1.0)`, returns via
   `fxp::f64_phase_to_phase` (handles `rem_euclid` + the "rounds to
-  `2^32`" edge case). RT-safe.
+  `2^32`" edge case). RT-safe. `sample_rate` is `NonZeroU32` so the
+  division can't panic on a zero anchor.
 - **Tests replacing the `#[should_panic]` guard**:
   `phase_at_sample_returns_valid_phase`,
   `phase_wraps_once_per_beat_at_120bpm_48k`,
@@ -70,3 +72,206 @@ See `doc/plans/plan-2026-04-23-05.md` §Review. Three points:
 - **Tidier `now_micros()`** — the probe's throwaway-clock pattern is
   a smell; a free function wrapping `abl_link_clock_micros` would
   be cleaner if rusty_link exposes the path.
+
+## Local review (2026-04-23)
+
+**Branch:** plan/2026-04-23-05
+**Commits:** 4 (origin/main..plan/2026-04-23-05)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+
+Four commits — plan, two feats, doc-finalize — all under 72 chars
+with conventional prefixes. TDD workflow shape intact. Nothing to
+fix.
+
+### Code Quality
+
+`#![forbid(unsafe_code)]` present at both crate roots. Modern module
+layout compliant.
+
+`i128` overflow analysis in `phase_at_sample` is correct: `u64::MAX *
+1_000_000` is ~1.84 × 10²⁵, twelve orders of magnitude below
+`i128::MAX`. The `.clamp(i64::MIN, i64::MAX) as i64` cast is safe.
+
+`f64_phase_to_phase` (crates/core/src/fxp.rs:135–147) confirms the
+bridge's doc comment: `rem_euclid(1.0)` normalises, the `!(0.0..2^32
+as f64).contains(&scaled)` guard catches the round-to-2^32 edge.
+
+Throwaway-clock pattern at `crates/cli/src/main.rs` diff lines 81–93
+(two `AblLink::new` calls at probe startup with explicit `drop` in
+between) is already acknowledged in plan §Review deviation 3;
+acceptable for now.
+
+`anchor()` getter is a forward-looking API addition, not used in
+this diff. Fine.
+
+### Critical
+
+None.
+
+### Important
+
+**1. `phase_wraps_once_per_beat_at_120bpm_48k` tolerance is 2²² ULPs,
+but plan T2 task 2 says "1 ULP".**
+
+`crates/host-link/src/link.rs:441`: `ulp < (1u32 << 22)`.
+
+Plan T2 (line 129): "`phase_at_sample(0)` and `phase_at_sample(24_000)`
+should be within **1 ULP** of each other."
+
+The code's 2²² tolerance is correct — each `phase_at_sample` does a
+fresh `capture_audio_session_state`, so two calls can diverge by the
+inter-capture drift; 1 ULP is unreachable in practice. The §Review
+deviation section doesn't document this 1-ULP → 4M-ULP change.
+
+Fix: add a §Review deviation bullet recording why the tolerance was
+relaxed.
+
+**2. Phase column decimal places: plan says 4, code emits 6.**
+
+`crates/cli/src/main.rs` diff line 41: `"{},{},{:.4},{:.6}"`.
+
+Plan T4 spec (line 161): "`phase` is the `Phase.0 as f64 / 2^32`
+with **4 decimal places**."
+
+The code ships 6 decimal places. Defensible (phase has more
+meaningful precision than tempo at sub-ms beat resolutions), but the
+deviation is undocumented.
+
+Fix: either revert the format to `{:.4}`, or add a §Review bullet
+explaining the change.
+
+### Test Coverage
+
+`phase_circular_ulps` wrapping arithmetic is correct for `diff = 0`,
+`diff = 1`, and `diff = 2^31`.
+
+`phase_delta_matches_tempo` proptest: the expected-value formula
+`stride * 2 * 2^32 / 48_000` matches the 120 BPM / 48 kHz rate.
+BPM is fixed at 120.0 in the test; anchor origin ranges across
+`[-10⁶, 10⁶]` µs. The formula's integer truncation makes `expected`
+a lower bound — `phase_circular_ulps` handles the directional error
+by measuring circular distance. Correct.
+
+`set_anchor_shifts_the_sample_mapping` 2¹⁸ ULP tolerance is
+plausible: same session state for both calls, only inter-call time
+drift contributes error (~µs-level at 120 BPM = ~8.6K ULPs per µs).
+
+### Plan Conformance
+
+T0 (HostTimeAnchor), T1 (bridge), T3 (proptest), T4 (CLI
+`--sr`/phase) all implemented. Proptest rename and anchor-shift test
+restructuring are documented in §Review.
+
+**Plan dependency graph labels the CLI branch "T3 CLI --sr + phase
+column" but the tasks section numbers it T4.** Internal plan-doc
+inconsistency with no code consequence.
+
+### Risks
+
+No `todo!()` stubs remain. No new dependencies. Breaking
+`LinkClock::new` signature is OK: host-link has no downstream
+consumers outside this workspace.
+
+### Recommendations
+
+**Must fix before push:**
+
+1. Add a §Review deviation bullet noting
+   `phase_wraps_once_per_beat_at_120bpm_48k` uses 2²² ULP tolerance
+   rather than 1 ULP from T2 task 2, because each call re-captures
+   session state.
+2. Resolve the phase decimal-places gap between plan T4 ("4 decimal
+   places") and `crates/cli/src/main.rs` (`{:.6}`). Either revert to
+   `{:.4}` or add a §Review bullet documenting the change.
+
+**Follow-up (Plan 09 or later):**
+
+- Add a `link::now_micros()` free function so the throwaway-clock
+  pattern in `link_probe` + tests can be retired.
+- Randomise BPM in `phase_delta_matches_tempo` across Link's
+  [20, 999] range to strengthen the invariant.
+- Fix the plan's dependency graph labeling (T3 vs T4 for CLI) on the
+  next doc touch.
+
+<!-- gh-id: 4166680342 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-23 23:02 UTC](https://github.com/cmk/agogo/pull/8#pullrequestreview-4166680342))
+
+## Pull request overview
+
+Implements the Ableton Link “sample index → host-time → beat-phase” bridge so `LinkClock` can now return an fxp `Phase` via `PhaseSourceImpl::phase_at_sample`, and updates the CLI probe + docs accordingly.
+
+**Changes:**
+- Added `HostTimeAnchor` and wired it through `LinkClock` (`new`, `set_anchor`, `anchor`, `clock_micros`) to support sample→host-µs mapping.
+- Implemented `LinkClock::phase_at_sample` using `capture_audio_session_state` + `SessionState::phase_at_time`, returning `Phase` via `f64_phase_to_phase`.
+- Updated `agogo link probe` to accept `--sr` and emit a `phase` CSV column; added unit tests + proptest for the bridge behavior.
+
+### Reviewed changes
+
+Copilot reviewed 5 out of 5 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00008.md | PR review record for Plan 08, summarizing the bridge/tests/CLI updates. |
+| doc/plans/plan-2026-04-23-05.md | Plan document detailing the bridge design, tests, and CLI changes (and recorded deviations). |
+| crates/host-link/src/link.rs | Adds `HostTimeAnchor`, implements `phase_at_sample`, and introduces unit/property tests for the bridge. |
+| crates/host-link/src/lib.rs | Updates crate-level docs and re-exports `HostTimeAnchor` alongside `LinkClock` (feature-gated). |
+| crates/cli/src/main.rs | Extends `link probe` with `--sr` and prints `phase` in CSV output. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3134427613 -->
+### Copilot on [`crates/host-link/src/link.rs:143`](https://github.com/cmk/agogo/pull/8#discussion_r3134427613) (2026-04-23 23:02 UTC)
+
+`phase_at_sample` divides by `self.anchor.sample_rate` without guarding against `0`. Since `HostTimeAnchor.sample_rate` is a plain `u32` and `set_anchor` is public, a caller can construct an anchor with `sample_rate = 0`, causing a division-by-zero panic on the (advertised) RT-safe path. Consider enforcing non-zero at the type/API boundary (e.g., `NonZeroU32`), or validating in `new`/`set_anchor` and handling the zero case without panicking.
+```suggestion
+        let host_micros = if self.anchor.sample_rate == 0 {
+            self.anchor.host_origin_micros
+        } else {
+            let offset = (i128::from(n) * 1_000_000) / i128::from(self.anchor.sample_rate);
+            (i128::from(self.anchor.host_origin_micros) + offset)
+                .clamp(i128::from(i64::MIN), i128::from(i64::MAX))
+                as i64
+        };
+```
+
+<!-- gh-id: 3134427674 -->
+### Copilot on [`crates/host-link/src/link.rs:75`](https://github.com/cmk/agogo/pull/8#discussion_r3134427674) (2026-04-23 23:02 UTC)
+
+The `set_anchor` doc says it is "safe to call from any thread", but the method requires `&mut self`, so it cannot be called concurrently with reads (or from multiple threads) without external synchronization. Suggest tightening the wording to avoid implying thread-safe/concurrent use until the anchor becomes atomic-packed in Plan 09.
+```suggestion
+    /// RT-safety: the setter writes two scalar fields and does not
+    /// block, but it requires exclusive `&mut self` access, so it is
+    /// not concurrently callable with readers without external
+    /// synchronization. Plan 09 will promote the anchor to an
+```
+
+<!-- gh-id: 3134427717 -->
+### Copilot on [`doc/reviews/review-00008.md:22`](https://github.com/cmk/agogo/pull/8#discussion_r3134427717) (2026-04-23 23:02 UTC)
+
+nit: In the bridge formula, the docs refer to `anchor.origin`, but the actual field name is `host_origin_micros`. Updating this wording would avoid confusion for readers looking for an `origin` field on `HostTimeAnchor`.
+
+<!-- gh-id: 3134449158 -->
+#### ↳ cmk ([2026-04-23 23:07 UTC](https://github.com/cmk/agogo/pull/8#discussion_r3134449158))
+
+Good catch — lifted the invariant into the type. `HostTimeAnchor::sample_rate` is now `NonZeroU32`, so the division in `phase_at_sample` can't panic on a zero anchor and the check stays off the RT-safe hot path. CLI call site goes through the existing `parse_positive_u32` gate then `NonZeroU32::new`. Commit d9735b1.
+
+<!-- gh-id: 3134449279 -->
+#### ↳ cmk ([2026-04-23 23:07 UTC](https://github.com/cmk/agogo/pull/8#discussion_r3134449279))
+
+Fair — applied the suggested wording. The rustdoc now says `set_anchor` requires exclusive `&mut self` access and is not concurrently callable with readers without external synchronization. Plan 09's atomic-packed variant is still the plan for the audio-thread path. Commit d9735b1.
+
+<!-- gh-id: 3134449392 -->
+#### ↳ cmk ([2026-04-23 23:07 UTC](https://github.com/cmk/agogo/pull/8#discussion_r3134449392))
+
+Right, `anchor.origin` was shorthand — fixed to `anchor.host_origin_micros` in the summary, and added a note that `sample_rate` is now `NonZeroU32` (from the div-by-zero fix above). Commit d9735b1.
