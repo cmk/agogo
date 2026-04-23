@@ -14,6 +14,7 @@
 //! methods, which are documented by rusty_link as RT-safe atomic
 //! reads on the Link C++ handle.
 
+use agogo_core::fxp::Phase;
 use agogo_core::sync::PhaseSourceImpl;
 use rusty_link::{AblLink, SessionState};
 
@@ -75,15 +76,16 @@ impl LinkClock {
 }
 
 impl PhaseSourceImpl for LinkClock {
-    /// **Deferred.** The Tick ↔ Host-Time bridge lands in the
-    /// follow-up sprint after the in-flight fixed-point refactor
-    /// (`plan/2026-04-23-03`) merges — see `doc/plans/plan-2026-04-23-04.md`
-    /// §Deferred. Panics on call so misuse surfaces immediately
-    /// rather than silently returning 0.0.
-    fn phase_at_sample(&mut self, _n: u64) -> f32 {
+    /// **Deferred.** The Tick ↔ Host-Time bridge lands in a
+    /// follow-up sprint (Plan 07-b) — see
+    /// `doc/plans/plan-2026-04-23-04.md` §Deferred. Panics on call
+    /// so misuse surfaces immediately rather than silently returning
+    /// a stale default.
+    fn phase_at_sample(&mut self, _n: u64) -> Phase {
         todo!(
             "LinkClock::phase_at_sample is deferred to Plan 07-b; \
-             requires the fxp Phase / Sample types"
+             the fxp Phase / Sample types are now available — \
+             next sprint wires up the host-time bridge"
         )
     }
 
