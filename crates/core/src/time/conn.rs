@@ -279,7 +279,7 @@ impl SampleTickConn {
     }
 
     /// Tick → Sample. Exact when `tick × sr × 60` is divisible by
-    /// `bpm × ppqn` (e.g. integer BPM on standard rates); otherwise
+    /// `bpm × ppqn` (e.g. 48 kHz / 120 BPM / 192 PPQN); otherwise
     /// rounded to the nearest `u64`.
     pub fn inner(&self, tick: Tick) -> u64 {
         let num = u128::from(tick.0) * u128::from(self.sr) * 60;

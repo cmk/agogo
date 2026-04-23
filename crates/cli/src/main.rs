@@ -85,11 +85,12 @@ enum ChannelSub {
         #[bpaf(long, argument("AMOUNT"), fallback(0))]
         shuffle: i32,
         /// Positive latency shift in ms; clamped to `[0, 300]` inside
-        /// the transform.
-        #[bpaf(long, argument("SHIFT_MS"), fallback(0.0))]
+        /// the transform. Non-finite or negative values rejected at
+        /// the CLI boundary.
+        #[bpaf(long, argument("SHIFT_MS"), parse(parse_non_negative_f32), fallback(0.0))]
         shift_ms: f32,
-        /// Signed calibration offset in ms.
-        #[bpaf(long, argument("OFFSET_MS"), fallback(0.0))]
+        /// Signed calibration offset in ms. Must be finite.
+        #[bpaf(long, argument("OFFSET_MS"), parse(parse_finite_f32), fallback(0.0))]
         offset_ms: f32,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
@@ -113,6 +114,14 @@ fn parse_non_negative_f32(v: f32) -> Result<f32, String> {
         Ok(v)
     } else {
         Err(format!("must be a non-negative finite number, got {v}"))
+    }
+}
+
+fn parse_finite_f32(v: f32) -> Result<f32, String> {
+    if v.is_finite() {
+        Ok(v)
+    } else {
+        Err(format!("must be a finite number, got {v}"))
     }
 }
 
@@ -326,9 +335,25 @@ pub mod channel_trace {
             shift_ms: args.shift_ms,
             offset_ms: args.offset_ms,
         };
+        // Pre-flight: reject ranges where `buffers × frames` would
+        // overflow `u64`. Silent wrap in release builds would produce
+        // garbage sample indices.
+        let frames_u64 = u64::try_from(args.frames)
+            .map_err(|_| format!("trace range exceeds u64: --frames {}", args.frames))?;
+        let total = u64::from(args.buffers)
+            .checked_mul(frames_u64)
+            .ok_or_else(|| {
+                format!(
+                    "trace range exceeds u64: --frames {} × --buffers {}",
+                    args.frames, args.buffers
+                )
+            })?;
+        let _ = total; // only needed for the overflow check above
         let mut rows = Vec::new();
         for b in 0..args.buffers {
-            let start = u64::from(b) * args.frames as u64;
+            let start = u64::from(b)
+                .checked_mul(frames_u64)
+                .expect("checked above");
             for ev in tick_stream(&channel, &stc, start, args.frames) {
                 rows.push(TraceRow {
                     buffer_index: b,

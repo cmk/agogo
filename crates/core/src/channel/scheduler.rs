@@ -42,12 +42,14 @@ pub fn tick_stream(
     let sr_f = stc.sr() as f32;
     let shift_samples: i64 = (shift_ms * sr_f / 1000.0).round() as i64;
     let offset_samples: i64 = (channel.offset_ms * sr_f / 1000.0).round() as i64;
-    let delta: i64 = shift_samples + offset_samples;
-
-    let swung_lo_signed = buffer_start_sample as i64 - delta;
-    let swung_hi_signed = buffer_end as i64 - delta;
-    let swung_lo = swung_lo_signed.max(0) as u64;
-    let swung_hi = swung_hi_signed.max(0) as u64;
+    // Promote to i128 so `buffer_start_sample - delta` can't wrap —
+    // `buffer_start_sample as i64` would lose the high bit for streams
+    // past ~6×10¹² seconds and produce spurious bounds.
+    let delta: i128 = i128::from(shift_samples) + i128::from(offset_samples);
+    let swung_lo_signed = i128::from(buffer_start_sample) - delta;
+    let swung_hi_signed = i128::from(buffer_end) - delta;
+    let swung_lo = swung_lo_signed.clamp(0, i128::from(u64::MAX)) as u64;
+    let swung_hi = swung_hi_signed.clamp(0, i128::from(u64::MAX)) as u64;
 
     // Convert swung-tick sample bounds to tick bounds, then expand by
     // swing displacement so off-beats (which are shifted by -d in tick
