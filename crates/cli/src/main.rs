@@ -200,7 +200,7 @@ pub mod time_sched {
 
         /// Number of 4/4 bars to schedule. Bounded to `u16` (≤ 65535)
         /// so memory and stdout stay reasonable — 65535 × 192 ≈ 12.6M
-        /// tick offsets ≈ 50 MB Vec at the finest grid. The plan
+        /// tick positions ≈ 50 MB Vec at the finest grid. The plan
         /// specified `u32`; narrowing the type is the simplest honest
         /// bound (see plan's Review section).
         #[arg(long)]
@@ -247,7 +247,7 @@ pub mod time_sched {
 #[cfg(all(test, feature = "core"))]
 mod tests {
     use super::sync_trace::trace;
-    use super::time_sched::{schedule_ticks, swing_to_config, ScheduleArgs};
+    use super::time_sched::{ScheduleArgs, schedule_ticks, swing_to_config};
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
 
@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn schedule_ticks_two_bars_t16_yields_32_offsets() {
+    fn schedule_ticks_two_bars_t16_yields_32_positions() {
         let ticks = schedule_ticks(&ScheduleArgs {
             bpm: 120.0,
             tbase: TBase::T16,

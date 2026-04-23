@@ -48,5 +48,11 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # Sibling crate: see Cargo.toml. cargo-deny's `unknown-git = deny`
-# otherwise rejects the gitlab.com URL.
-allow-git = ["https://gitlab.com/cmk/connections"]
+# otherwise rejects the gitlab.com URL. List both the `.git` form
+# (what appears in Cargo.toml/Cargo.lock) and the bare form
+# defensively, so the lint matches regardless of how cargo-deny
+# canonicalises the URL.
+allow-git = [
+    "https://gitlab.com/cmk/connections.git",
+    "https://gitlab.com/cmk/connections",
+]
