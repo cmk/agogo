@@ -86,6 +86,98 @@ impl Ple for TBase {
     }
 }
 
+// ── Lattice operations ────────────────────────────────────────────
+//
+// The 14 tick counts are all of the form `2^i * 3^j` with `j ∈ {0, 1}`
+// and bounded `i`, so LCM and GCD on tick counts stay within the set.
+// The lattice is bounded, distributive, and Heyting (but not Boolean:
+// some elements lack a complement).
+
+fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        let t = b;
+        b = a % b;
+        a = t;
+    }
+    a
+}
+
+fn lcm_u32(a: u32, b: u32) -> u32 {
+    // Dividing before multiplying avoids intermediate overflow; for
+    // values in the 14 tick counts (max 768), plain multiplication
+    // wouldn't overflow `u32` either, but the style generalises if
+    // this helper is reused later.
+    a / gcd_u32(a, b) * b
+}
+
+/// Look up the unique `TBase` with the given tick count, if one
+/// exists. Returns `None` for values outside the 14-element set.
+fn from_tick_count(n: u32) -> Option<TBase> {
+    TBase::ALL.iter().copied().find(|tb| tb.tick_count() == n)
+}
+
+/// Lattice join (coarsening): LCM of tick counts. The closed-form
+/// `.expect` is valid because the 14-element lattice is closed under
+/// LCM; `tbase_lattice_closure` in the tests verifies this exhaustively.
+pub fn join(a: TBase, b: TBase) -> TBase {
+    from_tick_count(lcm_u32(a.tick_count(), b.tick_count()))
+        .expect("TBase lattice is closed under LCM")
+}
+
+/// Lattice meet (refinement): GCD of tick counts.
+pub fn meet(a: TBase, b: TBase) -> TBase {
+    from_tick_count(gcd_u32(a.tick_count(), b.tick_count()))
+        .expect("TBase lattice is closed under GCD")
+}
+
+/// Heyting implication `a // b`: the coarsest `c` such that
+/// `meet(a, c) ≤ b`. Computed directly as a join over the witness set.
+///
+/// The witness set is always non-empty — `c = T128t` makes
+/// `meet(a, c) = T128t`, which is the lattice bottom and thus ≤ any
+/// `b`.
+pub fn heyting(a: TBase, b: TBase) -> TBase {
+    TBase::ALL
+        .iter()
+        .copied()
+        .filter(|&c| meet(a, c).ple(&b))
+        .reduce(join)
+        .expect("heyting witness set is non-empty (T128t always qualifies)")
+}
+
+/// Co-Heyting co-implication `a \\ b`: the finest `c` such that
+/// `a ≤ join(b, c)`. Computed as a meet over the witness set.
+///
+/// The witness set is always non-empty — `c = T1` makes
+/// `join(b, c) = T1`, the top, which every `a` refines.
+pub fn coheyting(a: TBase, b: TBase) -> TBase {
+    TBase::ALL
+        .iter()
+        .copied()
+        .filter(|&c| a.ple(&join(b, c)))
+        .reduce(meet)
+        .expect("coheyting witness set is non-empty (T1 always qualifies)")
+}
+
+/// Heyting negation: `neg(x) = heyting(x, bottom)`. The coarsest grid
+/// whose meet with `x` collapses to the lattice bottom.
+pub fn neg(x: TBase) -> TBase {
+    heyting(x, TBase::T128t)
+}
+
+/// Co-Heyting co-negation: `non(x) = coheyting(top, x)`. The finest
+/// grid whose join with `x` reaches the lattice top. In general
+/// `neg(x) ≤ non(x)` with strict inequality for some `x`, confirming
+/// the lattice is Heyting but not Boolean.
+pub fn non(x: TBase) -> TBase {
+    coheyting(TBase::T1, x)
+}
+
+/// Co-Heyting boundary: `boundary(x) = meet(x, non(x))`.
+pub fn boundary(x: TBase) -> TBase {
+    meet(x, non(x))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +281,190 @@ mod tests {
             if a.ple(&b) && b.ple(&c) {
                 prop_assert!(a.ple(&c));
             }
+        }
+    }
+
+    // ── Spot checks on lattice ops ────────────────────────────────
+
+    #[test]
+    fn join_t4_t8t_is_t4() {
+        // lcm(192, 64) = 192
+        assert_eq!(join(TBase::T4, TBase::T8t), TBase::T4);
+    }
+
+    #[test]
+    fn meet_t4_t8t_is_t8t() {
+        // gcd(192, 64) = 64
+        assert_eq!(meet(TBase::T4, TBase::T8t), TBase::T8t);
+    }
+
+    #[test]
+    fn join_t4_t2t_is_top() {
+        // lcm(192, 256) = 768 = T1 — straight and triplet reach top.
+        assert_eq!(join(TBase::T4, TBase::T2t), TBase::T1);
+    }
+
+    #[test]
+    fn meet_t4_t2t_is_bottom_region() {
+        // gcd(192, 256) = 64 = T8t
+        assert_eq!(meet(TBase::T4, TBase::T2t), TBase::T8t);
+    }
+
+    #[test]
+    fn neg_t4_is_bottom() {
+        // Coarsest c with gcd(192, tc(c)) = 4 — only T128t qualifies.
+        assert_eq!(neg(TBase::T4), TBase::T128t);
+    }
+
+    #[test]
+    fn non_t4_is_t2t() {
+        // Finest c with lcm(192, tc(c)) = 768 — c must contribute 2^8,
+        // so c ∈ {T2t, T1}; the finer one is T2t.
+        assert_eq!(non(TBase::T4), TBase::T2t);
+    }
+
+    #[test]
+    fn neg_leq_non_witness() {
+        // Confirms TBase is Heyting but not Boolean: neg(T4) = T128t,
+        // non(T4) = T2t, and T128t ≤ T2t strictly.
+        assert!(neg(TBase::T4).ple(&non(TBase::T4)));
+        assert_ne!(neg(TBase::T4), non(TBase::T4));
+    }
+
+    #[test]
+    fn boundary_t4_is_t8t() {
+        // meet(T4, non(T4)) = meet(T4, T2t) = gcd(192, 256) = 64 = T8t.
+        assert_eq!(boundary(TBase::T4), TBase::T8t);
+    }
+
+    #[test]
+    fn tbase_lattice_closure_under_join_and_meet() {
+        // Exhaustive 14×14: lcm and gcd of any two tick counts resolve
+        // to a TBase variant. The private `from_tick_count` would
+        // return None otherwise; `join`/`meet` would then panic via
+        // .expect, which would surface here as a test failure.
+        for a in TBase::ALL {
+            for b in TBase::ALL {
+                let _ = join(a, b);
+                let _ = meet(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn join_bottom_is_identity() {
+        for a in TBase::ALL {
+            assert_eq!(join(a, TBase::T128t), a);
+            assert_eq!(join(TBase::T128t, a), a);
+        }
+    }
+
+    #[test]
+    fn meet_top_is_identity() {
+        for a in TBase::ALL {
+            assert_eq!(meet(a, TBase::T1), a);
+            assert_eq!(meet(TBase::T1, a), a);
+        }
+    }
+
+    // ── Lattice property tests ────────────────────────────────────
+
+    proptest! {
+        /// Join equals LCM on tick counts.
+        #[test]
+        fn tbase_join_is_lcm(a in arb_tbase(), b in arb_tbase()) {
+            prop_assert_eq!(
+                join(a, b).tick_count(),
+                lcm_u32(a.tick_count(), b.tick_count())
+            );
+        }
+
+        /// Meet equals GCD on tick counts.
+        #[test]
+        fn tbase_meet_is_gcd(a in arb_tbase(), b in arb_tbase()) {
+            prop_assert_eq!(
+                meet(a, b).tick_count(),
+                gcd_u32(a.tick_count(), b.tick_count())
+            );
+        }
+
+        /// Join commutativity.
+        #[test]
+        fn tbase_join_commutative(a in arb_tbase(), b in arb_tbase()) {
+            prop_assert_eq!(join(a, b), join(b, a));
+        }
+
+        /// Meet commutativity.
+        #[test]
+        fn tbase_meet_commutative(a in arb_tbase(), b in arb_tbase()) {
+            prop_assert_eq!(meet(a, b), meet(b, a));
+        }
+
+        /// Join associativity.
+        #[test]
+        fn tbase_join_associative(
+            a in arb_tbase(),
+            b in arb_tbase(),
+            c in arb_tbase(),
+        ) {
+            prop_assert_eq!(join(join(a, b), c), join(a, join(b, c)));
+        }
+
+        /// Meet associativity.
+        #[test]
+        fn tbase_meet_associative(
+            a in arb_tbase(),
+            b in arb_tbase(),
+            c in arb_tbase(),
+        ) {
+            prop_assert_eq!(meet(meet(a, b), c), meet(a, meet(b, c)));
+        }
+
+        /// Absorption: `a ∧ (a ∨ b) = a` and `a ∨ (a ∧ b) = a`.
+        #[test]
+        fn tbase_lattice_absorption(a in arb_tbase(), b in arb_tbase()) {
+            prop_assert_eq!(meet(a, join(a, b)), a);
+            prop_assert_eq!(join(a, meet(a, b)), a);
+        }
+
+        /// Distributivity: `a ∧ (b ∨ c) = (a ∧ b) ∨ (a ∧ c)`.
+        #[test]
+        fn tbase_lattice_distributivity(
+            a in arb_tbase(),
+            b in arb_tbase(),
+            c in arb_tbase(),
+        ) {
+            prop_assert_eq!(
+                meet(a, join(b, c)),
+                join(meet(a, b), meet(a, c))
+            );
+        }
+
+        /// Heyting adjunction: `a ∧ c ≤ b ⟺ c ≤ a // b`.
+        #[test]
+        fn tbase_heyting_adjunction(
+            a in arb_tbase(),
+            b in arb_tbase(),
+            c in arb_tbase(),
+        ) {
+            let lhs = meet(a, c).ple(&b);
+            let rhs = c.ple(&heyting(a, b));
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        /// Co-Heyting adjunction (dual): `c \\ a ≤ b ⟺ c ≤ a ∨ b`.
+        ///
+        /// In our `coheyting(a, b)` convention this reads:
+        /// `a ≤ join(b, c) ⟺ coheyting(a, b) ≤ c`.
+        #[test]
+        fn tbase_coheyting_adjunction(
+            a in arb_tbase(),
+            b in arb_tbase(),
+            c in arb_tbase(),
+        ) {
+            let lhs = a.ple(&join(b, c));
+            let rhs = coheyting(a, b).ple(&c);
+            prop_assert_eq!(lhs, rhs);
         }
     }
 }
