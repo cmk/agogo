@@ -1,6 +1,6 @@
 //! Shared proptest strategies and synthetic test signals.
 
-use crate::fxp::{MicroBpm, Pico, SampleRate, SampleTime};
+use crate::fxp::{Tempo, Pico, SampleRate, SampleTime};
 use rand::SeedableRng;
 use rand_distr::{Distribution, Normal};
 
@@ -23,7 +23,7 @@ pub const PULSE_WIDTH_PS: Pico = Pico(1_500_000_000);
 /// # Panics
 /// Panics if `bpm == 0`, `ppq == 0`, or `jitter_sigma.0 < 0`.
 pub fn pulse_train<R: SampleTime>(
-    bpm: MicroBpm,
+    bpm: Tempo,
     ppq: u32,
     jitter_sigma: Pico,
     n_pulses: u32,
@@ -97,7 +97,7 @@ pub fn pulse_train<R: SampleTime>(
 
 #[cfg(any(test, feature = "testkit"))]
 mod strategies {
-    use crate::fxp::{MicroBpm, Pico};
+    use crate::fxp::{Tempo, Pico};
     use num_rational::Rational64;
     use proptest::prelude::*;
 
@@ -105,15 +105,15 @@ mod strategies {
     use crate::time::tbase::TBase;
     use crate::time::tick::{Tick, Time};
 
-    /// BPM strategy as `MicroBpm` (BPM × 10⁶). Biased toward common
+    /// BPM strategy as `Tempo` (BPM × 10⁶). Biased toward common
     /// musical tempos with some boundary spice.
-    pub fn arb_bpm() -> impl Strategy<Value = MicroBpm> {
+    pub fn arb_bpm() -> impl Strategy<Value = Tempo> {
         prop_oneof![
-            1 => Just(MicroBpm::from_bpm_integer(60)),
-            1 => Just(MicroBpm::from_bpm_integer(120)),
-            1 => Just(MicroBpm::from_bpm_integer(200)),
-            5 => (60_000_000u32..200_000_000).prop_map(MicroBpm),
-            1 => (30_000_000u32..400_000_000).prop_map(MicroBpm),
+            1 => Just(Tempo::from_bpm_integer(60)),
+            1 => Just(Tempo::from_bpm_integer(120)),
+            1 => Just(Tempo::from_bpm_integer(200)),
+            5 => (60_000_000u32..200_000_000).prop_map(Tempo),
+            1 => (30_000_000u32..400_000_000).prop_map(Tempo),
         ]
     }
 
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn pulse_train_shape_basic() {
-        let bpm = MicroBpm::from_bpm_integer(120);
+        let bpm = Tempo::from_bpm_integer(120);
         let (samples, peaks): (Vec<f32>, Vec<S48>) =
             pulse_train::<S48>(bpm, 24, Pico(0), 4, 1);
         assert_eq!(peaks.len(), 4);
@@ -229,14 +229,14 @@ mod tests {
     #[test]
     fn pulse_train_zero_pulses_is_empty() {
         let (samples, peaks): (Vec<f32>, Vec<S48>) =
-            pulse_train::<S48>(MicroBpm::from_bpm_integer(120), 24, Pico(0), 0, 0);
+            pulse_train::<S48>(Tempo::from_bpm_integer(120), 24, Pico(0), 0, 0);
         assert!(samples.is_empty());
         assert!(peaks.is_empty());
     }
 
     #[test]
     fn pulse_train_is_deterministic_in_seed() {
-        let bpm = MicroBpm::from_bpm_integer(140);
+        let bpm = Tempo::from_bpm_integer(140);
         let jitter = Pico(100_000_000); // 100 µs
         let a: (Vec<f32>, Vec<S48>) = pulse_train::<S48>(bpm, 24, jitter, 8, 42);
         let b: (Vec<f32>, Vec<S48>) = pulse_train::<S48>(bpm, 24, jitter, 8, 42);

@@ -20,10 +20,10 @@
 //! { phase, freq_hz, integrator }` stay `f64` — they are the analog
 //! control-law quantities the user explicitly exempted from the
 //! no-float rule. The only f64→fxp casts live in
-//! [`crate::fxp::f64_bpm_to_micro_bpm`] / [`crate::fxp::f64_phase_to_phase`]
+//! [`crate::fxp::f64_bpm_to_tempo`] / [`crate::fxp::f64_phase_to_phase`]
 //! at the `PllOutput` boundary.
 
-use crate::fxp::{MicroBpm, Phase, SampleTime, f64_bpm_to_micro_bpm, f64_phase_to_phase};
+use crate::fxp::{Tempo, Phase, SampleTime, f64_bpm_to_tempo, f64_phase_to_phase};
 
 /// Loop-filter tuning.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,7 +62,7 @@ pub struct PllState {
 /// One PLL update result.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PllOutput {
-    pub bpm: MicroBpm,
+    pub bpm: Tempo,
     pub phase: Phase,
 }
 
@@ -84,7 +84,7 @@ impl<R: SampleTime> Pll<R> {
     /// Construct a PLL seeded at the nominal BPM. The loop pulls toward
     /// the measured rate from there; the integrator's clamp bounds how
     /// far it can roam.
-    pub fn new(cfg: PllSettings, nominal_bpm: MicroBpm, ppq: u32) -> Self {
+    pub fn new(cfg: PllSettings, nominal_bpm: Tempo, ppq: u32) -> Self {
         assert!(nominal_bpm.0 > 0, "nominal bpm must be positive");
         assert!(ppq > 0, "ppq must be positive");
         // PI-exempt: convert the argv/µBPM nominal into f64 Hz for the
@@ -124,10 +124,10 @@ impl<R: SampleTime> Pll<R> {
     }
 
     /// Smoothed BPM derived from the integrator only.
-    fn smoothed_bpm(&self) -> MicroBpm {
+    fn smoothed_bpm(&self) -> Tempo {
         // PI-exempt: integrator-driven f64 BPM → µBPM at the output boundary.
         let f = self.nominal_freq_hz * (1.0 + self.state.integrator);
-        f64_bpm_to_micro_bpm(f * 60.0 / self.ppq as f64)
+        f64_bpm_to_tempo(f * 60.0 / self.ppq as f64)
     }
 
     /// Project the current NCO phase forward by `elapsed` samples —
@@ -206,7 +206,7 @@ mod tests {
 
     /// PLL initialised at the true BPM under jitter — tracks the rate
     /// to within 50_000 µBPM after a 32-pulse warm-up.
-    fn assert_bpm_converges(bpm: MicroBpm, jitter: Pico, seed: u64) {
+    fn assert_bpm_converges(bpm: Tempo, jitter: Pico, seed: u64) {
         let ppq = 24u32;
         let n_pulses = 64u32;
         let (_, peaks): (Vec<f32>, Vec<S48>) =
@@ -228,11 +228,11 @@ mod tests {
     #[test]
     fn default_settings_track_120_at_48k() {
         let ppq = 24u32;
-        let bpm = MicroBpm::from_bpm_integer(120);
+        let bpm = Tempo::from_bpm_integer(120);
         let (_, peaks): (Vec<f32>, Vec<S48>) =
             pulse_train::<S48>(bpm, ppq, Pico(0), 48, 1);
         let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, ppq);
-        let mut last = MicroBpm::ZERO;
+        let mut last = Tempo::ZERO;
         for &p in &peaks {
             last = pll.step(Some(p)).bpm;
         }
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn jitter_free_tracks_perfectly() {
-        assert_bpm_converges(MicroBpm::from_bpm_integer(120), Pico(0), 1);
+        assert_bpm_converges(Tempo::from_bpm_integer(120), Pico(0), 1);
     }
 
     #[test]
@@ -250,11 +250,11 @@ mod tests {
         // Regression: when `clamp_hz / nominal_freq_hz > 1.0` the
         // integrator could reach `-1.0` and drive `1 + integrator` to
         // zero or below. Check the f64 control-law state stays in the
-        // valid range — the MicroBpm output may legitimately round to
+        // valid range — the Tempo output may legitimately round to
         // 0 when smoothed_bpm is well below 1 µBPM without indicating
         // the regression.
         let ppq = 24u32;
-        let nominal_bpm = MicroBpm::from_bpm_integer(120);
+        let nominal_bpm = Tempo::from_bpm_integer(120);
         let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, nominal_bpm, ppq);
         let huge_spacing_samples: f64 = S48::HZ as f64 * 100.0;
         let mut t: f64 = 0.0;
@@ -283,7 +283,7 @@ mod tests {
             jitter_us in 0u32..200,
             seed in any::<u64>(),
         ) {
-            let bpm = MicroBpm(bpm_mbpm);
+            let bpm = Tempo(bpm_mbpm);
             let jitter = Pico(jitter_us as i64 * 1_000_000);
             let ppq = 24u32;
             let n_pulses = 64u32;
@@ -308,7 +308,7 @@ mod tests {
             jitter_us in 0u32..200,
             seed in any::<u64>(),
         ) {
-            let bpm = MicroBpm(bpm_mbpm);
+            let bpm = Tempo(bpm_mbpm);
             let jitter = Pico(jitter_us as i64 * 1_000_000);
             let ppq = 24u32;
             let n_pulses = 64u32;
@@ -346,7 +346,7 @@ mod tests {
             bpm_mbpm in 90_000_000u32..160_000_000,
             seed in any::<u64>(),
         ) {
-            let bpm = MicroBpm(bpm_mbpm);
+            let bpm = Tempo(bpm_mbpm);
             let ppq = 24u32;
             let n_pulses = 96u32;
             let jitter = Pico(50_000_000); // 50 µs
@@ -378,7 +378,7 @@ mod tests {
         fn pll_no_panic_on_silence(
             bpm_mbpm in 60_000_000u32..200_000_000,
         ) {
-            let bpm = MicroBpm(bpm_mbpm);
+            let bpm = Tempo(bpm_mbpm);
             let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, 24);
             for _ in 0..1000 {
                 let _ = pll.step(None);
@@ -399,8 +399,8 @@ mod tests {
                 clamp_hz: 1000.0,
                 interp: 0.0,
             };
-            let nominal = MicroBpm::from_bpm_integer(120);
-            let actual = MicroBpm::from_bpm_integer(130);
+            let nominal = Tempo::from_bpm_integer(120);
+            let actual = Tempo::from_bpm_integer(130);
             let ppq = 24u32;
             let (_, peaks): (Vec<f32>, Vec<S48>) =
                 pulse_train::<S48>(actual, ppq, Pico(0), 800, 1);

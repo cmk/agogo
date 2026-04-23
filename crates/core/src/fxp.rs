@@ -4,7 +4,7 @@
 //! Micro / Nano / Pico`) and rate-typed sample tier (`S44 / S48 /
 //! S88 / S96 / S176 / S192`) from the sibling `connections` crate.
 //! Adds two agogo-local fixed-point types — `Phase` (Q0.32 cycles,
-//! wrapping-add = modular reduction) and `MicroBpm` (BPM × 10⁶) —
+//! wrapping-add = modular reduction) and `Tempo` (BPM × 10⁶) —
 //! plus integer `linear_u8` / `smoothstep_u8` primitives and a
 //! handful of narrow f32/f64 → fxp conversions for the CLI-parser
 //! and PI-controller boundaries.
@@ -96,7 +96,7 @@ impl Phase {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// MicroBpm — BPM × 10⁶ stored as u32.
+// Tempo — BPM × 10⁶ stored as u32.
 //
 // Range 0..≈4295 BPM (plenty for music). Resolution 10⁻⁶ BPM, well
 // below any human perceptual threshold.
@@ -105,9 +105,9 @@ impl Phase {
 /// Beats per minute × 10⁶.
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct MicroBpm(pub u32);
+pub struct Tempo(pub u32);
 
-impl MicroBpm {
+impl Tempo {
     pub const ZERO: Self = Self(0);
 
     pub const fn from_bpm_integer(n: u32) -> Self {
@@ -140,26 +140,26 @@ pub fn f64_phase_to_phase(p: f64) -> Phase {
     Phase(bits)
 }
 
-/// f64 BPM → `MicroBpm` with round-to-nearest. Negative or NaN
+/// f64 BPM → `Tempo` with round-to-nearest. Negative or NaN
 /// inputs saturate to `ZERO`.
-pub fn f64_bpm_to_micro_bpm(b: f64) -> MicroBpm {
+pub fn f64_bpm_to_tempo(b: f64) -> Tempo {
     // PI-exempt.
     if !b.is_finite() || b <= 0.0 {
-        return MicroBpm::ZERO;
+        return Tempo::ZERO;
     }
     let scaled = (b * 1_000_000.0).round();
     if scaled >= u32::MAX as f64 {
-        MicroBpm(u32::MAX)
+        Tempo(u32::MAX)
     } else {
-        MicroBpm(scaled as u32)
+        Tempo(scaled as u32)
     }
 }
 
-/// f32 BPM → `MicroBpm`. Same rounding semantics as the f64 version.
-pub fn f32_bpm_to_micro_bpm(b: f32) -> MicroBpm {
+/// f32 BPM → `Tempo`. Same rounding semantics as the f64 version.
+pub fn f32_bpm_to_tempo(b: f32) -> Tempo {
     // ABI-local: the CLI parser produces f32; this is the first line
     // of the handler that consumes it.
-    f64_bpm_to_micro_bpm(b as f64)
+    f64_bpm_to_tempo(b as f64)
 }
 
 /// f32 microseconds of jitter → `Pico`. Rounds to nearest ps.
@@ -368,7 +368,7 @@ mod tests {
 
         #[test]
         fn f32_bpm_roundtrip(b in 30.0_f32..=400.0) {
-            let u = f32_bpm_to_micro_bpm(b);
+            let u = f32_bpm_to_tempo(b);
             let roundtrip = u.0 as f32 * 1.0e-6;
             // f32 resolution at b≈400 is ~4.8e-5 absolute; add a ULP
             // of µBPM rounding (5e-7) as headroom.
@@ -401,10 +401,10 @@ mod tests {
 
     #[test]
     fn f64_bpm_edge_cases() {
-        assert_eq!(f64_bpm_to_micro_bpm(120.0), MicroBpm(120_000_000));
-        assert_eq!(f64_bpm_to_micro_bpm(0.0), MicroBpm::ZERO);
-        assert_eq!(f64_bpm_to_micro_bpm(-5.0), MicroBpm::ZERO);
-        assert_eq!(f64_bpm_to_micro_bpm(f64::NAN), MicroBpm::ZERO);
+        assert_eq!(f64_bpm_to_tempo(120.0), Tempo(120_000_000));
+        assert_eq!(f64_bpm_to_tempo(0.0), Tempo::ZERO);
+        assert_eq!(f64_bpm_to_tempo(-5.0), Tempo::ZERO);
+        assert_eq!(f64_bpm_to_tempo(f64::NAN), Tempo::ZERO);
     }
 
     #[test]

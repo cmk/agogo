@@ -192,11 +192,11 @@ fn main() {
                     std::process::exit(2);
                 }
                 let rows = sync_trace::trace(bpm, ppq, jitter_us, pulses, seed);
-                println!("sample,sub_q16,bpm_u_bpm,phase_q32");
+                println!("sample,sub_q16,tempo_ubpm,phase_q32");
                 for r in rows {
                     println!(
                         "{},{},{},{}",
-                        r.sample, r.sub_q16, r.bpm_u_bpm, r.phase_q32
+                        r.sample, r.sub_q16, r.tempo_ubpm, r.phase_q32
                     );
                 }
             }
@@ -383,7 +383,7 @@ pub mod link_probe {
 mod sync_trace {
     use agogo_core::arb::pulse_train;
     use agogo_core::fxp::{
-        MicroBpm, Pico, S48, SampleRate, SampleTime, f32_bpm_to_micro_bpm,
+        Tempo, Pico, S48, SampleRate, SampleTime, f32_bpm_to_tempo,
         f32_jitter_us_to_sigma,
     };
     use agogo_core::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
@@ -396,7 +396,7 @@ mod sync_trace {
         /// Q16 sub-sample fraction (signed i16-range).
         pub sub_q16: i16,
         /// PLL smoothed BPM × 10⁶.
-        pub bpm_u_bpm: u32,
+        pub tempo_ubpm: u32,
         /// PLL phase, Q0.32 cycles.
         pub phase_q32: u32,
     }
@@ -409,7 +409,7 @@ mod sync_trace {
         seed: u64,
     ) -> Vec<TraceRow> {
         // argv-boundary conversions.
-        let bpm: MicroBpm = f32_bpm_to_micro_bpm(bpm_f32);
+        let bpm: Tempo = f32_bpm_to_tempo(bpm_f32);
         let jitter: Pico = f32_jitter_us_to_sigma(jitter_us);
 
         let (samples, _truth): (Vec<f32>, Vec<S48>) =
@@ -429,7 +429,7 @@ mod sync_trace {
                 TraceRow {
                     sample: p.sample_index.sample(),
                     sub_q16: (p.sample_index.to_bits_q48_16() & 0xFFFF) as i16,
-                    bpm_u_bpm: out.bpm.0,
+                    tempo_ubpm: out.bpm.0,
                     phase_q32: out.phase.0,
                 }
             })
@@ -440,7 +440,7 @@ mod sync_trace {
 #[cfg(feature = "core")]
 pub mod channel_trace {
     use agogo_core::channel::{Channel, ChannelMode, tick_stream};
-    use agogo_core::fxp::MicroBpm;
+    use agogo_core::fxp::Tempo;
     use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
@@ -482,7 +482,7 @@ pub mod channel_trace {
                     u32::MAX as f64 / 1.0e6
                 ));
             }
-            MicroBpm(scaled as u32)
+            Tempo(scaled as u32)
         };
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
         let channel = Channel {
@@ -614,12 +614,12 @@ mod tests {
         let rows = trace(120.0, 24, 50.0, 256, 1);
         assert_eq!(rows.len(), 256);
         let last = rows.last().unwrap();
-        let err = (last.bpm_u_bpm as i64 - 120_000_000).unsigned_abs();
+        let err = (last.tempo_ubpm as i64 - 120_000_000).unsigned_abs();
         assert!(
             err < 50_000,
-            "final µBPM err {} > 50_000 (got bpm_u_bpm = {})",
+            "final µBPM err {} > 50_000 (got tempo_ubpm = {})",
             err,
-            last.bpm_u_bpm
+            last.tempo_ubpm
         );
     }
 

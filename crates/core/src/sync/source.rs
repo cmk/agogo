@@ -1,6 +1,6 @@
 //! Unified phase source: internal free-running clock or external PLL.
 
-use crate::fxp::{MicroBpm, Phase, SampleTime};
+use crate::fxp::{Tempo, Phase, SampleTime};
 use crate::sync::detect::PeakDetector;
 use crate::sync::pll::Pll;
 
@@ -38,7 +38,7 @@ pub trait PhaseSourceImpl: Send {
 pub enum PhaseSource<R: SampleTime> {
     /// Free-running internal clock. Phase is deterministic from
     /// `(bpm, R::HZ, n)` — no state, no drift, no jitter.
-    Internal { bpm: MicroBpm },
+    Internal { bpm: Tempo },
     /// External pulse train run through detector → PLL.
     External {
         detector: PeakDetector<R>,
@@ -110,7 +110,7 @@ impl<R: SampleTime> PhaseSource<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fxp::{MicroBpm, Pico, S48, SampleRate};
+    use crate::fxp::{Tempo, Pico, S48, SampleRate};
     use crate::sync::detect::DetectorConfig;
     use crate::sync::pll::PllSettings;
     use proptest::prelude::*;
@@ -120,7 +120,7 @@ mod tests {
         // At 120 BPM and 48 kHz, a beat is 24 000 samples; half a beat
         // is 12 000 samples → phase = 0.5 → Phase = 2^31.
         let mut src = PhaseSource::<S48>::Internal {
-            bpm: MicroBpm::from_bpm_integer(120),
+            bpm: Tempo::from_bpm_integer(120),
         };
         let p_half = src.phase_at_sample(12_000);
         // Allow ±1 ULP (integer arithmetic rounding of 2^32 / bpm quotient).
@@ -135,10 +135,10 @@ mod tests {
             threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::<S48>::new(PllSettings::DEFAULT, MicroBpm::from_bpm_integer(120), 24);
+        let pll = Pll::<S48>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
         let mut src = PhaseSource::<S48>::External { detector, pll };
         let (samples, _): (Vec<f32>, Vec<S48>) = crate::arb::pulse_train::<S48>(
-            MicroBpm::from_bpm_integer(120),
+            Tempo::from_bpm_integer(120),
             24,
             Pico(0),
             4,
@@ -155,9 +155,9 @@ mod tests {
             threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::<S48>::new(PllSettings::DEFAULT, MicroBpm::from_bpm_integer(120), 24);
+        let pll = Pll::<S48>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
         let mut src = PhaseSource::<S48>::External { detector, pll };
-        let bpm = MicroBpm::from_bpm_integer(120);
+        let bpm = Tempo::from_bpm_integer(120);
         let (samples, peaks): (Vec<f32>, Vec<S48>) =
             crate::arb::pulse_train::<S48>(bpm, 24, Pico(0), 4, 1);
         src.feed_samples(&samples, 0);
@@ -189,7 +189,7 @@ mod tests {
             threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::<S48>::new(PllSettings::DEFAULT, MicroBpm::from_bpm_integer(120), 24);
+        let pll = Pll::<S48>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
         let mut src = PhaseSource::<S48>::External { detector, pll };
         assert_eq!(src.phase_at_sample(0).0, 0);
         assert_eq!(src.phase_at_sample(48_000).0, 0);
@@ -207,7 +207,7 @@ mod tests {
             // precomputed-inc rounding accumulation, so the first
             // difference `p(n+1) - p(n)` may vary by ±1 Q0.32 ULP around
             // the "ideal" increment. Assert that tolerance.
-            let bpm = MicroBpm(bpm_mbpm);
+            let bpm = Tempo(bpm_mbpm);
             let mut src = PhaseSource::<S48>::Internal { bpm };
             let p1 = src.phase_at_sample(n);
             let p2 = src.phase_at_sample(n + 1);

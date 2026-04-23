@@ -246,12 +246,12 @@ pub fn tbase() -> Conn<(TBase, TBase), TBase> {
 /// depends on runtime `(sr, bpm, ppqn)` — would require a closure-
 /// capturing variant upstream.
 ///
-/// All arithmetic is integer (`MicroBpm` for tempo, `u128` intermediate).
+/// All arithmetic is integer (`Tempo` for tempo, `u128` intermediate).
 /// No floating-point.
 #[derive(Copy, Clone, Debug)]
 pub struct SampleTickConn {
     sr: u32,
-    bpm: crate::fxp::MicroBpm,
+    bpm: crate::fxp::Tempo,
     ppqn: u32,
 }
 
@@ -261,7 +261,7 @@ impl SampleTickConn {
     /// Panics if `sr == 0`, `ppqn == 0`, or `bpm.0 == 0`. These are
     /// programming errors — every call site either ships fixed
     /// constants or validates at a CLI/config boundary.
-    pub fn new(sr: u32, bpm: crate::fxp::MicroBpm, ppqn: u32) -> Self {
+    pub fn new(sr: u32, bpm: crate::fxp::Tempo, ppqn: u32) -> Self {
         assert!(sr > 0, "sample rate must be positive");
         assert!(ppqn > 0, "ppqn must be positive");
         assert!(bpm.0 > 0, "bpm must be positive, got {:?}", bpm);
@@ -271,7 +271,7 @@ impl SampleTickConn {
     pub fn sr(&self) -> u32 {
         self.sr
     }
-    pub fn bpm(&self) -> crate::fxp::MicroBpm {
+    pub fn bpm(&self) -> crate::fxp::Tempo {
         self.bpm
     }
     pub fn ppqn(&self) -> u32 {
@@ -882,8 +882,8 @@ mod tests {
     // asserted in-module because `SampleTickConn` is not a genuine
     // `Conn` (cannot capture runtime `(sr, bpm)`).
 
-    fn mbpm(b: u32) -> crate::fxp::MicroBpm {
-        crate::fxp::MicroBpm::from_bpm_integer(b)
+    fn mbpm(b: u32) -> crate::fxp::Tempo {
+        crate::fxp::Tempo::from_bpm_integer(b)
     }
 
     #[test]
