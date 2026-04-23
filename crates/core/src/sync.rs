@@ -13,3 +13,5 @@
 pub mod detect;
 pub mod pll;
 pub mod source;
+
+pub use detect::{DetectorConfig, Peak, PeakDetector};
