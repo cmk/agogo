@@ -51,15 +51,24 @@ path is fully functional.
 
 ### Deviations from the plan
 
-See `doc/plans/plan-2026-04-23-05.md` §Review. Three points:
+See `doc/plans/plan-2026-04-23-05.md` §Review. Summary:
 
 1. Anchor-shift test restructured to use one clock with two
    `set_anchor` calls — two independent `AblLink` instances have
    divergent session states, so cross-session comparisons fail.
 2. Proptest named `phase_delta_matches_tempo` (more diagnostic than
    the plan's `phase_monotonic_across_random_anchors` heading).
-3. Probe anchor captured via a throwaway `LinkClock` so
-   `clock_micros()` can be read before the real clock is built.
+3. Probe + tests construct one `LinkClock` with a placeholder
+   `host_origin_micros: 0` anchor, read `clock_micros()` off the
+   live instance, then `set_anchor` with the real origin — no
+   throwaway second `AblLink::new`.
+4. `phase_wraps_once_per_beat_at_120bpm_48k` tolerance is 2²² ULPs
+   (not "1 ULP" from T2 task 2) — Link drifts a few µs between
+   consecutive `capture_audio_session_state` calls.
+5. CLI `phase` column emits 6 decimal places, not 4 — matches the
+   bridge's actual resolution.
+6. `HostTimeAnchor::sample_rate` is `NonZeroU32`, not `u32` — lifts
+   the division's non-zero invariant into the type system.
 
 ### Out of scope / follow-ups
 
@@ -69,9 +78,6 @@ See `doc/plans/plan-2026-04-23-05.md` §Review. Three points:
   behind `fixture_or_skip!("link_multicast")`.
 - **Link CI** — adding CMake + C++ to the CI image so
   `--features link` runs there too. Separate chore.
-- **Tidier `now_micros()`** — the probe's throwaway-clock pattern is
-  a smell; a free function wrapping `abl_link_clock_micros` would
-  be cleaner if rusty_link exposes the path.
 
 ## Local review (2026-04-23)
 
@@ -275,3 +281,57 @@ Fair — applied the suggested wording. The rustdoc now says `set_anchor` requir
 #### ↳ cmk ([2026-04-23 23:07 UTC](https://github.com/cmk/agogo/pull/8#discussion_r3134449392))
 
 Right, `anchor.origin` was shorthand — fixed to `anchor.host_origin_micros` in the summary, and added a note that `sample_rate` is now `NonZeroU32` (from the div-by-zero fix above). Commit d9735b1.
+
+<!-- gh-id: 3134475222 -->
+### Copilot on [`doc/plans/plan-2026-04-23-05.md:75`](https://github.com/cmk/agogo/pull/8#discussion_r3134475222) (2026-04-23 23:13 UTC)
+
+`HostTimeAnchor.sample_rate` is documented in the T0 code snippet as `u32`, but the implementation in `crates/host-link/src/link.rs` now uses `NonZeroU32`. This makes several later snippets/facts in this plan inaccurate too (e.g., T1 divides by `i128::from(self.anchor.sample_rate)` rather than `.sample_rate.get()`, and T4’s anchor construction uses `sample_rate: sr` instead of a `NonZeroU32`). Please update the plan’s code snippets/text so they match the actual API and avoid misleading readers.
+```suggestion
+    /// Sample rate for the sample → host-µs conversion.
+    /// `NonZeroU32` encodes the invariant that the conversion
+    /// denominator must never be zero; Link's time domain is still
+    /// microseconds rather than rate-typed samples.
+    pub sample_rate: NonZeroU32,
+```
+
+<!-- gh-id: 3134475253 -->
+### Copilot on [`doc/reviews/review-00008.md:62`](https://github.com/cmk/agogo/pull/8#discussion_r3134475253) (2026-04-23 23:13 UTC)
+
+The review record still describes a “throwaway-clock pattern” with two `AblLink::new` calls (both in the top Deviations list and again in the Local review Code Quality section), but the current implementation constructs one `LinkClock` with a placeholder anchor and then calls `set_anchor` using `clock_micros()`. Please update these references so the review doc matches the final code in this PR.
+
+<!-- gh-id: 3134475276 -->
+### Copilot on [`crates/cli/src/main.rs:352`](https://github.com/cmk/agogo/pull/8#discussion_r3134475276) (2026-04-23 23:13 UTC)
+
+In `link_probe::probe`, `sr` is already validated as non-zero by the CLI parser, but the code still uses `sr.max(1)` before converting to `NonZeroU32`. This silently changes behavior for any non-CLI caller of `probe` (e.g., `sr = 0` becomes `1`) and makes the comment about the invariant less accurate. Prefer preserving the invariant explicitly (e.g., convert with `NonZeroU32::new(sr)` and fail fast, or change the function signature to accept a `NonZeroU32`).
+```suggestion
+        // The CLI parser (parse_positive_u32) already enforces `sr >= 1`.
+        // Preserve that invariant explicitly here so non-CLI callers
+        // fail fast instead of silently changing `sr = 0` to `sr = 1`.
+        let sr = NonZeroU32::new(sr).expect("probe requires a non-zero sample rate");
+```
+
+<!-- gh-id: 4166735345 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-23 23:13 UTC](https://github.com/cmk/agogo/pull/8#pullrequestreview-4166735345))
+
+## Pull request overview
+
+Copilot reviewed 5 out of 5 changed files in this pull request and generated 3 comments.
+
+
+
+
+
+<!-- gh-id: 3134493366 -->
+#### ↳ cmk ([2026-04-23 23:17 UTC](https://github.com/cmk/agogo/pull/8#discussion_r3134493366))
+
+Fair — applied. Plan T0 snippet now shows `sample_rate: NonZeroU32`, T1 uses `self.anchor.sample_rate.get()`, and T4's Anchor paragraph describes the single-clock `set_anchor` pattern + the `{:.6}` phase precision. Commit 798aeb7.
+
+<!-- gh-id: 3134493485 -->
+#### ↳ cmk ([2026-04-23 23:17 UTC](https://github.com/cmk/agogo/pull/8#discussion_r3134493485))
+
+Partial — updated the Summary's Deviations list + removed the "throwaway-clock pattern" Out-of-scope bullet, so the top of the file now matches the single-clock code. The Local review section further down stays intact: it's a dated reviewer snapshot (convention from Plan 07 round 1), and rewriting it retroactively would blur the audit trail. The Summary is the evolving record; commit 798aeb7.
+
+<!-- gh-id: 3134493578 -->
+#### ↳ cmk ([2026-04-23 23:17 UTC](https://github.com/cmk/agogo/pull/8#discussion_r3134493578))
+
+Good catch — dropped the `sr.max(1)` silent coercion. Non-CLI callers now fail fast on `sr = 0` via the `NonZeroU32::new(sr).expect(...)`; the comment points at `parse_positive_u32` as the CLI-side guard. Commit 798aeb7.
