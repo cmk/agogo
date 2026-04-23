@@ -249,7 +249,7 @@ mod tests {
         let mut pll = Pll::new(PllSettings::DEFAULT, nominal_bpm, sr, ppq);
         // Pretend pulses arrive at 100× the expected spacing (extremely
         // late) for many steps — this would push the integrator
-        // negative without bound if uncuumed.
+        // negative without bound if unclamped.
         let huge_spacing = sr as f64 * 100.0; // ~100 s between pulses
         let mut t = 0.0_f64;
         for _ in 0..1000 {
