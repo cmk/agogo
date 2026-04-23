@@ -3,11 +3,13 @@
 //! Two kinds of items live here:
 //!
 //! - **Strategies** (`arb_bpm`, `arb_sample_rate`, `arb_jitter_sigma_us`,
-//!   `arb_tbase`) return `impl proptest::strategy::Strategy<...>` and
-//!   are gated behind `#[cfg(any(test, feature = "testkit"))]` so
-//!   production builds don't pull in proptest. Downstream crates that
-//!   want them in their own tests should depend on `agogo-core` with
-//!   the `testkit` feature.
+//!   `arb_tbase`, `arb_tick`, `arb_time`, `arb_small_time`,
+//!   `arb_rational_nonneg`, `arb_swing`) return
+//!   `impl proptest::strategy::Strategy<...>` and are gated behind
+//!   `#[cfg(any(test, feature = "testkit"))]` so production builds
+//!   don't pull in proptest. Downstream crates that want them in their
+//!   own tests should depend on `agogo-core` with the `testkit`
+//!   feature.
 //! - **Synthetic generators** (`pulse_train`) are pure functions of
 //!   `(params, seed)` and ship unconditionally so non-test code (e.g.
 //!   the CLI) can use the same fixture as the proptests.
@@ -142,9 +144,12 @@ fn next_gaussian(state: &mut u64) -> f64 {
 
 #[cfg(any(test, feature = "testkit"))]
 mod strategies {
+    use num_rational::Rational64;
     use proptest::prelude::*;
 
+    use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
+    use crate::time::tick::{Tick, Time};
 
     /// BPM strategy biased toward common musical tempos with some
     /// boundary spice.
@@ -193,10 +198,66 @@ mod strategies {
             4 => prop::sample::select(TBase::ALL.as_slice()),
         ]
     }
+
+    /// Strategy over `Tick` values. Bounded at 1M so that downstream
+    /// arithmetic — including `beats × tick_count` where
+    /// `tick_count ≤ 768` — stays well inside `u32`. 1M ticks ≈ 1300
+    /// whole notes ≈ 325 bars at 4/4, plenty of musical range for the
+    /// property tests.
+    pub fn arb_tick() -> impl Strategy<Value = Tick> {
+        prop_oneof![
+            1 => Just(Tick(0)),
+            1 => Just(Tick(TBase::T128t.tick_count())),
+            1 => Just(Tick(TBase::T1.tick_count())),
+            4 => (0u32..=1_000_000).prop_map(Tick),
+        ]
+    }
+
+    /// Strategy over `Time` values. Beats bounded at 100K so the tick
+    /// count stays inside `u32` for every `TBase` (max product ≈ 77M).
+    pub fn arb_time() -> impl Strategy<Value = Time> {
+        (0u32..=100_000, arb_tbase()).prop_map(|(beats, base)| Time { beats, base })
+    }
+
+    /// Narrower `Time` strategy for lattice tests. Beats bounded at 50
+    /// so LCM of any two tick counts stays inside `u32` (max tick
+    /// count ≈ 38400, LCM ≤ 1.47e9 ≪ u32::MAX).
+    pub fn arb_small_time() -> impl Strategy<Value = Time> {
+        (0u32..=50, arb_tbase()).prop_map(|(beats, base)| Time { beats, base })
+    }
+
+    /// Non-negative rational whole-note duration for `rat_tick` tests.
+    /// Numerator ≤ 10_000 and denominator ∈ [1, 768] keeps the product
+    /// `r * 768` well inside `i64` for ceil/floor conversions.
+    pub fn arb_rational_nonneg() -> impl Strategy<Value = Rational64> {
+        prop_oneof![
+            1 => Just(Rational64::new(0, 1)),
+            1 => Just(Rational64::new(1, 4)),  // quarter note
+            1 => Just(Rational64::new(1, 1)),  // whole note
+            4 => (0i64..=10_000, 1i64..=768).prop_map(|(n, d)| Rational64::new(n, d)),
+        ]
+    }
+
+    /// Strategy over `SwingConfig`. Biased toward boundary values:
+    /// `amount = 0` (no swing), `amount = 16` (Cirklon maximum), and
+    /// `multiplier = 1` (the finest unit). The sampled arm covers
+    /// signed ranges so negative displacements are exercised too.
+    pub fn arb_swing() -> impl Strategy<Value = SwingConfig> {
+        prop_oneof![
+            1 => Just(SwingConfig { amount: 0, multiplier: 1 }),
+            1 => Just(SwingConfig { amount: 16, multiplier: 1 }),
+            1 => Just(SwingConfig { amount: 8, multiplier: 2 }),
+            4 => (-16i32..=16, 1i32..=16)
+                 .prop_map(|(amount, multiplier)| SwingConfig { amount, multiplier }),
+        ]
+    }
 }
 
 #[cfg(any(test, feature = "testkit"))]
-pub use strategies::{arb_bpm, arb_jitter_sigma_us, arb_sample_rate, arb_tbase};
+pub use strategies::{
+    arb_bpm, arb_jitter_sigma_us, arb_rational_nonneg, arb_sample_rate, arb_small_time, arb_swing,
+    arb_tbase, arb_tick, arb_time,
+};
 
 // ---------------------------------------------------------------------
 // Self-tests for the synthetic generator.
