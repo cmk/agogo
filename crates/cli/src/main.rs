@@ -440,6 +440,7 @@ mod sync_trace {
 #[cfg(feature = "core")]
 pub mod channel_trace {
     use agogo_core::channel::{Channel, ChannelMode, tick_stream};
+    use agogo_core::fxp::MicroBpm;
     use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
@@ -471,7 +472,19 @@ pub mod channel_trace {
             .divider
             .parse()
             .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
-        let stc = SampleTickConn::new(args.sr, args.bpm, PPQN);
+        // argv-boundary: f64 BPM → µBPM. f64 dies right here.
+        let bpm = {
+            let scaled = (args.bpm * 1.0e6).round();
+            if !(0.0..u32::MAX as f64).contains(&scaled) {
+                return Err(format!(
+                    "--bpm {} out of range (expected (0, {}] BPM)",
+                    args.bpm,
+                    u32::MAX as f64 / 1.0e6
+                ));
+            }
+            MicroBpm(scaled as u32)
+        };
+        let stc = SampleTickConn::new(args.sr, bpm, PPQN);
         let channel = Channel {
             mode: ChannelMode::MidiClock,
             divider,

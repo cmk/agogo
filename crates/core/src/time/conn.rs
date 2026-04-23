@@ -234,76 +234,80 @@ pub fn tbase() -> Conn<(TBase, TBase), TBase> {
 //
 // `connections::Conn<A, B>` uses bare `fn` pointers that cannot close
 // over runtime state, so the natural `Conn<Sample, Tick>` parameterised
-// on `(sr, bpm, ppqn)` is not expressible today (see agogo.md §7). The
-// pragmatic workaround is a struct mirroring `Conn`'s shape and laws.
+// on `(sr, bpm, ppqn)` is not expressible today. The pragmatic
+// workaround is a struct mirroring `Conn`'s `(ceil, inner, floor)`
+// shape with the same adjoint-law guarantees, all integer-valued.
 
 /// Sample ↔ Tick bridge parameterised by sample rate, tempo, and PPQN.
 ///
 /// Mirrors `connections::Conn<Sample, Tick>`'s `(ceil, inner, floor)`
 /// triple. The laws — round-trip on aligned inputs, monotonicity — are
 /// verified by proptest. Not a real `Conn` because its conversion
-/// depends on runtime `(sr, bpm)`; see agogo.md §7 for the migration
-/// plan if `connections` gains a closure-capturing variant.
+/// depends on runtime `(sr, bpm, ppqn)` — would require a closure-
+/// capturing variant upstream.
+///
+/// All arithmetic is integer (`MicroBpm` for tempo, `u128` intermediate).
+/// No floating-point.
 #[derive(Copy, Clone, Debug)]
 pub struct SampleTickConn {
     sr: u32,
-    bpm: f64,
+    bpm: crate::fxp::MicroBpm,
     ppqn: u32,
 }
 
 impl SampleTickConn {
     /// # Panics
     ///
-    /// Panics if `sr == 0`, `ppqn == 0`, or `bpm` is non-positive /
-    /// non-finite. These are programming errors — every call site
-    /// either ships fixed constants or validates at a CLI/config
-    /// boundary.
-    pub fn new(sr: u32, bpm: f64, ppqn: u32) -> Self {
+    /// Panics if `sr == 0`, `ppqn == 0`, or `bpm.0 == 0`. These are
+    /// programming errors — every call site either ships fixed
+    /// constants or validates at a CLI/config boundary.
+    pub fn new(sr: u32, bpm: crate::fxp::MicroBpm, ppqn: u32) -> Self {
         assert!(sr > 0, "sample rate must be positive");
         assert!(ppqn > 0, "ppqn must be positive");
-        assert!(
-            bpm.is_finite() && bpm > 0.0,
-            "bpm must be positive and finite, got {bpm}"
-        );
+        assert!(bpm.0 > 0, "bpm must be positive, got {:?}", bpm);
         Self { sr, bpm, ppqn }
     }
 
     pub fn sr(&self) -> u32 {
         self.sr
     }
-    pub fn bpm(&self) -> f64 {
+    pub fn bpm(&self) -> crate::fxp::MicroBpm {
         self.bpm
     }
     pub fn ppqn(&self) -> u32 {
         self.ppqn
     }
 
-    /// Tick → Sample. Exact when `tick × sr × 60` is divisible by
-    /// `bpm × ppqn` (e.g. 48 kHz / 120 BPM / 192 PPQN); otherwise
-    /// rounded to the nearest `u64`.
+    /// Tick → Sample. Exact when `tick × sr × 60 × 10⁶` is divisible
+    /// by `bpm_µ × ppqn` (e.g. 48 kHz / 120 BPM / 192 PPQN is exact);
+    /// otherwise rounded to the nearest `u64` (half-away-from-zero —
+    /// both quantities are non-negative).
     pub fn inner(&self, tick: Tick) -> u64 {
-        let num = u128::from(tick.0) * u128::from(self.sr) * 60;
-        let denom = self.bpm * f64::from(self.ppqn);
-        ((num as f64) / denom).round().max(0.0) as u64
+        // sample = tick · sr · 60 · 10⁶ / (bpm_µ · ppqn)
+        let num = u128::from(tick.0) * u128::from(self.sr) * 60 * 1_000_000;
+        let denom = u128::from(self.bpm.0) * u128::from(self.ppqn);
+        // Round to nearest: (num + denom/2) / denom. Half-up because
+        // both num and denom are non-negative.
+        ((num + denom / 2) / denom) as u64
     }
 
     /// Sample → Tick, rounding down (latest tick at-or-before `sample`).
     pub fn floor(&self, sample: u64) -> Tick {
-        let num = (sample as f64) * self.bpm * f64::from(self.ppqn);
-        let denom = f64::from(self.sr) * 60.0;
-        Self::to_tick((num / denom).floor())
+        // tick = sample · bpm_µ · ppqn / (sr · 60 · 10⁶)   (floor)
+        let num = u128::from(sample) * u128::from(self.bpm.0) * u128::from(self.ppqn);
+        let denom = u128::from(self.sr) * 60 * 1_000_000;
+        Self::to_tick(num / denom)
     }
 
     /// Sample → Tick, rounding up (next tick at-or-after `sample`).
     pub fn ceil(&self, sample: u64) -> Tick {
-        let num = (sample as f64) * self.bpm * f64::from(self.ppqn);
-        let denom = f64::from(self.sr) * 60.0;
-        Self::to_tick((num / denom).ceil())
+        let num = u128::from(sample) * u128::from(self.bpm.0) * u128::from(self.ppqn);
+        let denom = u128::from(self.sr) * 60 * 1_000_000;
+        Self::to_tick(num.div_ceil(denom))
     }
 
-    fn to_tick(x: f64) -> Tick {
-        let clamped = x.clamp(0.0, f64::from(u32::MAX));
-        Tick(clamped as u32)
+    fn to_tick(x: u128) -> Tick {
+        Tick(x.min(u128::from(u32::MAX)) as u32)
     }
 }
 
@@ -878,17 +882,21 @@ mod tests {
     // asserted in-module because `SampleTickConn` is not a genuine
     // `Conn` (cannot capture runtime `(sr, bpm)`).
 
+    fn mbpm(b: u32) -> crate::fxp::MicroBpm {
+        crate::fxp::MicroBpm::from_bpm_integer(b)
+    }
+
     #[test]
     fn sample_tick_inner_120bpm_48k_one_beat() {
         // 120 BPM, 192 PPQN, 48 kHz: one quarter note (tick 192) is
         // 0.5 s = 24 000 samples. Plan spot check.
-        let stc = SampleTickConn::new(48_000, 120.0, 192);
+        let stc = SampleTickConn::new(48_000, mbpm(120), 192);
         assert_eq!(stc.inner(Tick(192)), 24_000);
     }
 
     #[test]
     fn sample_tick_floor_and_ceil_bracket_inner() {
-        let stc = SampleTickConn::new(48_000, 120.0, 192);
+        let stc = SampleTickConn::new(48_000, mbpm(120), 192);
         // Halfway between tick 192 and 193: sample ≈ 24 062.5.
         // floor → 192, ceil → 193.
         let s = 24_062;
@@ -898,24 +906,23 @@ mod tests {
 
     #[test]
     fn sample_tick_zero_is_zero() {
-        let stc = SampleTickConn::new(48_000, 120.0, 192);
+        let stc = SampleTickConn::new(48_000, mbpm(120), 192);
         assert_eq!(stc.inner(Tick(0)), 0);
         assert_eq!(stc.floor(0), Tick(0));
         assert_eq!(stc.ceil(0), Tick(0));
     }
 
-    /// Sample-rate / BPM / PPQN ranges that keep integer samples-per-tick
-    /// exact (`sr * 60` divisible by `bpm * ppqn`) for the round-trip
-    /// property. 120 / 48 000 / 192 → 125; 60 / 44 100 / 96 → 459.375
-    /// (not exact), so the strategy sticks to combinations that are.
+    /// Sample-rate / BPM / PPQN combinations that keep integer
+    /// samples-per-tick exact (`sr · 60 · 10⁶` divisible by
+    /// `bpm_µ · ppqn`), needed for the round-trip property.
     fn arb_integer_stc() -> impl Strategy<Value = SampleTickConn> {
         prop_oneof![
-            Just(SampleTickConn::new(48_000, 120.0, 192)),
-            Just(SampleTickConn::new(48_000, 60.0, 192)),
-            Just(SampleTickConn::new(48_000, 240.0, 192)),
-            Just(SampleTickConn::new(96_000, 120.0, 192)),
-            Just(SampleTickConn::new(192_000, 120.0, 192)),
-            Just(SampleTickConn::new(48_000, 120.0, 24)),
+            Just(SampleTickConn::new(48_000, mbpm(120), 192)),
+            Just(SampleTickConn::new(48_000, mbpm(60), 192)),
+            Just(SampleTickConn::new(48_000, mbpm(240), 192)),
+            Just(SampleTickConn::new(96_000, mbpm(120), 192)),
+            Just(SampleTickConn::new(192_000, mbpm(120), 192)),
+            Just(SampleTickConn::new(48_000, mbpm(120), 24)),
         ]
     }
 

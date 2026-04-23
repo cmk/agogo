@@ -89,7 +89,7 @@ mod tests {
     use proptest::prelude::*;
 
     fn stc_120_48k() -> SampleTickConn {
-        SampleTickConn::new(48_000, 120.0, 192)
+        SampleTickConn::new(48_000, crate::fxp::MicroBpm::from_bpm_integer(120), 192)
     }
 
     fn zero_channel(divider: TBase) -> Channel {
