@@ -12,3 +12,4 @@ core = ["dep:agogo-core"]
 
 [dependencies]
 agogo-core = { workspace = true, optional = true }
+clap = { workspace = true }
