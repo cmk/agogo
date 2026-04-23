@@ -14,8 +14,12 @@ testkit = ["dep:proptest"]
 
 [dependencies]
 connections = { workspace = true }
+fixed = { workspace = true }
 num-rational = { workspace = true }
 proptest = { workspace = true, optional = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+rand_pcg = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
