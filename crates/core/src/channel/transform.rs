@@ -209,6 +209,11 @@ mod tests {
             let ev = transform(master, &ch, &stc_120_48k());
             for w in ev.windows(2) {
                 prop_assert!(
+                    w[0].tick <= w[1].tick,
+                    "ticks {:?} → {:?} non-monotonic under divider={:?} swing={:?}",
+                    w[0].tick, w[1].tick, divider, shuffle,
+                );
+                prop_assert!(
                     w[0].sample_index <= w[1].sample_index,
                     "events {:?} → {:?} non-monotonic under divider={:?} swing={:?}",
                     w[0], w[1], divider, shuffle,
