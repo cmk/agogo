@@ -47,3 +47,6 @@ confidence-threshold = 0.8
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Sibling crate: see Cargo.toml. cargo-deny's `unknown-git = deny`
+# otherwise rejects the gitlab.com URL.
+allow-git = ["https://gitlab.com/cmk/connections"]

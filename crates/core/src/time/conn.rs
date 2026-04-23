@@ -63,9 +63,16 @@ fn tpw_rational() -> Rational64 {
     Rational64::new(TPW, 1)
 }
 
+// Clamp an `i64` into the `u32` range. Saturates at both ends so a
+// huge rational produces `u32::MAX` ticks (not a wrapped value) and
+// a negative one produces 0.
+fn i64_to_tick(n: i64) -> Tick {
+    Tick(n.clamp(0, i64::from(u32::MAX)) as u32)
+}
+
 fn rt_ceil(r: Whole) -> Tick {
     let ceil = (r * tpw_rational()).ceil().to_integer();
-    Tick(ceil.max(0) as u32)
+    i64_to_tick(ceil)
 }
 
 fn rt_inner(n: Tick) -> Whole {
@@ -74,7 +81,7 @@ fn rt_inner(n: Tick) -> Whole {
 
 fn rt_floor(r: Whole) -> Tick {
     let floor = (r * tpw_rational()).floor().to_integer();
-    Tick(floor.max(0) as u32)
+    i64_to_tick(floor)
 }
 
 /// Galois connection between rational whole-note durations and ticks.
