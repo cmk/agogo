@@ -350,11 +350,15 @@ mod tests {
     proptest! {
         #[test]
         fn f64_phase_roundtrip(x in -1.0e6..1.0e6_f64) {
+            // Implementation is round-nearest on a Q0.32, so worst-case
+            // error is 2⁻³³. Plan's Verification table asserts < 2⁻³¹
+            // as the contract; pick that (still well-above-implementation)
+            // so a regression to half-ULP drift gets caught.
             let p = f64_phase_to_phase(x);
             let roundtrip = p.0 as f64 / (1u64 << 32) as f64;
             let expected = x.rem_euclid(1.0);
             prop_assert!(
-                (roundtrip - expected).abs() < 2.0f64.powi(-20),
+                (roundtrip - expected).abs() < 2.0f64.powi(-31),
                 "roundtrip={} expected={} for x={}",
                 roundtrip,
                 expected,
