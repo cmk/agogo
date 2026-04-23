@@ -346,10 +346,11 @@ pub mod link_probe {
         mut on_row: F,
     ) {
         let period_ms = period_ms.max(1);
-        // `sr` is already `>= 1` from the CLI parser (parse_positive_u32);
-        // coerce to `NonZeroU32` so the anchor's type-level invariant
-        // holds without an `unwrap` that suggests the path can fail.
-        let sr = NonZeroU32::new(sr.max(1)).expect("sr.max(1) is non-zero");
+        // The CLI parser (`parse_positive_u32`) already enforces
+        // `sr >= 1`. Preserve that invariant explicitly here so
+        // non-CLI callers fail fast on `sr = 0` instead of silently
+        // mapping to 1 and producing wrong sample-index math.
+        let sr = NonZeroU32::new(sr).expect("probe requires a non-zero sample rate");
         // Capture Link's current host-time once and use it as the
         // anchor origin so the phase column reads as "cycles elapsed
         // since probe start" rather than against an arbitrary epoch.
