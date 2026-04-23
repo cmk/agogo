@@ -9,7 +9,9 @@ publish = false
 [features]
 default = ["core"]
 core = ["dep:agogo-core"]
+link = ["dep:agogo-host-link"]
 
 [dependencies]
 agogo-core = { workspace = true, optional = true }
+agogo-host-link = { workspace = true, optional = true }
 bpaf = { workspace = true }
