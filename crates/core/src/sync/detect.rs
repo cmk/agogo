@@ -18,8 +18,10 @@ pub struct Peak {
 pub struct DetectorConfig {
     /// Minimum amplitude for a candidate to be considered a peak.
     pub threshold: f32,
-    /// Minimum number of samples between consecutive emitted peaks.
-    /// A peak at sample `n` blocks emission at samples `n+1 .. n+hold`.
+    /// Minimum number of samples between consecutive emitted peaks: a
+    /// peak at sample `n` suppresses any candidate at samples `n+1`
+    /// through `n + hold_samples - 1` inclusive; the next emission is
+    /// allowed at `n + hold_samples` or later.
     pub hold_samples: u32,
 }
 
@@ -103,8 +105,11 @@ impl PeakDetector {
                         (0.5 * (y_m1 - y_p1) as f64 / denom).clamp(-0.5, 0.5)
                     };
 
+                    // i128 keeps the arithmetic exact for any
+                    // u64 stream index — `start_index as i64` would
+                    // wrap above `i64::MAX`.
                     let centre_global =
-                        (start_index as i64) + (offset as i64) - 1;
+                        (start_index as i128) + (offset as i128) - 1;
                     let sample_index = centre_global as f64 + frac;
 
                     // Parabolic-fit apex amplitude.
