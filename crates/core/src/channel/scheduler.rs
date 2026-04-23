@@ -1,3 +1,221 @@
-//! Per-buffer scheduler: given `(channel, sr, bpm, buffer_window)`
-//! emits the `ScheduledEvent`s that fall inside the window. Filled in
-//! by T4 of Plan 03.
+//! Per-audio-buffer scheduler.
+//!
+//! Given a `Channel` and a `SampleTickConn`, [`tick_stream`] returns
+//! the `ScheduledEvent`s whose `sample_index` falls inside the half-
+//! open window `[buffer_start_sample, buffer_start_sample + frames)`.
+//!
+//! The plan's `tick_stream` signature names a `&mut PhaseSource` as
+//! its first argument. v0.1 does not read phase here — the tick range
+//! is derived algebraically from `SampleTickConn`, and the PLL is
+//! driven by the audio callback outside this function (Plan 05). The
+//! parameter is omitted rather than kept unused; documented in the
+//! sprint's Review section.
+
+use crate::channel::transform::{Channel, MAX_SHIFT_MS, ScheduledEvent, transform};
+use crate::time::conn::SampleTickConn;
+use crate::time::tick::Tick;
+
+/// Compute all `ScheduledEvent`s whose `sample_index` falls in
+/// `[buffer_start_sample, buffer_start_sample + frames)`.
+///
+/// Pure: no I/O, deterministic in its inputs, allocates only the
+/// returned `Vec`. Consecutive calls covering a contiguous sample
+/// range together yield each tick exactly once — no dupes, no gaps
+/// (see the `scheduler_block_equivalence` property in the test
+/// module).
+pub fn tick_stream(
+    channel: &Channel,
+    stc: &SampleTickConn,
+    buffer_start_sample: u64,
+    frames: usize,
+) -> Vec<ScheduledEvent> {
+    if frames == 0 {
+        return Vec::new();
+    }
+    let buffer_end = buffer_start_sample.saturating_add(frames as u64);
+
+    // Inverse of the transform's sample offset: event.sample_index =
+    // stc.inner(swung_tick) + shift_samples + offset_samples. For an
+    // event to land in [start, end), the swung_tick's natural sample
+    // must land in [start - delta, end - delta).
+    let shift_ms = channel.shift_ms.clamp(0.0, MAX_SHIFT_MS);
+    let sr_f = stc.sr() as f32;
+    let shift_samples: i64 = (shift_ms * sr_f / 1000.0).round() as i64;
+    let offset_samples: i64 = (channel.offset_ms * sr_f / 1000.0).round() as i64;
+    let delta: i64 = shift_samples + offset_samples;
+
+    let swung_lo_signed = buffer_start_sample as i64 - delta;
+    let swung_hi_signed = buffer_end as i64 - delta;
+    let swung_lo = swung_lo_signed.max(0) as u64;
+    let swung_hi = swung_hi_signed.max(0) as u64;
+
+    // Convert swung-tick sample bounds to tick bounds, then expand by
+    // swing displacement so off-beats (which are shifted by -d in tick
+    // space) are included.
+    let swing_d = channel.shuffle.displacement();
+    let lo_from_sample = stc.floor(swung_lo).0 as i64;
+    let hi_from_sample = stc.ceil(swung_hi).0 as i64;
+    let lo_tick = lo_from_sample.saturating_add(swing_d.min(0)).max(0) as u32;
+    let hi_tick_i = hi_from_sample.saturating_add(swing_d.max(0));
+    let hi_tick = hi_tick_i.clamp(0, u32::MAX as i64) as u32;
+
+    if lo_tick > hi_tick {
+        return Vec::new();
+    }
+
+    let master = (lo_tick..=hi_tick).map(Tick);
+    transform(master, channel, stc)
+        .into_iter()
+        .filter(|e| e.sample_index >= buffer_start_sample && e.sample_index < buffer_end)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arb::arb_tbase;
+    use crate::channel::mode::ChannelMode;
+    use crate::time::swing::SwingConfig;
+    use crate::time::tbase::TBase;
+    use proptest::prelude::*;
+
+    fn stc_120_48k() -> SampleTickConn {
+        SampleTickConn::new(48_000, 120.0, 192)
+    }
+
+    fn zero_channel(divider: TBase) -> Channel {
+        Channel {
+            mode: ChannelMode::MidiClock,
+            divider,
+            shuffle: SwingConfig {
+                amount: 0,
+                multiplier: 1,
+            },
+            shift_ms: 0.0,
+            offset_ms: 0.0,
+        }
+    }
+
+    // ── Spot checks ──────────────────────────────────────────────
+
+    #[test]
+    fn t4_120bpm_48k_fires_at_buffer_6_offset_24000() {
+        // One quarter note at 120 BPM = 24 000 samples. A 4 096-frame
+        // buffer starting at 20 480 covers samples 20 480..24 576 —
+        // exactly containing 24 000. The scheduler should emit one
+        // event.
+        let ch = zero_channel(TBase::T4);
+        let ev = tick_stream(&ch, &stc_120_48k(), 20_480, 4_096);
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].sample_index, 24_000);
+        assert_eq!(ev[0].tick.0, 192);
+    }
+
+    #[test]
+    fn empty_buffer_returns_empty() {
+        let ch = zero_channel(TBase::T4);
+        assert!(tick_stream(&ch, &stc_120_48k(), 0, 0).is_empty());
+    }
+
+    #[test]
+    fn buffer_with_no_events_returns_empty() {
+        // Between two quarter notes: buffer [1000, 5000) contains no
+        // multiple of 24 000.
+        let ch = zero_channel(TBase::T4);
+        assert!(tick_stream(&ch, &stc_120_48k(), 1_000, 4_000).is_empty());
+    }
+
+    #[test]
+    fn t16_buffer_covers_multiple_events() {
+        // 16th notes at 120 BPM 48 kHz: 6 000 samples apart. A buffer
+        // 24 000 samples wide at sample 0 covers 4 events at
+        // 0, 6 000, 12 000, 18 000.
+        let ch = zero_channel(TBase::T16);
+        let ev = tick_stream(&ch, &stc_120_48k(), 0, 24_000);
+        let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
+        assert_eq!(samples, vec![0, 6_000, 12_000, 18_000]);
+    }
+
+    // ── Property tests ───────────────────────────────────────────
+
+    /// Same `(divider, bounded-swing)` generator as `transform`'s
+    /// monotonicity test: swings whose displacement is smaller than the
+    /// divider's step are well-behaved.
+    fn arb_divider_with_bounded_swing() -> impl Strategy<Value = (TBase, SwingConfig)> {
+        arb_tbase().prop_flat_map(|d| {
+            let cap = (d.tick_count() as i32 - 1).max(0);
+            (
+                Just(d),
+                (-cap..=cap).prop_map(|amount| SwingConfig {
+                    amount,
+                    multiplier: 1,
+                }),
+            )
+        })
+    }
+
+    proptest! {
+        /// Plan property `scheduler_events_in_window`: every emitted
+        /// event's `sample_index` lies inside `[buffer_start,
+        /// buffer_start + frames)`.
+        #[test]
+        fn scheduler_events_in_window(
+            (divider, shuffle) in arb_divider_with_bounded_swing(),
+            shift_ms in 0.0f32..=MAX_SHIFT_MS,
+            offset_ms in -5.0f32..=5.0f32,
+            buffer_start in 0u64..=1_000_000,
+            frames in 1usize..=8_192,
+        ) {
+            let ch = Channel {
+                mode: ChannelMode::MidiClock,
+                divider,
+                shuffle,
+                shift_ms,
+                offset_ms,
+            };
+            let end = buffer_start + frames as u64;
+            let ev = tick_stream(&ch, &stc_120_48k(), buffer_start, frames);
+            for e in &ev {
+                prop_assert!(
+                    e.sample_index >= buffer_start,
+                    "event sample {} < start {}", e.sample_index, buffer_start
+                );
+                prop_assert!(
+                    e.sample_index < end,
+                    "event sample {} >= end {}", e.sample_index, end
+                );
+            }
+        }
+
+        /// Plan properties `scheduler_no_dupes` + `scheduler_no_gaps`
+        /// combined: consecutive buffer calls covering a contiguous
+        /// sample range yield the same event multiset (and order) as
+        /// a single call covering the whole range.
+        #[test]
+        fn scheduler_block_equivalence(
+            (divider, shuffle) in arb_divider_with_bounded_swing(),
+            shift_ms in 0.0f32..=MAX_SHIFT_MS,
+            offset_ms in -5.0f32..=5.0f32,
+            buf_size in 64usize..=2_048,
+            n_buffers in 1usize..=16,
+        ) {
+            let ch = Channel {
+                mode: ChannelMode::MidiClock,
+                divider,
+                shuffle,
+                shift_ms,
+                offset_ms,
+            };
+            let stc = stc_120_48k();
+            let total = buf_size * n_buffers;
+
+            let one_big = tick_stream(&ch, &stc, 0, total);
+            let mut pieces = Vec::new();
+            for b in 0..n_buffers {
+                let start = (b * buf_size) as u64;
+                pieces.extend(tick_stream(&ch, &stc, start, buf_size));
+            }
+            prop_assert_eq!(one_big, pieces);
+        }
+    }
+}

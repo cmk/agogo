@@ -12,4 +12,5 @@ pub mod scheduler;
 pub mod transform;
 
 pub use mode::ChannelMode;
+pub use scheduler::tick_stream;
 pub use transform::{Channel, MAX_SHIFT_MS, ScheduledEvent, transform};
