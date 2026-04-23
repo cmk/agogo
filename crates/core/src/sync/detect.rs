@@ -151,7 +151,7 @@ impl<R: SampleTime> PeakDetector<R> {
 mod tests {
     use super::*;
     use crate::arb::{arb_bpm, pulse_train};
-    use crate::fxp::{MicroBpm, Pico, S48, SampleRate};
+    use crate::fxp::{Tempo, Pico, S48, SampleRate};
     use proptest::prelude::*;
 
     /// Stamp a Hann-bell pulse into `buf`. Mirrors `pulse_train`'s
@@ -352,7 +352,7 @@ mod tests {
         }
     }
 
-    // Suppress MicroBpm import drain-warning on cfg(not(test)).
+    // Suppress Tempo import drain-warning on cfg(not(test)).
     #[allow(dead_code)]
-    fn _micro_bpm_unused_reminder(_: MicroBpm) {}
+    fn _tempo_unused_reminder(_: Tempo) {}
 }

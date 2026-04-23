@@ -24,20 +24,20 @@ genuine analog-DSP arithmetic, not stored time.
   consumer) was a runtime bug rather than a compile error.
 
 All three are gone: `Peak<R>` / `Pll<R>` / `PhaseSource<R>` are
-generic over `R: SampleTime`, `PllOutput { MicroBpm, Phase }` is
+generic over `R: SampleTime`, `PllOutput { Tempo, Phase }` is
 integer-typed, and rate mismatches are type errors.
 
 ### What changes
 
 **New module**: `agogo-core::fxp`
 - `Phase(u32)` — Q0.32 cycles; `wrapping_add` IS modular reduction.
-- `MicroBpm(u32)` — BPM × 10⁶, 10⁻⁶ BPM resolution.
+- `Tempo(u32)` — BPM × 10⁶, 10⁻⁶ BPM resolution.
 - `linear_u8(t, n)` / `smoothstep_u8(t, n)` — integer-exact Hermite,
   Q0.24 intermediate in `u128`.
 - f64→fxp boundary casts for the PI controller exit:
-  `f64_phase_to_phase`, `f64_bpm_to_micro_bpm`.
+  `f64_phase_to_phase`, `f64_bpm_to_tempo`.
 - f32→fxp boundary casts for the CLI argv:
-  `f32_bpm_to_micro_bpm`, `f32_jitter_us_to_sigma`,
+  `f32_bpm_to_tempo`, `f32_jitter_us_to_sigma`,
   `f32_threshold_to_q15`.
 - `SampleTime` trait over `Sxx` rate types with `from_bits_q48_16` /
   `to_bits_q48_16` / `from_sample` / `sample` for generic DSP code.
@@ -50,25 +50,25 @@ integer-typed, and rate mismatches are type errors.
   single f32 compare at the cpal ABI boundary),
   `PeakDetector<R>`. Parabolic-fit f64 locals stay contained —
   converted to Q48.16 bits before any value escapes.
-- `sync::pll` — `Pll<R>`, `PllOutput { bpm: MicroBpm, phase: Phase }`,
-  `last_pulse_sample: Option<R>`, `nominal_bpm` arg is `MicroBpm`.
+- `sync::pll` — `Pll<R>`, `PllOutput { bpm: Tempo, phase: Phase }`,
+  `last_pulse_sample: Option<R>`, `nominal_bpm` arg is `Tempo`.
   Control-law state untouched. One-per-`step()` boundary cast via
   `fxp::f64_{bpm,phase}_to_*`. Added `Pll::predicted_phase_at(elapsed:
   R) -> Phase` so `PhaseSource::External` can project phase without
   the f64 leaking out of the PI-exempt zone.
-- `sync::source` — `PhaseSource<R>`, `Internal { bpm: MicroBpm }`
+- `sync::source` — `PhaseSource<R>`, `Internal { bpm: Tempo }`
   uses a pure-integer NCO (`n · bpm · 2³²` kept together in `u128`
   to avoid per-sample rounding accumulation).
-- `arb::pulse_train<R: SampleTime>(MicroBpm, u32 ppq, Pico sigma, …)
+- `arb::pulse_train<R: SampleTime>(Tempo, u32 ppq, Pico sigma, …)
   -> (Vec<f32>, Vec<R>)` — PRNG flipped to `rand_pcg::Pcg64` +
   `rand_distr::Normal`. PCM buffer stays `Vec<f32>` (cpal ABI).
 - `time::envelope` — delegates `opening` / `closing` / `s_curve` to
   `fxp::{linear_u8, smoothstep_u8}`. Bit-exact on the midpoint-128
   spot check.
 - `cli::sync_trace::TraceRow` — `{sample: i64, sub_q16: i16,
-  bpm_u_bpm: u32, phase_q32: u32}`. CSV header and row format all
+  tempo_ubpm: u32, phase_q32: u32}`. CSV header and row format all
   integers. Argv f32 dies at the first line of the handler via
-  `f32_bpm_to_micro_bpm` / `f32_jitter_us_to_sigma`. Pinned to
+  `f32_bpm_to_tempo` / `f32_jitter_us_to_sigma`. Pinned to
   48 kHz this sprint; rejects other `--sr` values with a clear
   message.
 
@@ -89,7 +89,7 @@ bumped to `15d3791e281e30c4eacaa4e499ee5788894d9ab6`.
 - E2E smoke:
   `cargo run -p agogo-cli -- sync trace --bpm 120 --sr 48000 --ppq 24
   --jitter-us 50 --pulses 256 --seed 1` emits 256 integer rows;
-  final `bpm_u_bpm = 120_000_543` — within 50 000 µBPM of
+  final `tempo_ubpm = 120_000_543` — within 50 000 µBPM of
   120 × 10⁶ (the 0.05 BPM convergence gate).
 
 ### Known deviations
@@ -102,7 +102,7 @@ Four deviations documented in the plan's Review section:
    the detector algorithm is rate-agnostic so the loss is cosmetic).
 3. `integrator_clamp_keeps_bpm_positive` now asserts on PI-exempt
    `state().integrator` / `state().freq_hz` directly, since
-   `MicroBpm` can legitimately round to zero when smoothed_bpm is
+   `Tempo` can legitimately round to zero when smoothed_bpm is
    below 0.5 µBPM — that's not the regression the test guards.
 4. `source_internal_is_linear` tolerance relaxed to ±1 Q0.32 ULP
    because the implementation keeps `n · bpm · 2³²` together in u128
@@ -124,7 +124,7 @@ Four deviations documented in the plan's Review section:
 - `cargo test --workspace` — all passing.
 - `cargo clippy --all-targets -- -D warnings` — clean.
 - `cargo run -p agogo-cli -- sync trace --bpm 120 --sr 48000 --ppq 24 --jitter-us 50 --pulses 256 --seed 1`
-  prints 256 integer rows with final `bpm_u_bpm` within 50 000 µBPM
+  prints 256 integer rows with final `tempo_ubpm` within 50 000 µBPM
   of 120 × 10⁶.
 
 ## Local review (2026-04-23)
@@ -161,7 +161,7 @@ All six commits use the required conventional-prefix scheme (`plan:`, `feat(core
 
 **`source_internal_is_linear` rate pinned to S48**: The relaxation to ±1 Q0.32 ULP is correct — the per-call computation introduces ±1 from integer division. The test is load-bearing at large `n`.
 
-**`integrator_clamp_keeps_bpm_positive` — catches the original regression**: The new assertions on `state().integrator > -1.0` and `state().freq_hz > 0.0` correctly capture "`1 + integrator <= 0` driving smoothed_bpm non-positive". The `MicroBpm` output can legitimately round to zero well below the regression threshold, so asserting on the PI-exempt state is the appropriate shift.
+**`integrator_clamp_keeps_bpm_positive` — catches the original regression**: The new assertions on `state().integrator > -1.0` and `state().freq_hz > 0.0` correctly capture "`1 + integrator <= 0` driving smoothed_bpm non-positive". The `Tempo` output can legitimately round to zero well below the regression threshold, so asserting on the PI-exempt state is the appropriate shift.
 
 **`pll_no_panic_on_silence` weakened to no-panic only**: Correct for integer types (can't NaN or infinite). Not vacuous — appropriately narrowed.
 
@@ -201,5 +201,5 @@ None remaining (both "Important" items from the reviewer were addressed in-sprin
   to force the import on non-testkit builds more cleanly.
 - Update the now-stale envelope tests comment about "float arithmetic"
   after the T2 integer delegation.
-- Flip `SampleTickConn` to take `MicroBpm` instead of `f64 bpm`
+- Flip `SampleTickConn` to take `Tempo` instead of `f64 bpm`
   (tracked in the plan's Recommendations).
