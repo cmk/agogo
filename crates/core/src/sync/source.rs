@@ -3,12 +3,32 @@
 use crate::sync::detect::PeakDetector;
 use crate::sync::pll::Pll;
 
+/// Extension trait for user-provided phase sources.
+///
+/// Implementors plug into [`PhaseSource::Custom`] to expose a clock
+/// source that isn't one of the built-in `Internal` / `External`
+/// variants — e.g. Ableton Link in `agogo-host-link`.
+///
+/// **RT-safety contract:** `phase_at_sample` must be non-blocking and
+/// allocation-free (it may be called from the audio thread).
+/// `feed_samples` may also run on the audio thread; same constraints
+/// apply, though an implementation whose tempo source is external to
+/// the audio stream (Link, DIN) is free to treat it as a no-op.
+pub trait PhaseSourceImpl: Send {
+    fn phase_at_sample(&mut self, n: u64) -> f32;
+    fn feed_samples(&mut self, samples: &[f32], start: u64);
+}
+
 /// A clock from which downstream consumers can query the current
 /// beat-phase at any stream-global sample index.
 ///
 /// `Internal` is a stateless free-running clock — phase is purely
 /// `(bpm, sr, n)`. `External` wraps a peak detector + PLL pair driven
 /// by audio samples handed in via [`PhaseSource::feed_samples`].
+/// `Custom` holds an arbitrary [`PhaseSourceImpl`] — the extension
+/// point for host integrations (Ableton Link, DIN sync, etc.) that
+/// live in sibling crates to keep their build dependencies out of
+/// `agogo-core`.
 ///
 /// **Unit caveat**: `Internal::phase_at_sample` returns *beat-phase*
 /// (cycles per quarter-note ∈ [0, 1)), while `External::phase_at_sample`
@@ -25,6 +45,11 @@ pub enum PhaseSource {
         detector: PeakDetector,
         pll: Pll,
     },
+    /// Arbitrary user-provided clock. Lives behind a box to keep the
+    /// enum `Sized` and to allow sibling crates (like
+    /// `agogo-host-link`) to contribute clock implementations without
+    /// their deps leaking into `agogo-core`.
+    Custom(Box<dyn PhaseSourceImpl + Send>),
 }
 
 impl PhaseSource {
@@ -53,12 +78,14 @@ impl PhaseSource {
                     projected as f32
                 }
             },
+            PhaseSource::Custom(inner) => inner.phase_at_sample(n),
         }
     }
 
     /// Feed a block of audio samples into the clock. No-op for
-    /// `Internal`; routes to detector → PLL for `External`. Silent
-    /// blocks (no peaks detected) leave the PLL untouched —
+    /// `Internal`; routes to detector → PLL for `External`; delegates
+    /// to the `PhaseSourceImpl` for `Custom`. Silent blocks (no peaks
+    /// detected) leave the PLL untouched —
     /// [`phase_at_sample`] projects analytically from the last
     /// observed pulse and does not need the PLL to be free-run
     /// through silence.
@@ -70,6 +97,7 @@ impl PhaseSource {
                     pll.step(Some(p.sample_index));
                 }
             }
+            PhaseSource::Custom(inner) => inner.feed_samples(samples, start),
         }
     }
 }
@@ -188,5 +216,48 @@ mod tests {
                 expected_inc, observed_inc, n, bpm, sr
             );
         }
+    }
+
+    /// Proves the `Custom` variant delegates through to the boxed
+    /// `PhaseSourceImpl`. Mock counts each call via shared atomics so
+    /// the test can inspect without downcasting the trait object.
+    #[test]
+    fn phase_source_custom_dispatches() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        struct Mock {
+            phase_calls: Arc<AtomicU64>,
+            feed_calls: Arc<AtomicU64>,
+            last_n: Arc<AtomicU64>,
+        }
+        impl PhaseSourceImpl for Mock {
+            fn phase_at_sample(&mut self, n: u64) -> f32 {
+                self.phase_calls.fetch_add(1, Ordering::SeqCst);
+                self.last_n.store(n, Ordering::SeqCst);
+                0.42
+            }
+            fn feed_samples(&mut self, _samples: &[f32], _start: u64) {
+                self.feed_calls.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let phase_calls = Arc::new(AtomicU64::new(0));
+        let feed_calls = Arc::new(AtomicU64::new(0));
+        let last_n = Arc::new(AtomicU64::new(0));
+        let mock = Mock {
+            phase_calls: Arc::clone(&phase_calls),
+            feed_calls: Arc::clone(&feed_calls),
+            last_n: Arc::clone(&last_n),
+        };
+
+        let mut src = PhaseSource::Custom(Box::new(mock));
+        assert_eq!(src.phase_at_sample(42), 0.42);
+        assert_eq!(src.phase_at_sample(100), 0.42);
+        src.feed_samples(&[0.1, 0.2], 7);
+
+        assert_eq!(phase_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(feed_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(last_n.load(Ordering::SeqCst), 100);
     }
 }
