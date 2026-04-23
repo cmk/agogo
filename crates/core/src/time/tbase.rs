@@ -86,6 +86,51 @@ impl Ple for TBase {
     }
 }
 
+impl std::fmt::Display for TBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            TBase::T1 => "t1",
+            TBase::T2 => "t2",
+            TBase::T4 => "t4",
+            TBase::T8 => "t8",
+            TBase::T16 => "t16",
+            TBase::T32 => "t32",
+            TBase::T64 => "t64",
+            TBase::T2t => "t2t",
+            TBase::T4t => "t4t",
+            TBase::T8t => "t8t",
+            TBase::T16t => "t16t",
+            TBase::T32t => "t32t",
+            TBase::T64t => "t64t",
+            TBase::T128t => "t128t",
+        };
+        f.write_str(s)
+    }
+}
+
+impl std::str::FromStr for TBase {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "t1" => Ok(TBase::T1),
+            "t2" => Ok(TBase::T2),
+            "t4" => Ok(TBase::T4),
+            "t8" => Ok(TBase::T8),
+            "t16" => Ok(TBase::T16),
+            "t32" => Ok(TBase::T32),
+            "t64" => Ok(TBase::T64),
+            "t2t" => Ok(TBase::T2t),
+            "t4t" => Ok(TBase::T4t),
+            "t8t" => Ok(TBase::T8t),
+            "t16t" => Ok(TBase::T16t),
+            "t32t" => Ok(TBase::T32t),
+            "t64t" => Ok(TBase::T64t),
+            "t128t" => Ok(TBase::T128t),
+            _ => Err(format!("unknown TBase: {s}")),
+        }
+    }
+}
+
 // ── Lattice operations ────────────────────────────────────────────
 //
 // The 14 tick counts are all of the form `2^i * 3^j` with `j ∈ {0, 1}`
@@ -189,6 +234,32 @@ mod tests {
     #[test]
     fn tick_count_t4_is_ppqn() {
         assert_eq!(TBase::T4.tick_count(), 192);
+    }
+
+    // ── FromStr / Display ─────────────────────────────────────────
+
+    #[test]
+    fn tbase_fromstr_display_round_trip() {
+        for tb in TBase::ALL {
+            let s = tb.to_string();
+            let parsed: TBase = s.parse().expect("parse own Display");
+            assert_eq!(parsed, tb);
+        }
+    }
+
+    #[test]
+    fn tbase_fromstr_accepts_case_insensitive() {
+        assert_eq!("T16".parse::<TBase>().unwrap(), TBase::T16);
+        assert_eq!("t16".parse::<TBase>().unwrap(), TBase::T16);
+        assert_eq!("T128t".parse::<TBase>().unwrap(), TBase::T128t);
+        assert_eq!("T8T".parse::<TBase>().unwrap(), TBase::T8t);
+    }
+
+    #[test]
+    fn tbase_fromstr_rejects_garbage() {
+        assert!("whatever".parse::<TBase>().is_err());
+        assert!("t3".parse::<TBase>().is_err()); // not in the 14
+        assert!("".parse::<TBase>().is_err());
     }
 
     #[test]
