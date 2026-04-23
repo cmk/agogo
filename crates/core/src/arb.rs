@@ -341,3 +341,18 @@ pub fn arb_rational_nonneg() -> impl Strategy<Value = Rational64> {
         4 => (0i64..=10_000, 1i64..=768).prop_map(|(n, d)| Rational64::new(n, d)),
     ]
 }
+
+/// Strategy over `SwingConfig`. Biased toward boundary values:
+/// `amount = 0` (no swing), `amount = 16` (Cirklon maximum), and
+/// `multiplier = 1` (the finest unit). The sampled arm covers signed
+/// ranges so negative displacements are exercised too.
+pub fn arb_swing() -> impl Strategy<Value = crate::time::swing::SwingConfig> {
+    use crate::time::swing::SwingConfig;
+    prop_oneof![
+        1 => Just(SwingConfig { amount: 0, multiplier: 1 }),
+        1 => Just(SwingConfig { amount: 16, multiplier: 1 }),
+        1 => Just(SwingConfig { amount: 8, multiplier: 2 }),
+        4 => (-16i32..=16, 1i32..=16)
+             .prop_map(|(amount, multiplier)| SwingConfig { amount, multiplier }),
+    ]
+}
