@@ -31,6 +31,33 @@ enum Command {
         #[bpaf(external(channel_sub))]
         sub: ChannelSub,
     },
+    /// Ableton Link integration utilities.
+    #[cfg(feature = "link")]
+    #[bpaf(command("link"))]
+    Link {
+        #[bpaf(external(link_sub))]
+        sub: LinkSub,
+    },
+}
+
+#[cfg(feature = "link")]
+#[derive(Debug, Clone, Bpaf)]
+enum LinkSub {
+    /// Probe a live Ableton Link session: emit CSV
+    /// `t_ms,peers,tempo_bpm` at a chosen period for a chosen duration.
+    /// Phase is deferred to the post-fxp sprint.
+    #[bpaf(command("probe"))]
+    Probe {
+        /// Tempo to initialise Link with (BPM).
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f64), fallback(120.0))]
+        initial_bpm: f64,
+        /// Total probe duration in ms.
+        #[bpaf(long, argument("DURATION_MS"), parse(parse_positive_u32), fallback(3_000))]
+        duration_ms: u32,
+        /// Sampling period in ms.
+        #[bpaf(long, argument("PERIOD_MS"), parse(parse_positive_u32), fallback(100))]
+        period_ms: u32,
+    },
 }
 
 #[derive(Debug, Clone, Bpaf)]
@@ -237,12 +264,88 @@ fn main() {
                 std::process::exit(2);
             }
         }
+        #[cfg(feature = "link")]
+        Some(Command::Link {
+            sub:
+                LinkSub::Probe {
+                    initial_bpm,
+                    duration_ms,
+                    period_ms,
+                },
+        }) => {
+            println!("t_ms,peers,tempo_bpm");
+            for row in link_probe::probe(initial_bpm, duration_ms, period_ms) {
+                println!("{},{},{:.4}", row.t_ms, row.peers, row.tempo_bpm);
+            }
+        }
         None => {
             #[cfg(feature = "core")]
             let tag = "with core";
             #[cfg(not(feature = "core"))]
             let tag = "core disabled";
             println!("agogo-cli ({tag})");
+        }
+    }
+}
+
+#[cfg(feature = "link")]
+pub mod link_probe {
+    use agogo_host_link::LinkClock;
+    use std::thread::sleep;
+    use std::time::{Duration, Instant};
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct ProbeRow {
+        pub t_ms: u32,
+        pub peers: u64,
+        pub tempo_bpm: f64,
+    }
+
+    /// Run a probe loop for `duration_ms`, sampling every `period_ms`.
+    /// Peer discovery is enabled for the duration of the call and
+    /// disabled before return. Blocks the calling thread; intended for
+    /// the CLI, not the audio callback.
+    pub fn probe(initial_bpm: f64, duration_ms: u32, period_ms: u32) -> Vec<ProbeRow> {
+        let mut clock = LinkClock::new(initial_bpm);
+        clock.enable(true);
+        let start = Instant::now();
+        let mut rows = Vec::new();
+        let duration = Duration::from_millis(u64::from(duration_ms));
+        let period = Duration::from_millis(u64::from(period_ms));
+        loop {
+            let elapsed = start.elapsed();
+            if elapsed > duration {
+                break;
+            }
+            rows.push(ProbeRow {
+                t_ms: elapsed.as_millis() as u32,
+                peers: clock.num_peers(),
+                tempo_bpm: clock.tempo(),
+            });
+            sleep(period);
+        }
+        clock.enable(false);
+        rows
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Smoke-test: probing for 100ms at 50ms period emits at
+        /// least one row; first row has t_ms ≈ 0, peers = 0 (no LAN
+        /// peer in test), and tempo equal to the initial BPM.
+        #[test]
+        fn probe_emits_rows_and_keeps_initial_tempo() {
+            let rows = probe(125.0, 100, 50);
+            assert!(!rows.is_empty(), "probe returned no rows");
+            let first = rows[0];
+            assert_eq!(first.peers, 0);
+            assert!(
+                (first.tempo_bpm - 125.0).abs() < 1e-9,
+                "tempo {} differs from initial 125.0",
+                first.tempo_bpm
+            );
         }
     }
 }
