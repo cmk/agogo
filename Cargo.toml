@@ -19,7 +19,11 @@ agogo-core = { path = "crates/core" }
 connections = { path = "../connections" }
 
 # Shared dependencies
+<<<<<<< HEAD
 clap = { version = "4", features = ["derive"] }
+=======
+num-rational = "0.4"
+>>>>>>> 42ec292 (feat(time): five Galois connections (ticks, rat_tick, quantize_at, time, tbase))
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

@@ -14,16 +14,11 @@ testkit = ["dep:proptest"]
 
 [dependencies]
 connections = { workspace = true }
+num-rational = { workspace = true }
 proptest = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-proptest = { workspace = true, optional = true }
-
-[features]
-# Exposes the shared proptest strategies in `crate::arb` to downstream
-# crates' test code. Activates the optional `proptest` dep.
-proptest = ["dep:proptest"]
 
 [dev-dependencies]
 proptest = { workspace = true }

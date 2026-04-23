@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc c4c04e640d376f563322975ec66b8fa6ee2541df6ddcbd0832dd99f53661adc5 # shrinks to a = T1, b = T128t
+cc 9ea3c1f21e639c4e487d5b54033f55c3ad783c0ad14438ec9db25310ddc7d895 # shrinks to tb = T1, t = Time { beats: 1, base: T128t }
+cc b76f6142dd476868aad8e585649ec2a177b66a6c572850c6de665f5361e7b2dc # shrinks to a = T1, b = T128t, z = T128t
