@@ -44,13 +44,18 @@ enum Command {
 #[derive(Debug, Clone, Bpaf)]
 enum LinkSub {
     /// Probe a live Ableton Link session: emit CSV
-    /// `t_ms,peers,tempo_bpm` at a chosen period for a chosen duration.
-    /// Phase is deferred to the post-fxp sprint.
+    /// `t_ms,peers,tempo_bpm,phase` at a chosen period for a chosen
+    /// duration. `phase` is the session's beat-phase at sample
+    /// `t_ms × sr / 1000` mapped through a static `HostTimeAnchor`
+    /// captured at probe start.
     #[bpaf(command("probe"))]
     Probe {
         /// Tempo to initialise Link with (BPM).
         #[bpaf(long, argument("BPM"), parse(parse_positive_f64), fallback(120.0))]
         initial_bpm: f64,
+        /// Sample rate for the sample-index ↔ host-time mapping.
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
+        sr: u32,
         /// Total probe duration in ms.
         #[bpaf(long, argument("DURATION_MS"), parse(parse_positive_u32), fallback(3_000))]
         duration_ms: u32,
@@ -279,13 +284,17 @@ fn main() {
             sub:
                 LinkSub::Probe {
                     initial_bpm,
+                    sr,
                     duration_ms,
                     period_ms,
                 },
         }) => {
-            println!("t_ms,peers,tempo_bpm");
-            link_probe::probe(initial_bpm, duration_ms, period_ms, |row| {
-                println!("{},{},{:.4}", row.t_ms, row.peers, row.tempo_bpm);
+            println!("t_ms,peers,tempo_bpm,phase");
+            link_probe::probe(initial_bpm, sr, duration_ms, period_ms, |row| {
+                println!(
+                    "{},{},{:.4},{:.6}",
+                    row.t_ms, row.peers, row.tempo_bpm, row.phase
+                );
             });
         }
         None => {
@@ -300,7 +309,8 @@ fn main() {
 
 #[cfg(feature = "link")]
 pub mod link_probe {
-    use agogo_host_link::LinkClock;
+    use agogo_core::sync::PhaseSourceImpl;
+    use agogo_host_link::{HostTimeAnchor, LinkClock};
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
@@ -312,6 +322,9 @@ pub mod link_probe {
         pub t_ms: u64,
         pub peers: u64,
         pub tempo_bpm: f64,
+        /// Beat-phase in `[0, 1)` at sample `t_ms × sr / 1000`,
+        /// mapped through the anchor captured at probe start.
+        pub phase: f64,
     }
 
     /// Run a probe loop for `duration_ms`, sampling every `period_ms`.
@@ -326,12 +339,28 @@ pub mod link_probe {
     /// and starve the row consumer if it can't keep up.
     pub fn probe<F: FnMut(ProbeRow)>(
         initial_bpm: f64,
+        sr: u32,
         duration_ms: u32,
         period_ms: u32,
         mut on_row: F,
     ) {
         let period_ms = period_ms.max(1);
-        let mut clock = LinkClock::new(initial_bpm);
+        // Capture Link's current host-time once, use it as the
+        // anchor origin so the phase column reads as "cycles elapsed
+        // since probe start" rather than against an arbitrary epoch.
+        let probe_clock = LinkClock::new(
+            initial_bpm,
+            HostTimeAnchor {
+                host_origin_micros: 0,
+                sample_rate: sr.max(1),
+            },
+        );
+        let anchor = HostTimeAnchor {
+            host_origin_micros: probe_clock.clock_micros(),
+            sample_rate: sr.max(1),
+        };
+        drop(probe_clock);
+        let mut clock = LinkClock::new(initial_bpm, anchor);
         clock.enable(true);
         let start = Instant::now();
         let duration = Duration::from_millis(u64::from(duration_ms));
@@ -341,10 +370,16 @@ pub mod link_probe {
             if elapsed > duration {
                 break;
             }
+            let t_ms = elapsed.as_millis() as u64;
+            // Convert t_ms → sample index using the anchor's sample
+            // rate, then query phase.
+            let n = t_ms * u64::from(anchor.sample_rate) / 1_000;
+            let phase_u32 = clock.phase_at_sample(n).0;
             on_row(ProbeRow {
-                t_ms: elapsed.as_millis() as u64,
+                t_ms,
                 peers: clock.num_peers(),
                 tempo_bpm: clock.tempo(),
+                phase: f64::from(phase_u32) / (1u64 << 32) as f64,
             });
             sleep(period);
         }
@@ -357,16 +392,17 @@ pub mod link_probe {
 
         /// Smoke-test: probing for 100ms at 50ms period emits at
         /// least one row; first row has t_ms ≈ 0, peers = 0 (no LAN
-        /// peer in test), and tempo equal to the initial BPM.
+        /// peer in test), tempo equal to the initial BPM, and phase
+        /// in `[0, 1)`.
         ///
         /// Touches the network via `LinkClock::enable(true)` under
         /// the hood. `peers == 0` fails if a real Link peer is
-        /// reachable on the test LAN; Plan 08 adds a
+        /// reachable on the test LAN; Plan 09 adds a
         /// `fixture_or_skip!`-style network gate.
         #[test]
         fn probe_emits_rows_and_keeps_initial_tempo() {
             let mut rows = Vec::new();
-            probe(125.0, 100, 50, |row| rows.push(row));
+            probe(125.0, 48_000, 100, 50, |row| rows.push(row));
             assert!(!rows.is_empty(), "probe returned no rows");
             let first = rows[0];
             assert_eq!(first.peers, 0);
@@ -374,6 +410,11 @@ pub mod link_probe {
                 (first.tempo_bpm - 125.0).abs() < 1e-9,
                 "tempo {} differs from initial 125.0",
                 first.tempo_bpm
+            );
+            assert!(
+                (0.0..1.0).contains(&first.phase),
+                "phase {} not in [0, 1)",
+                first.phase
             );
         }
     }
