@@ -10,3 +10,6 @@
 pub mod mode;
 pub mod scheduler;
 pub mod transform;
+
+pub use mode::ChannelMode;
+pub use transform::{Channel, MAX_SHIFT_MS, ScheduledEvent, transform};
