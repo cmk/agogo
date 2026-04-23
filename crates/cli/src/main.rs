@@ -24,19 +24,37 @@ enum SyncSub {
     ///
     /// One row per detected peak: `sample_index,bpm_estimate,phase_estimate`.
     Trace {
-        #[arg(long)]
+        #[arg(long, value_parser = parse_positive_f32)]
         bpm: f32,
-        #[arg(long)]
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
         sr: u32,
-        #[arg(long)]
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
         ppq: u32,
-        #[arg(long, default_value_t = 0.0)]
+        #[arg(long, default_value_t = 0.0, value_parser = parse_non_negative_f32)]
         jitter_us: f32,
-        #[arg(long)]
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..))]
         pulses: u32,
         #[arg(long, default_value_t = 1)]
         seed: u64,
     },
+}
+
+fn parse_positive_f32(s: &str) -> Result<f32, String> {
+    let v: f32 = s.parse().map_err(|e| format!("not a number: {e}"))?;
+    if v.is_finite() && v > 0.0 {
+        Ok(v)
+    } else {
+        Err(format!("must be a positive finite number, got {v}"))
+    }
+}
+
+fn parse_non_negative_f32(s: &str) -> Result<f32, String> {
+    let v: f32 = s.parse().map_err(|e| format!("not a number: {e}"))?;
+    if v.is_finite() && v >= 0.0 {
+        Ok(v)
+    } else {
+        Err(format!("must be a non-negative finite number, got {v}"))
+    }
 }
 
 fn main() {

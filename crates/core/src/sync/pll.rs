@@ -121,6 +121,13 @@ impl Pll {
     pub fn nominal_freq_hz(&self) -> f64 {
         self.nominal_freq_hz
     }
+    /// Stream-global sample index of the most-recent observed pulse,
+    /// or `None` if no pulse has been seen yet. Lets external phase
+    /// queries anchor analytic projections without driving the NCO
+    /// per-sample through silent intervals.
+    pub fn last_pulse_sample(&self) -> Option<f64> {
+        self.last_pulse_sample
+    }
 
     /// Smoothed BPM derived from the integrator only. This is the
     /// running mean — no per-pulse `kp * e` modulation.
@@ -152,8 +159,13 @@ impl Pll {
 
             self.state.integrator += self.cfg.ki * phase_error;
             let clamp_frac = self.cfg.clamp_hz / self.nominal_freq_hz;
+            // `clamp_hz / nominal_freq_hz` can exceed 1.0 (e.g. 50/48
+            // at default settings), which would let `integrator <=
+            // -1.0` and drive the smoothed BPM negative. Floor the
+            // lower bound just above -1 so `1 + integrator > 0`.
+            let min_integrator = (-clamp_frac).max(-1.0 + f64::EPSILON);
             self.state.integrator =
-                self.state.integrator.clamp(-clamp_frac, clamp_frac);
+                self.state.integrator.clamp(min_integrator, clamp_frac);
 
             let correction = self.cfg.kp * phase_error + self.state.integrator;
             self.state.freq_hz = self.nominal_freq_hz * (1.0 + correction);
@@ -222,6 +234,30 @@ mod tests {
     #[test]
     fn jitter_free_tracks_perfectly() {
         assert_bpm_converges(120.0, 0.0, 1);
+    }
+
+    #[test]
+    fn integrator_clamp_keeps_bpm_positive() {
+        // Drive a sustained negative phase error so the integrator
+        // saturates against its lower clamp; the smoothed BPM must
+        // stay strictly positive (regression for a bug where
+        // `clamp_hz / nominal_freq_hz > 1.0` allowed
+        // `1 + integrator <= 0`).
+        let sr = 48_000u32;
+        let ppq = 24u32;
+        let nominal_bpm = 120.0_f32;
+        let mut pll = Pll::new(PllSettings::DEFAULT, nominal_bpm, sr, ppq);
+        // Pretend pulses arrive at 100× the expected spacing (extremely
+        // late) for many steps — this would push the integrator
+        // negative without bound if uncuumed.
+        let huge_spacing = sr as f64 * 100.0; // ~100 s between pulses
+        let mut t = 0.0_f64;
+        for _ in 0..1000 {
+            let out = pll.step(Some(t));
+            assert!(out.bpm > 0.0, "smoothed bpm went non-positive: {}", out.bpm);
+            assert!(out.bpm.is_finite());
+            t += huge_spacing;
+        }
     }
 
     proptest! {
