@@ -122,7 +122,9 @@ mod tests {
     // ── Shared proptest strategy ─────────────────────────────────
 
     fn arb_env_range() -> impl Strategy<Value = (Tick, Tick)> {
-        (1u32..=10_000, 0u32..=20_000).prop_map(|(n, t)| (Tick(t), Tick(n)))
+        // Equal-sized ranges keep interior (`t < n`), boundary (`t == n`),
+        // and saturation (`t > n`) each well-represented, roughly 50/ε/50.
+        (1u32..=10_000, 0u32..=10_000).prop_map(|(n, t)| (Tick(t), Tick(n)))
     }
 
     // ── Property tests ───────────────────────────────────────────

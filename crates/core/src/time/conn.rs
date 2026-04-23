@@ -190,6 +190,13 @@ fn time_pair_floor(ab: (Time, Time)) -> Time {
 /// `ceil = meet (GCD)`, `floor = join (LCM)`, `inner = diagonal`.
 /// Following Haskell convention — the relevant order here is
 /// divisibility of tick counts, not magnitude.
+///
+/// # Panics
+///
+/// `floor` panics if the LCM of the two input tick counts exceeds
+/// `u32::MAX`. For musically-bounded `Time` values this is
+/// unreachable; tests use `arb_small_time` (tick counts ≤ 38_400,
+/// LCM well inside `u32`) to stay safely bounded.
 pub fn time() -> Conn<(Time, Time), Time> {
     Conn::new(time_pair_ceil, time_pair_inner, time_pair_floor)
 }
@@ -752,6 +759,31 @@ mod tests {
             let once = c.inner(c.ceil((a, b)));
             let twice = c.inner(c.ceil(once));
             prop_assert_eq!(once, twice);
+        }
+
+        /// Monotonicity under refine-to order, matching the pattern
+        /// used for the other four connections. `ceil = GCD` is
+        /// monotone because `gcd` is monotone in each argument under
+        /// divisibility; `inner` (diagonal) inherits monotonicity
+        /// component-wise from the input.
+        #[test]
+        fn time_monotonic(
+            a1 in arb_small_time(), a2 in arb_small_time(),
+            b1 in arb_small_time(), b2 in arb_small_time(),
+            z1 in arb_small_time(), z2 in arb_small_time(),
+        ) {
+            let c = time();
+            if time_refine_le(a1, a2) && time_refine_le(b1, b2) {
+                prop_assert!(
+                    time_refine_le(c.ceil((a1, b1)), c.ceil((a2, b2)))
+                );
+            }
+            if time_refine_le(z1, z2) {
+                let (x1, y1) = c.inner(z1);
+                let (x2, y2) = c.inner(z2);
+                prop_assert!(time_refine_le(x1, x2));
+                prop_assert!(time_refine_le(y1, y2));
+            }
         }
     }
 }
