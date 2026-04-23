@@ -9,27 +9,19 @@
 //! `opening n t`. We follow the plan (Rust convention: position-then-
 //! length reads naturally as `opening(at: t, over: n)`).
 //!
-//! **Rounding.** Intermediate arithmetic is `f64`; the result is
-//! converted with `f64::round()` (ties round half away from zero) and
-//! clamped into `0..=255`. Edge cases match the Haskell:
-//! `n == 0` collapses to the envelope's fully-open value (255 for
-//! `opening` / `s_curve`, 0 for `closing`).
+//! **Rounding.** All arithmetic is integer: delegation to
+//! `fxp::linear_u8` and `fxp::smoothstep_u8` keeps the old bit-exact
+//! rounding semantics (ties round half-away-from-zero via the shared
+//! Q0.24 / u128 path) without any floating-point. Edge cases match
+//! the Haskell: `n == 0` collapses to the envelope's fully-open value
+//! (255 for `opening` / `s_curve`, 0 for `closing`).
 
+use crate::fxp;
 use crate::time::tick::Tick;
 
 /// Linear opening envelope: 0 at `t = 0`, 255 at `t = n`.
 pub fn opening(t: Tick, n: Tick) -> u8 {
-    if n.0 == 0 {
-        return 255;
-    }
-    if t.0 == 0 {
-        return 0;
-    }
-    if t.0 >= n.0 {
-        return 255;
-    }
-    let x = f64::from(t.0) / f64::from(n.0);
-    (x * 255.0).round().clamp(0.0, 255.0) as u8
+    fxp::linear_u8(t.0, n.0)
 }
 
 /// Linear closing envelope: 255 at `t = 0`, 0 at `t = n`.
@@ -37,31 +29,13 @@ pub fn closing(t: Tick, n: Tick) -> u8 {
     if n.0 == 0 {
         return 0;
     }
-    if t.0 == 0 {
-        return 255;
-    }
-    if t.0 >= n.0 {
-        return 0;
-    }
-    let x = f64::from(n.0 - t.0) / f64::from(n.0);
-    (x * 255.0).round().clamp(0.0, 255.0) as u8
+    255 - fxp::linear_u8(t.0.min(n.0), n.0)
 }
 
 /// Hermite smoothstep envelope: `3x² - 2x³` scaled to `0..=255`.
 /// Monotonically non-decreasing on `[0, n]`.
 pub fn s_curve(t: Tick, n: Tick) -> u8 {
-    if n.0 == 0 {
-        return 255;
-    }
-    if t.0 == 0 {
-        return 0;
-    }
-    if t.0 >= n.0 {
-        return 255;
-    }
-    let x = f64::from(t.0) / f64::from(n.0);
-    let y = 3.0 * x * x - 2.0 * x * x * x;
-    (y * 255.0).round().clamp(0.0, 255.0) as u8
+    fxp::smoothstep_u8(t.0, n.0)
 }
 
 #[cfg(test)]
