@@ -247,13 +247,11 @@ mod tests {
     /// are near-equal after one wrap.
     #[test]
     fn phase_wraps_once_per_beat_at_120bpm_48k() {
-        let c0 = LinkClock::new(120.0, zero_anchor_48k());
-        let now = c0.clock_micros();
-        let anchor = HostTimeAnchor {
-            host_origin_micros: now,
+        let mut c = LinkClock::new(120.0, zero_anchor_48k());
+        c.set_anchor(HostTimeAnchor {
+            host_origin_micros: c.clock_micros(),
             sample_rate: 48_000,
-        };
-        let mut c = LinkClock::new(120.0, anchor);
+        });
 
         let p0 = c.phase_at_sample(0);
         let p24k = c.phase_at_sample(24_000);
@@ -278,15 +276,11 @@ mod tests {
     #[test]
     fn phase_never_returns_exact_u32_max() {
         for bpm in [30.0, 120.0, 200.0, 999.0] {
-            let c0 = LinkClock::new(bpm, zero_anchor_48k());
-            let now = c0.clock_micros();
-            let mut c = LinkClock::new(
-                bpm,
-                HostTimeAnchor {
-                    host_origin_micros: now,
-                    sample_rate: 48_000,
-                },
-            );
+            let mut c = LinkClock::new(bpm, zero_anchor_48k());
+            c.set_anchor(HostTimeAnchor {
+                host_origin_micros: c.clock_micros(),
+                sample_rate: 48_000,
+            });
             for n in (0u64..100_000).step_by(37) {
                 let p = c.phase_at_sample(n);
                 assert!(p.0 < u32::MAX, "saw u32::MAX at n={n}, bpm={bpm}");
@@ -305,37 +299,48 @@ mod tests {
     /// `phase_at_time(t, 1.0)` values diverge.
     proptest::proptest! {
         /// The per-stride phase delta must match the tempo-driven
-        /// expectation (stride samples at 48 kHz → `2 · stride / 48 000`
-        /// cycles at 120 BPM), regardless of the anchor's host-origin.
-        /// Anchor shifts change absolute phase but not the rate of
-        /// phase advance.
+        /// expectation (stride samples at `sample_rate` → `stride × bpm
+        /// / 60 / sample_rate` cycles), regardless of the anchor's
+        /// host-origin. Anchor shifts change absolute phase but not
+        /// the rate of phase advance.
+        ///
+        /// BPM is sampled as µBPM across Link's `[20, 999]` BPM range
+        /// so the test doesn't fix the tempo at 120 — the invariant's
+        /// "tempo-driven" claim has to hold across Link's range.
         #[test]
         fn phase_delta_matches_tempo(
             host_origin in -1_000_000i64..=1_000_000i64,
             stride in 100u64..=10_000u64,
+            bpm_mbpm in 20_000_000u32..=999_000_000u32,
         ) {
+            let bpm = f64::from(bpm_mbpm) / 1_000_000.0;
             let mut c = LinkClock::new(
-                120.0,
+                bpm,
                 HostTimeAnchor { host_origin_micros: host_origin, sample_rate: 48_000 },
             );
             let p0 = c.phase_at_sample(0);
             let p1 = c.phase_at_sample(stride);
             let diff = p1.0.wrapping_sub(p0.0);
 
-            // Expected Q0.32 ULPs per stride at 120 BPM / 48 kHz:
-            //   cycles_per_stride = stride · 2 / 48_000
+            // Expected Q0.32 ULPs per stride:
+            //   cycles_per_stride = stride · (µBPM / 10⁶) / 60 / sample_rate
+            //                     = stride · µBPM / (60 · 10⁶ · sample_rate)
             //   ULPs = cycles · 2^32 rounded down.
-            let expected =
-                (stride as u128 * 2 * (1u128 << 32) / 48_000u128) as u32;
+            // Keep the whole numerator in u128 (stride · µBPM · 2³² is
+            // at most ~10⁴ · 10⁹ · 4.3·10⁹ ≈ 4.3·10²², fits in 128 bits).
+            let expected = (u128::from(stride)
+                * u128::from(bpm_mbpm)
+                * (1u128 << 32)
+                / (60u128 * 1_000_000u128 * 48_000u128)) as u32;
 
             let err = phase_circular_ulps(Phase(diff), Phase(expected));
             // Generous tolerance: Link's session state can drift a
-            // few microseconds between the two captures; 2^22 ULPs
+            // few microseconds between the two captures; 2²² ULPs
             // ≈ 0.1% of a full cycle is well above that noise floor.
             proptest::prop_assert!(
                 err < (1u32 << 22),
-                "delta != expected: diff={}, expected={}, err_ulp={}",
-                diff, expected, err
+                "delta != expected: diff={}, expected={}, err_ulp={}, bpm_µ={}",
+                diff, expected, err, bpm_mbpm
             );
         }
     }

@@ -345,22 +345,25 @@ pub mod link_probe {
         mut on_row: F,
     ) {
         let period_ms = period_ms.max(1);
-        // Capture Link's current host-time once, use it as the
+        let sr = sr.max(1);
+        // Capture Link's current host-time once and use it as the
         // anchor origin so the phase column reads as "cycles elapsed
         // since probe start" rather than against an arbitrary epoch.
-        let probe_clock = LinkClock::new(
+        // Construct with a placeholder anchor, read `clock_micros`,
+        // then `set_anchor` with the real origin — avoids the
+        // two-AblLink-instance throwaway pattern.
+        let mut clock = LinkClock::new(
             initial_bpm,
             HostTimeAnchor {
                 host_origin_micros: 0,
-                sample_rate: sr.max(1),
+                sample_rate: sr,
             },
         );
-        let anchor = HostTimeAnchor {
-            host_origin_micros: probe_clock.clock_micros(),
-            sample_rate: sr.max(1),
-        };
-        drop(probe_clock);
-        let mut clock = LinkClock::new(initial_bpm, anchor);
+        clock.set_anchor(HostTimeAnchor {
+            host_origin_micros: clock.clock_micros(),
+            sample_rate: sr,
+        });
+        let anchor = clock.anchor();
         clock.enable(true);
         let start = Instant::now();
         let duration = Duration::from_millis(u64::from(duration_ms));
