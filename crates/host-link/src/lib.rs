@@ -13,3 +13,5 @@
 //! keeping the CMake + C++ toolchain off the critical path.
 
 pub mod link;
+
+pub use link::LinkClock;
