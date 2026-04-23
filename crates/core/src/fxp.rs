@@ -110,8 +110,14 @@ pub struct Tempo(pub u32);
 impl Tempo {
     pub const ZERO: Self = Self(0);
 
+    /// Construct from an integer BPM. Panics if `n > 4294` (`n × 10⁶`
+    /// overflows `u32`). `checked_mul` avoids the silent release-build
+    /// wrap that plain `n * 1_000_000` would produce.
     pub const fn from_bpm_integer(n: u32) -> Self {
-        Self(n * 1_000_000)
+        match n.checked_mul(1_000_000) {
+            Some(v) => Self(v),
+            None => panic!("Tempo::from_bpm_integer: n must be ≤ 4294"),
+        }
     }
 }
 
@@ -192,7 +198,8 @@ pub fn f32_threshold_to_q15(t: f32) -> u16 {
 
 /// Linear ramp `t/n` rendered as `u8`. Endpoints: `linear_u8(0, n) = 0`,
 /// `linear_u8(n, n) = 255`. Degenerate `n = 0` returns 255 (treat
-/// "no span" as fully closed).
+/// "no span" as fully open — matches `opening(0, 0) = 255` in
+/// `time::envelope`).
 pub fn linear_u8(t: u32, n: u32) -> u8 {
     if n == 0 {
         return 255;

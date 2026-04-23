@@ -76,10 +76,13 @@ impl<R: SampleTime> PhaseSource<R> {
                 None => Phase::ZERO,
                 Some(last) => {
                     // Elapsed samples since the last observed pulse,
-                    // represented in R's Q48.16. Signed is fine because
-                    // `n` can be earlier than `last`.
+                    // represented in R's Q48.16. `n` is u64 but Q48.16
+                    // only covers i64 — panic if a caller feeds a
+                    // stream index past ~2⁴⁷ samples (93 000 years at
+                    // 48 kHz, never reached in practice).
                     let last_bits = last.to_bits_q48_16();
-                    let n_bits = (n as i128 * 65_536) as i64;
+                    let n_bits = i64::try_from(n as i128 * 65_536)
+                        .expect("sample index in Q48.16 must fit in i64");
                     let elapsed_bits = n_bits.wrapping_sub(last_bits);
                     let elapsed = R::from_bits_q48_16(elapsed_bits);
                     pll.predicted_phase_at(elapsed)

@@ -122,13 +122,17 @@ impl<R: SampleTime> PeakDetector<R> {
                         (0.5 * (y_m1 - y_p1) as f64 / denom).clamp(-0.5, 0.5)
                     };
 
-                    // i128 keeps the arithmetic exact for any u64
-                    // stream index — `start_index as i64` would wrap
-                    // above `i64::MAX`.
+                    // i128 keeps the intermediate product exact; the
+                    // final i64 cast bounds the stream to the Q48.16
+                    // range (≤ 2⁴⁷ samples ≈ 93 000 years at 48 kHz).
+                    // Panic rather than wrap silently if a caller
+                    // exceeds that.
                     let centre_int: i128 =
                         (start_index as i128) + (offset as i128) - 1;
                     let frac_q16 = (frac * 65_536.0).round() as i64;
-                    let bits_q48_16 = (centre_int * 65_536) as i64 + frac_q16;
+                    let bits_q48_16 = i64::try_from(centre_int * 65_536)
+                        .expect("stream index in Q48.16 must fit in i64")
+                        + frac_q16;
 
                     peaks.push(Peak {
                         sample_index: R::from_bits_q48_16(bits_q48_16),

@@ -192,11 +192,11 @@ fn main() {
                     std::process::exit(2);
                 }
                 let rows = sync_trace::trace(bpm, ppq, jitter_us, pulses, seed);
-                println!("sample,sub_q16,tempo_ubpm,phase_q32");
+                println!("bits_q48_16,tempo_ubpm,phase_q32");
                 for r in rows {
                     println!(
-                        "{},{},{},{}",
-                        r.sample, r.sub_q16, r.tempo_ubpm, r.phase_q32
+                        "{},{},{}",
+                        r.bits_q48_16, r.tempo_ubpm, r.phase_q32
                     );
                 }
             }
@@ -388,13 +388,19 @@ mod sync_trace {
     };
     use agogo_core::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
 
-    /// CSV row — integer fields throughout.
+    /// CSV row — integer fields throughout. Peak position is emitted
+    /// as a single Q48.16 `bits_q48_16` value rather than split
+    /// integer/fractional parts; splitting with signed fractional bits
+    /// is inconsistent for negative sample positions (the integer part
+    /// borrows from the fractional, so a Q48.16 value just below zero
+    /// decomposes to `(-1, 0xFFFF)` with `0xFFFF as i16 = -1`, which
+    /// doesn't reconstruct the original). The single-column form
+    /// sidesteps the sign-convention question; consumers decode with
+    /// `sample = bits >> 16`, `frac = bits & 0xFFFF` as needed.
     #[derive(Debug, Clone, Copy)]
     pub struct TraceRow {
-        /// Integer sample part of the peak position at S48's 48 kHz.
-        pub sample: i64,
-        /// Q16 sub-sample fraction (signed i16-range).
-        pub sub_q16: i16,
+        /// Peak position as raw Q48.16 bits at S48's 48 kHz.
+        pub bits_q48_16: i64,
         /// PLL smoothed BPM × 10⁶.
         pub tempo_ubpm: u32,
         /// PLL phase, Q0.32 cycles.
@@ -427,8 +433,7 @@ mod sync_trace {
             .map(|p| {
                 let out = pll.step(Some(p.sample_index));
                 TraceRow {
-                    sample: p.sample_index.sample(),
-                    sub_q16: (p.sample_index.to_bits_q48_16() & 0xFFFF) as i16,
+                    bits_q48_16: p.sample_index.to_bits_q48_16(),
                     tempo_ubpm: out.bpm.0,
                     phase_q32: out.phase.0,
                 }

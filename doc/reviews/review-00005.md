@@ -94,7 +94,7 @@ bumped to `15d3791e281e30c4eacaa4e499ee5788894d9ab6`.
 
 ### Known deviations
 
-Four deviations documented in the plan's Review section:
+Five deviations documented in the plan's Review section:
 
 1. `sync trace` CLI pins `R = S48` rather than multi-rate dispatch
    (deferred to v0.1 binary-runtime sprint).
@@ -108,6 +108,8 @@ Four deviations documented in the plan's Review section:
    because the implementation keeps `n · bpm · 2³²` together in u128
    rather than precomputing a per-sample inc — more accurate at
    large n, diff varies by ±1 at integer boundaries.
+5. `PULSE_WIDTH_SECS: f64` → `PULSE_WIDTH_PS: Pico` (constant type
+   rename; spelled out for symmetry with the rest of the flip).
 
 ### Out of scope
 
@@ -203,3 +205,154 @@ None remaining (both "Important" items from the reviewer were addressed in-sprin
   after the T2 integer delegation.
 - Flip `SampleTickConn` to take `Tempo` instead of `f64 bpm`
   (tracked in the plan's Recommendations).
+
+<!-- gh-id: 3130259306 -->
+### Copilot on [`doc/plans/plan-2026-04-23-03.md`](https://github.com/cmk/agogo/pull/5#discussion_r3130259306) (2026-04-23 10:58 UTC)
+
+The plan’s T5 snippet for `Pll::new` still shows an `sr: u32` parameter and bounds `R: SampleRate`, but the PR changes `Pll` to `R: SampleTime` and removes the explicit sample-rate argument. Please update the snippet to avoid a stale constructor signature.
+```suggestion
+pub struct Pll<R: SampleTime> { … last_pulse_sample: Option<R> … }
+impl<R: SampleTime> Pll<R> {
+    pub fn new(cfg: PllSettings, nominal_bpm: MicroBpm, ppq: u32) -> Self;
+```
+
+<!-- gh-id: 3130259361 -->
+### Copilot on [`crates/core/src/fxp.rs:114`](https://github.com/cmk/agogo/pull/5#discussion_r3130259361) (2026-04-23 10:58 UTC)
+
+`MicroBpm::from_bpm_integer` multiplies in `u32` (`n * 1_000_000`) and will wrap on overflow in release (e.g. `n > 4294`). Since this is a public constructor, it should avoid silent overflow (e.g. use `checked_mul` and saturate/panic, or take `u64` and clamp into range).
+```suggestion
+        match n.checked_mul(1_000_000) {
+            Some(value) => Self(value),
+            None => panic!("MicroBpm::from_bpm_integer overflow"),
+        }
+```
+
+<!-- gh-id: 3130259390 -->
+### Copilot on [`crates/cli/src/main.rs:312`](https://github.com/cmk/agogo/pull/5#discussion_r3130259390) (2026-04-23 10:58 UTC)
+
+`TraceRow { sample, sub_q16 }` is derived by splitting Q48.16 as `sample = bits >> 16` and `sub_q16 = low16 as i16`. For negative sub-sample offsets this decomposition is inconsistent (the fixed-point representation borrows from the integer part, so `low16` is near 0xFFFF and becomes negative even though the fractional part is actually ~0.75). If the intent is “integer sample + signed Q16 offset”, compute `sample` by rounding to nearest (or explicitly choose a convention) and set `sub_q16 = bits - (sample<<16)`; alternatively emit a single `bits_q48_16` column to make the CSV unambiguous.
+
+<!-- gh-id: 3130259409 -->
+### Copilot on [`crates/core/src/sync/source.rs:54`](https://github.com/cmk/agogo/pull/5#discussion_r3130259409) (2026-04-23 10:58 UTC)
+
+The `n_bits` computation casts `(n as i128 * 65_536)` down to `i64`, which truncates once `n > i64::MAX / 65_536` (even though `n` is a `u64`). Either keep this in `i128` until the final conversion, or add an explicit (debug_)assert/checked conversion so out-of-range `n` can’t silently corrupt the elapsed time used for phase projection.
+```suggestion
+                    let n_bits = i64::try_from(n as i128 * 65_536)
+                        .expect("sample index in Q48.16 must fit in i64");
+```
+
+<!-- gh-id: 3130259435 -->
+### Copilot on [`crates/core/src/sync/detect.rs:132`](https://github.com/cmk/agogo/pull/5#discussion_r3130259435) (2026-04-23 10:58 UTC)
+
+The comment says the i128 arithmetic is exact for any `u64` stream index, but `bits_q48_16` is still computed via `as i64` which will truncate for `start_index` beyond the representable Q48.16 range. Consider making the range limitation explicit (debug_assert/checked conversion/clamp) and adjust the comment so it doesn’t imply full `u64` coverage.
+
+<!-- gh-id: 3130259467 -->
+### Copilot on [`crates/core/src/fxp.rs:195`](https://github.com/cmk/agogo/pull/5#discussion_r3130259467) (2026-04-23 10:58 UTC)
+
+Docstring mismatch: `linear_u8` returns 255 for `n = 0`, but the comment describes this as “fully closed”. In the rest of the codebase 255 corresponds to fully open (e.g. `opening(n=0) == 255`). Please reword the doc comment so the degenerate-case semantics are described correctly.
+```suggestion
+/// "no span" as fully open).
+```
+
+<!-- gh-id: 4161800387 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-23 10:58 UTC](https://github.com/cmk/agogo/pull/5#pullrequestreview-4161800387))
+
+## Pull request overview
+
+This PR refactors `agogo-core` and `agogo-cli` to remove `f32`/`f64` from stored state and public APIs by introducing fixed-point types (`Phase`, `MicroBpm`) and rate-typed sample-time generics (`R: SampleTime`), while keeping the PLL control-law internals as `f64`.
+
+**Changes:**
+- Add `agogo-core::fxp` with fixed-point types/conversions and a `SampleTime` trait over the `connections` rate tier.
+- Flip sync modules (`detect`, `pll`, `source`) and envelope helpers to consume fixed-point and rate-typed sample positions (Q48.16).
+- Update `agogo-cli sync trace` to output integer CSV fields and pin runtime rate to 48 kHz.
+
+### Reviewed changes
+
+Copilot reviewed 13 out of 14 changed files in this pull request and generated 8 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00005.md | Adds a local review record for the fixed-point refactor work. |
+| doc/plans/plan-2026-04-23-03.md | Adds the implementation plan/spec for the refactor. |
+| crates/core/src/time/envelope.rs | Delegates envelope shaping to integer `fxp` ramp/smoothstep. |
+| crates/core/src/sync/source.rs | Converts `PhaseSource` to `R: SampleTime` and fixed-point `Phase` output. |
+| crates/core/src/sync/pll.rs | Converts PLL surface to `MicroBpm`/`Phase` and adds `predicted_phase_at`. |
+| crates/core/src/sync/detect.rs | Converts peak detector to `Peak<R>` with Q48.16 sample positions and Q0.15 threshold. |
+| crates/core/src/lib.rs | Exposes new `fxp` module from the core crate root. |
+| crates/core/src/fxp.rs | Introduces fixed-point primitives, conversions, and the `SampleTime` trait. |
+| crates/core/src/arb.rs | Updates `pulse_train` + strategies to fixed-point/time-typed APIs and uses `rand_pcg`/`rand_distr`. |
+| crates/core/Cargo.toml | Adds new dependencies required by fixed-point + pulse-train generation. |
+| crates/cli/src/main.rs | Updates `sync trace` CLI to integer CSV output and uses argv→fxp conversions. |
+| Cargo.toml | Bumps `connections` git rev and adds workspace dependencies. |
+| Cargo.lock | Records new dependency graph (fixed/rand/rand_distr/rand_pcg + transitive deps). |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3130259516 -->
+### Copilot on [`doc/reviews/review-00005.md:174`](https://github.com/cmk/agogo/pull/5#discussion_r3130259516) (2026-04-23 10:58 UTC)
+
+The review says “Four deviations” earlier, but later claims “Five documented deviations” in the plan conformance summary. Please reconcile this count (either update the summary to “Four” or add the missing deviation) so the document is internally consistent.
+```suggestion
+T0–T7: All implemented. Five documented deviations all accurately described. No undocumented deviations. Out-of-scope check: `channel/` and `time::conn` not touched.
+```
+
+<!-- gh-id: 3130259571 -->
+### Copilot on [`doc/plans/plan-2026-04-23-03.md`](https://github.com/cmk/agogo/pull/5#discussion_r3130259571) (2026-04-23 10:58 UTC)
+
+The plan’s T3 signature still includes an `sr: u32` argument and uses `R: SampleRate`, but the implementation in this PR makes `pulse_train` generic over `R: SampleTime` and derives `sr` from `R::HZ`. Please update the plan snippet to match the actual function signature so readers don’t copy an API that no longer exists.
+```suggestion
+Signature flip: `pulse_train<R: SampleTime>(bpm: MicroBpm, ppq: u32,
+jitter_sigma: Pico, n_pulses: u32, seed: u64) -> (Vec<f32>, Vec<R>)`.
+Derive the sample rate from `R::HZ`. Swap the custom
+xorshift+Box-Muller for `rand_pcg::Pcg64::seed_from_u64` +
+`rand_distr::Normal`. Hann-bell waveform synthesis continues to write
+into a `Vec<f32>` PCM buffer (that's the cpal ABI; documented
+exception).
+```
+
+<!-- gh-id: 3130480698 -->
+#### ↳ cmk ([2026-04-23 11:40 UTC](https://github.com/cmk/agogo/pull/5#discussion_r3130480698))
+
+Fixed — plan T5 snippet updated to `R: SampleTime` and dropped the `sr: u32` argument in `Pll::new` to match the implementation.
+
+<!-- gh-id: 3130481662 -->
+#### ↳ cmk ([2026-04-23 11:40 UTC](https://github.com/cmk/agogo/pull/5#discussion_r3130481662))
+
+Fixed — `Tempo::from_bpm_integer` now uses `checked_mul` and panics with a clear message if `n > 4294` instead of silently wrapping in release.
+
+<!-- gh-id: 3130484861 -->
+#### ↳ cmk ([2026-04-23 11:41 UTC](https://github.com/cmk/agogo/pull/5#discussion_r3130484861))
+
+Fixed — collapsed `(sample: i64, sub_q16: i16)` into a single `bits_q48_16: i64` column. As you note, the split is unsound for negative sample positions because the integer part borrows from the fractional and `0xFFFF as i16 = -1`; emitting raw Q48.16 bits sidesteps the sign-convention question entirely. CSV consumers decode with `sample = bits >> 16` / `frac = bits & 0xFFFF` as needed.
+
+<!-- gh-id: 3130485936 -->
+#### ↳ cmk ([2026-04-23 11:41 UTC](https://github.com/cmk/agogo/pull/5#discussion_r3130485936))
+
+Fixed — switched to `i64::try_from(n as i128 * 65_536).expect("sample index in Q48.16 must fit in i64")` so an out-of-range `n` panics cleanly instead of silently corrupting the elapsed-time projection.
+
+<!-- gh-id: 3130486912 -->
+#### ↳ cmk ([2026-04-23 11:41 UTC](https://github.com/cmk/agogo/pull/5#discussion_r3130486912))
+
+Fixed — switched the `centre_int * 65_536` cast to `i64::try_from(...).expect("stream index in Q48.16 must fit in i64")` and rewrote the comment to document the Q48.16 range limit (~2⁴⁷ samples) rather than imply full u64 coverage.
+
+<!-- gh-id: 3130514191 -->
+#### ↳ cmk ([2026-04-23 11:47 UTC](https://github.com/cmk/agogo/pull/5#discussion_r3130514191))
+
+Fixed — docstring reworded to "no span = fully open" to match the `n = 0` return of 255 and the sibling `opening(0, 0) = 255` in `time::envelope`.
+
+<!-- gh-id: 3130515170 -->
+#### ↳ cmk ([2026-04-23 11:47 UTC](https://github.com/cmk/agogo/pull/5#discussion_r3130515170))
+
+Fixed — review-00005.md now reads "Five" in both places, and the missing fifth item (`PULSE_WIDTH_SECS: f64` → `PULSE_WIDTH_PS: Pico`, deviation #5 in the plan's Review section) is added to the Known-deviations list.
+
+<!-- gh-id: 3130516213 -->
+#### ↳ cmk ([2026-04-23 11:47 UTC](https://github.com/cmk/agogo/pull/5#discussion_r3130516213))
+
+Fixed — T3 snippet updated to `pulse_train<R: SampleTime>(bpm: Tempo, ppq: u32, jitter_sigma: Pico, n_pulses: u32, seed: u64)`, dropping the stale `sr: u32` argument now that sample rate is derived from `R::HZ`.
