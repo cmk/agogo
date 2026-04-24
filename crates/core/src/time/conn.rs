@@ -315,7 +315,7 @@ impl SampleTickConn {
 ///
 /// Mirrors upstream `connections::Conn<Pico, Sxx>`'s adjoint
 /// triple but with a *runtime* rate. The sample side uses
-/// `connections::sample::Q48_16` (= `FixedI64<U16>`) exactly like
+/// `connections::conn::sample::Q48_16` (= `FixedI64<U16>`) exactly like
 /// `F12S48` / `F12S44` / etc. — this is what makes the bidirectional
 /// Galois laws exact for every IEEE-reasonable rate (44.1 kHz
 /// included), because the fractional sample type carries sub-sample
@@ -369,22 +369,22 @@ impl PicoSampleConn {
     /// no realistic caller should saturate — but silently wrapping
     /// on out-of-range Q48.16 inputs would turn a contract violation
     /// into a quiet data-corruption bug, so we clamp explicitly.
-    pub fn inner(&self, s: connections::sample::Q48_16) -> connections::fixed::Pico {
+    pub fn inner(&self, s: connections::conn::sample::Q48_16) -> connections::conn::fixed::Pico {
         let n: i128 = i128::from(s.to_bits()) * self.num;
         let clamped = n
             .div_euclid(self.den)
             .clamp(i128::from(i64::MIN), i128::from(i64::MAX));
-        connections::fixed::Pico(clamped as i64)
+        connections::conn::fixed::Pico(clamped as i64)
     }
 
     /// Pico → Sample (Q48.16), rounding up: smallest `s` with
     /// `inner(s) ≥ p`.
-    pub fn ceil(&self, p: connections::fixed::Pico) -> connections::sample::Q48_16 {
+    pub fn ceil(&self, p: connections::conn::fixed::Pico) -> connections::conn::sample::Q48_16 {
         let n: i128 = i128::from(p.0) * self.den;
         let q = n.div_euclid(self.num);
         let r = n.rem_euclid(self.num);
         let bits = if r != 0 { q + 1 } else { q };
-        connections::sample::Q48_16::from_bits(bits as i64)
+        connections::conn::sample::Q48_16::from_bits(bits as i64)
     }
 
     /// Pico → Sample (Q48.16): the Galois right-adjoint of `inner`
@@ -394,9 +394,9 @@ impl PicoSampleConn {
     /// `floor_div(p × DEN + DEN − 1, NUM)` differs from the naïve
     /// floor by at most one ULP, and IS what the adjoint laws
     /// require. Mirrors upstream `F12SXX::floor`.
-    pub fn floor(&self, p: connections::fixed::Pico) -> connections::sample::Q48_16 {
+    pub fn floor(&self, p: connections::conn::fixed::Pico) -> connections::conn::sample::Q48_16 {
         let n: i128 = i128::from(p.0) * self.den + (self.den - 1);
-        connections::sample::Q48_16::from_bits(n.div_euclid(self.num) as i64)
+        connections::conn::sample::Q48_16::from_bits(n.div_euclid(self.num) as i64)
     }
 }
 
@@ -415,7 +415,7 @@ fn gcd_i128(mut a: i128, mut b: i128) -> i128 {
 mod tests {
     use super::*;
     use crate::arb::{arb_rational_nonneg, arb_small_time, arb_tbase, arb_tick, arb_time};
-    use connections::order::Ple;
+    use connections::lattice::Ple;
     use proptest::prelude::*;
 
     // ── Spot checks ──────────────────────────────────────────────
@@ -1068,8 +1068,8 @@ mod tests {
     // Runtime-parameterised Pico ↔ Sample bridge (Q48.16 samples).
     // Laws mirror upstream `connections::Conn<Pico, Sxx>` exactly.
 
-    use connections::fixed::Pico;
-    use connections::sample::Q48_16;
+    use connections::conn::fixed::Pico;
+    use connections::conn::sample::Q48_16;
 
     /// All standard audio rates. Q48.16 carries sub-sample pico
     /// precision, so the adjoint laws are exact at every rate —

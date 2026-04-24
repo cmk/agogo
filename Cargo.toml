@@ -39,7 +39,7 @@ agogo-core = { path = "crates/core" }
 # agogo + connections on the same machine, add a gitignored
 # `.cargo/config.toml` with a `[patch]` override pointing at
 # `../connections` to avoid the cache-round-trip.
-connections = { git = "https://gitlab.com/cmk/connections.git", rev = "883b4ea7a5b72b82d68872d4f246151f1ee388cf" }
+connections = { git = "https://gitlab.com/cmk/connections.git", rev = "ccc4d85a69a3071a0a493820046cc6e737d2aacb" }
 
 # Shared dependencies
 bpaf = { version = "0.9", features = ["derive"] }

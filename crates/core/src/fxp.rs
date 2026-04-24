@@ -20,14 +20,14 @@
 //!   contained, never stored, converted to fxp at the first
 //!   exit boundary.
 
-pub use connections::extended::Extended;
-pub use connections::fixed::{
-    Centi, Deci, F64F00, F64F01, F64F02, F64F03, F64F06, F64F09, F64F12,
-    F12F06, F12F03, F12F09, F12F00, HasResolution, Micro, Milli, Nano,
+pub use connections::conn::fixed::{
+    Centi, Deci, F12F00, F12F03, F12F06, F12F09, F64F00, F64F01, F64F02,
+    F64F03, F64F06, F64F09, F64F12, HasResolution, Micro, Milli, Nano,
     Pico, Uni,
 };
-pub use connections::float_ext::FloatExt;
-pub use connections::sample::{S44, S48, S88, S96, S176, S192, SampleRate};
+pub use connections::conn::float::ExtendedFloat;
+pub use connections::conn::sample::{S44, S48, S88, S96, S176, S192, SampleRate};
+pub use connections::extended::Extended;
 
 // ────────────────────────────────────────────────────────────────────
 // SampleTime — agogo-local convenience trait over the rate types.
@@ -38,7 +38,7 @@ pub use connections::sample::{S44, S48, S88, S96, S176, S192, SampleRate};
 // ────────────────────────────────────────────────────────────────────
 
 /// Common Q48.16-bits interface over the `Sxx` rate types from
-/// `connections::sample`. Lets generic DSP code accept an arbitrary
+/// `connections::conn::sample`. Lets generic DSP code accept an arbitrary
 /// `R: SampleTime` rather than committing to a single rate.
 pub trait SampleTime: SampleRate + Copy + Default + Ord + core::fmt::Debug {
     /// Construct from raw Q48.16 bits.
