@@ -139,6 +139,38 @@ pub fn render_buffer(
     render_clock_block(events, sink);
 }
 
+// ── Per-channel dispatch ────────────────────────────────────────────
+
+use crate::channel::{Channel, ChannelMode};
+
+/// Render one channel's block to the sink. Exhaustive match on
+/// [`ChannelMode`]; only `MidiClock` emits bytes in v0.1. The other
+/// variants' rendering paths (DIN bytes, CV pulses, analog LFO,
+/// MIDI CC) land in v0.2+ per the doc comments on
+/// [`ChannelMode`](crate::channel::ChannelMode).
+pub fn render_channel_block(
+    ch: &Channel,
+    events: &[ScheduledEvent],
+    transport: Option<MidiRtByte>,
+    buffer_start_sample: u64,
+    sink: &dyn MidiSink,
+) {
+    match ch.mode {
+        ChannelMode::MidiClock => {
+            render_buffer(events, transport, buffer_start_sample, sink);
+        }
+        // v0.2+: DIN sync24 bit stream.
+        // v0.4:  AnalogPulse (single-sample CV impulse, see
+        //        `doc/designs/cv-pulse.md`).
+        // v0.4:  AnalogLfo (sample-rate-rendered envelope).
+        // Post-v0.5: MidiCc (needs a real u7 newtype outside core).
+        ChannelMode::Din
+        | ChannelMode::AnalogPulse
+        | ChannelMode::AnalogLfo
+        | ChannelMode::MidiCc { .. } => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +369,95 @@ mod tests {
             prop_assert_eq!(recs.len(), evs.len() + 1);
             prop_assert_eq!(recs[0].at_sample, buffer_start);
             prop_assert_eq!(recs[0].bytes.as_slice(), &[variant.status_byte()]);
+        }
+    }
+
+    // ── render_channel_block ──────────────────────────────────────
+
+    use crate::channel::{Channel, ChannelMode, scheduler::tick_stream};
+    use crate::fxp::{Micro, Tempo};
+    use crate::time::conn::SampleTickConn;
+    use crate::time::swing::SwingConfig;
+    use crate::time::tbase::TBase;
+
+    fn stc_120_48k() -> SampleTickConn {
+        SampleTickConn::new(48_000, Tempo::from_bpm_integer(120), 192)
+    }
+
+    fn zero_channel(mode: ChannelMode, divider: TBase) -> Channel {
+        Channel {
+            mode,
+            divider,
+            shuffle: SwingConfig {
+                amount: 0,
+                multiplier: 1,
+            },
+            shift: Micro::ZERO,
+            offset: Micro::ZERO,
+            snap_to_quantum: None,
+        }
+    }
+
+    #[test]
+    fn midi_clock_mode_routes_through_render_buffer() {
+        let ch = zero_channel(ChannelMode::MidiClock, TBase::T4);
+        let evs = [ev(0), ev(24_000)];
+        let sink = TestSink::new();
+        render_channel_block(&ch, &evs, Some(MidiRtByte::Start), 0, &sink);
+        let recs = sink.records();
+        assert_eq!(recs.len(), 3);
+        assert_eq!(recs[0].bytes, vec![MIDI_START]);
+        assert_eq!(recs[1].bytes, vec![MIDI_CLOCK]);
+        assert_eq!(recs[2].bytes, vec![MIDI_CLOCK]);
+    }
+
+    proptest! {
+        /// Plan 12 property `non_clock_modes_are_noop`: every
+        /// non-MidiClock `ChannelMode` variant produces zero sink
+        /// records, even with non-empty events and a transport byte.
+        #[test]
+        fn non_clock_modes_are_noop(
+            mode in prop::sample::select(&[
+                ChannelMode::Din,
+                ChannelMode::AnalogPulse,
+                ChannelMode::AnalogLfo,
+                ChannelMode::MidiCc { cc: 74, range: (0, 127) },
+            ]),
+            samples in prop::collection::vec(any::<u64>(), 0..16),
+            transport in prop::option::of(prop::sample::select(&[
+                MidiRtByte::Start,
+                MidiRtByte::Continue,
+                MidiRtByte::Stop,
+            ])),
+            buffer_start in any::<u64>(),
+        ) {
+            let ch = zero_channel(mode, TBase::T4);
+            let evs: Vec<ScheduledEvent> = samples.into_iter().map(ev).collect();
+            let sink = TestSink::new();
+            render_channel_block(&ch, &evs, transport, buffer_start, &sink);
+            prop_assert!(sink.is_empty());
+        }
+
+        /// Plan 12 property `block_render_matches_scheduler`: for an
+        /// arbitrary MidiClock channel and buffer window, the
+        /// `TestSink.at_sample` list emitted by
+        /// `render_channel_block(..., transport: None, ...)` equals
+        /// `tick_stream(...)`'s `ScheduledEvent.sample_index` list
+        /// bit-for-bit. Pins the composition contract Plan 13's RT
+        /// callback relies on.
+        #[test]
+        fn block_render_matches_scheduler(
+            buffer_start in 0u64..=1_000_000,
+            frames in 1usize..=8_192,
+        ) {
+            let ch = zero_channel(ChannelMode::MidiClock, TBase::T16);
+            let stc = stc_120_48k();
+            let evs = tick_stream(&ch, &stc, buffer_start, frames);
+            let sink = TestSink::new();
+            render_channel_block(&ch, &evs, None, buffer_start, &sink);
+            let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();
+            let expected: Vec<u64> = evs.iter().map(|e| e.sample_index).collect();
+            prop_assert_eq!(emitted, expected);
         }
     }
 }
