@@ -291,8 +291,8 @@ mod tests {
     /// strictly less than `u32::MAX`.
     #[test]
     fn phase_never_returns_exact_u32_max() {
-        for bpm in [30.0, 120.0, 200.0, 999.0] {
-            let mut c = LinkClock::new(bpm, zero_anchor_48k());
+        for bpm in [30_u32, 120, 200, 999] {
+            let mut c = LinkClock::new(Tempo::from_bpm_integer(bpm), zero_anchor_48k());
             c.set_anchor(HostTimeAnchor {
                 host_origin_micros: c.clock_micros(),
                 sample_rate: sr_48k(),
@@ -329,9 +329,11 @@ mod tests {
             stride in 100u64..=10_000u64,
             bpm_mbpm in 20_000_000u32..=999_000_000u32,
         ) {
-            let bpm = f64::from(bpm_mbpm) / 1_000_000.0;
+            // `bpm_mbpm` is already µBPM — construct Tempo directly, no
+            // float round-trip.
+            let tempo = Tempo(bpm_mbpm);
             let mut c = LinkClock::new(
-                bpm,
+                tempo,
                 HostTimeAnchor { host_origin_micros: host_origin, sample_rate: sr_48k() },
             );
             let p0 = c.phase_at_sample(0);

@@ -254,11 +254,11 @@ fn main() {
             #[cfg(feature = "core")]
             {
                 // Header to stderr (stdout reserved for the schedule
-                // itself). `bpm` is informational per the plan;
-                // emitting it here makes the input visible.
+                // itself). Emits the parsed inputs so the reader can
+                // correlate against the tick stream.
                 eprintln!(
-                    "# schedule: {} bars @ {:.1} BPM, tbase={}, swing={:.3}",
-                    args.bars, args.bpm, args.tbase, args.swing
+                    "# schedule: {} bars, tbase={}, swing={:.3}",
+                    args.bars, args.tbase, args.swing
                 );
                 for t in time_sched::schedule_ticks(&args) {
                     println!("{}", t.0);
@@ -520,18 +520,6 @@ pub mod channel_trace {
         pub buffers: u32,
     }
 
-    /// argv-boundary: convert an `f64` ms value (already validated
-    /// as finite by bpaf's `parse_*_f64`) into a `Micro` via the
-    /// upstream `F64F06` lawful conn. Out-of-range saturates to
-    /// `Micro::ZERO` — same "safe default" as the previous bespoke
-    /// helper.
-    fn ms_to_micro(ms: f64) -> Micro {
-        let seconds = ms * 1.0e-3;
-        match F64F06.ceil(ExtendedFloat::Finite(seconds)) {
-            Extended::Finite(m) => m,
-            Extended::NegInf | Extended::PosInf => Micro::ZERO,
-        }
-    }
 
     #[derive(Debug, Clone, Copy)]
     pub struct TraceRow {
@@ -560,6 +548,18 @@ pub mod channel_trace {
             Tempo(scaled as u32)
         };
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
+        // argv-boundary: ms (f64) → Micro via the upstream `F64F06`
+        // lawful conn, saturating to `Micro::ZERO` for out-of-range.
+        // Inlined per the compose-don't-hardcode rule (CLAUDE.md
+        // §Repository conventions; review-calibration Pattern 11).
+        let shift = match F64F06.ceil(ExtendedFloat::Finite(args.shift_ms * 1.0e-3)) {
+            Extended::Finite(m) => m,
+            Extended::NegInf | Extended::PosInf => Micro::ZERO,
+        };
+        let offset = match F64F06.ceil(ExtendedFloat::Finite(args.offset_ms * 1.0e-3)) {
+            Extended::Finite(m) => m,
+            Extended::NegInf | Extended::PosInf => Micro::ZERO,
+        };
         let channel = Channel {
             mode: ChannelMode::MidiClock,
             divider,
@@ -567,8 +567,8 @@ pub mod channel_trace {
                 amount: args.shuffle,
                 multiplier: 1,
             },
-            shift: ms_to_micro(args.shift_ms),
-            offset: ms_to_micro(args.offset_ms),
+            shift,
+            offset,
         };
         // Pre-flight: reject ranges where `buffers × frames` would
         // overflow `u64`. Silent wrap in release builds would produce
@@ -609,19 +609,15 @@ pub mod time_sched {
 
     #[derive(Bpaf, Debug, Clone)]
     pub struct ScheduleArgs {
-        /// Tempo in beats per minute. Informational only — scheduling
-        /// happens in tick space, tempo-independently.
-        #[bpaf(long, argument("BPM"))]
-        pub bpm: f32,
-
         /// Grid resolution (e.g. `t16`, `t8t`, `t128t`).
         #[bpaf(long, argument::<String>("TBASE"), parse(parse_tbase))]
         pub tbase: TBase,
 
         /// Swing ratio in `[0.5, 0.75]`: 0.5 = straight, 0.75 = full
-        /// triplet swing.
+        /// triplet swing. f64 per the CLI argv-boundary rule
+        /// (CLAUDE.md §Repository conventions).
         #[bpaf(long, argument("SWING"), fallback(0.5))]
-        pub swing: f32,
+        pub swing: f64,
 
         /// Number of 4/4 bars to schedule. Bounded to `u16` (≤ 65535)
         /// so memory and stdout stay reasonable — 65535 × 192 ≈ 12.6M
@@ -642,7 +638,7 @@ pub mod time_sched {
     /// so `amount` directly expresses the tick displacement.
     ///
     /// Values outside `[0.5, 0.75]` are clamped.
-    pub fn swing_to_config(swing: f32) -> SwingConfig {
+    pub fn swing_to_config(swing: f64) -> SwingConfig {
         let clamped = swing.clamp(0.5, 0.75);
         let amount = ((clamped - 0.5) * 96.0).round() as i32;
         SwingConfig {
@@ -743,7 +739,6 @@ mod tests {
     #[test]
     fn schedule_ticks_two_bars_t16_yields_32_positions() {
         let ticks = schedule_ticks(&ScheduleArgs {
-            bpm: 120.0,
             tbase: TBase::T16,
             swing: 0.5,
             bars: 2,
@@ -758,7 +753,6 @@ mod tests {
     #[test]
     fn schedule_ticks_swing_054_shifts_off_beats() {
         let ticks = schedule_ticks(&ScheduleArgs {
-            bpm: 120.0,
             tbase: TBase::T16,
             swing: 0.54,
             bars: 1,
@@ -774,7 +768,6 @@ mod tests {
     #[test]
     fn schedule_ticks_t128t_has_192_steps_per_bar() {
         let ticks = schedule_ticks(&ScheduleArgs {
-            bpm: 120.0,
             tbase: TBase::T128t,
             swing: 0.5,
             bars: 1,
@@ -823,7 +816,6 @@ mod tests {
     #[test]
     fn schedule_ticks_t1_has_one_step_per_bar() {
         let ticks = schedule_ticks(&ScheduleArgs {
-            bpm: 120.0,
             tbase: TBase::T1,
             swing: 0.5,
             bars: 4,

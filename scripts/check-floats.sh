@@ -17,6 +17,15 @@
 # Any `f32` / `f64` in a non-allowlisted file is a build failure.
 # To add a new allowlisted file, amend both this script and
 # CLAUDE.md so the rule and the gate stay in sync.
+#
+# Known limitation: the regex `\bf32\b|\bf64\b` matches occurrences
+# inside string literals, format strings, and inline comments after
+# code. False positives are possible in error messages like
+# `return Err("expected f32 sample data")`. The gate is a
+# "type-position-or-adjacent-comment" approximation, not a
+# full-fidelity Rust parser. Check manually before blaming the gate;
+# rewrite the offending string to not literally contain the token if
+# avoidance is simpler than refactor.
 
 set -euo pipefail
 
