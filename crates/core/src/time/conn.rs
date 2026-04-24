@@ -1089,19 +1089,32 @@ mod tests {
         ]
     }
 
-    /// Bound Pico so `pico × den` fits in i128 comfortably. `den`
-    /// maxes at `192_000 × 2¹⁶ = 1.26×10¹⁰` (before gcd reduction);
-    /// keep Pico within ±10¹⁷ (~3 years) so the product stays under
-    /// 2¹²⁷ ≈ 1.7×10³⁸.
+    /// Full `i64` Pico range. All intermediate arithmetic is `i128`
+    /// and stays comfortably inside `i128::MAX` even at `Pico(i64::MAX)`
+    /// times the largest post-gcd `den` (~1.26×10¹⁰), so there's no
+    /// reason to bound the generator — doing so would fake coverage
+    /// by hiding the exact region where saturation / wrap bugs live
+    /// (per CLAUDE.md proptest convention).
     fn arb_pico() -> impl Strategy<Value = Pico> {
-        (-100_000_000_000_000_000_i64..=100_000_000_000_000_000).prop_map(Pico)
+        prop_oneof![
+            1 => Just(Pico(0)),
+            1 => Just(Pico(i64::MIN)),
+            1 => Just(Pico(i64::MAX)),
+            6 => any::<i64>().prop_map(Pico),
+        ]
     }
 
-    /// Bound Q48.16 so the inverse product stays in i128. `num ×
-    /// bits` with `num` up to 10¹² and `bits` in this range stays
-    /// under 2¹²⁷ comfortably.
-    fn arb_q48_16() -> impl Strategy<Value = Q48_16> {
-        // ±10¹⁵ bits = ±~15 billion samples. More than enough.
+    /// Bounded Q48.16 for the strict round-trip identity tests —
+    /// `floor(inner(s)) == s` and `ceil(inner(s)) == s` only hold
+    /// inside the non-saturating region. The saturation *behaviour*
+    /// is covered by `pico_sample_inner_saturates_at_i64_boundaries`;
+    /// this generator keeps the round-trip proptest on its valid
+    /// domain.
+    fn arb_q48_16_non_saturating() -> impl Strategy<Value = Q48_16> {
+        // At 44.1 kHz, num = 9_765_625 / den = 28_224; saturation
+        // kicks in at roughly |bits| × (num/den) > i64::MAX, i.e.
+        // |bits| > i64::MAX × 28_224 / 9_765_625 ≈ 2.66×10¹⁶. Bound
+        // to ±10¹⁵ leaves a comfortable margin.
         (-1_000_000_000_000_000_i64..=1_000_000_000_000_000).prop_map(Q48_16::from_bits)
     }
 
@@ -1169,21 +1182,31 @@ mod tests {
 
     proptest! {
         /// Galois adjoint upper: `ceil(p) ≤ s ⟺ p ≤ inner(s)`.
+        ///
+        /// Bounded s to the non-saturating range because `inner`
+        /// intentionally clamps at the i64 Pico boundary — many
+        /// distinct s values near ±i64::MAX all map to the same
+        /// `Pico(i64::MIN/MAX)`, flattening the law at that edge.
+        /// That flattening is a designed behaviour (covered by
+        /// `pico_sample_inner_saturates_at_i64_boundaries`), not a
+        /// bug the law should catch. `p` stays at full i64 because
+        /// `ceil`/`floor` don't saturate on the Pico side.
         #[test]
         fn pico_sample_adjoint_upper(
             psc in arb_pico_sample_conn(),
             p in arb_pico(),
-            s in arb_q48_16(),
+            s in arb_q48_16_non_saturating(),
         ) {
             prop_assert_eq!(psc.ceil(p) <= s, p.0 <= psc.inner(s).0);
         }
 
         /// Galois adjoint lower: `inner(s) ≤ p ⟺ s ≤ floor(p)`.
+        /// Same saturation caveat as `pico_sample_adjoint_upper`.
         #[test]
         fn pico_sample_adjoint_lower(
             psc in arb_pico_sample_conn(),
             p in arb_pico(),
-            s in arb_q48_16(),
+            s in arb_q48_16_non_saturating(),
         ) {
             prop_assert_eq!(psc.inner(s).0 <= p.0, s <= psc.floor(p));
         }
@@ -1224,10 +1247,13 @@ mod tests {
 
         /// `floor(inner(s)) == s` — inner lands on the exact pico
         /// for integer-bit Q48.16 samples, floor is the left inverse.
+        /// Bounded to the non-saturating domain; the saturation
+        /// behaviour is exercised by
+        /// `pico_sample_inner_saturates_at_i64_boundaries`.
         #[test]
         fn pico_sample_inner_round_trip_floor(
             psc in arb_pico_sample_conn(),
-            s in arb_q48_16(),
+            s in arb_q48_16_non_saturating(),
         ) {
             prop_assert_eq!(psc.floor(psc.inner(s)), s);
         }
@@ -1237,7 +1263,7 @@ mod tests {
         #[test]
         fn pico_sample_inner_round_trip_ceil(
             psc in arb_pico_sample_conn(),
-            s in arb_q48_16(),
+            s in arb_q48_16_non_saturating(),
         ) {
             prop_assert_eq!(psc.ceil(psc.inner(s)), s);
         }
@@ -1293,15 +1319,23 @@ mod tests {
         ) {
             let p0 = psc.inner(Q48_16::from_bits(bits)).0;
             let p1 = psc.inner(Q48_16::from_bits(bits + 1)).0;
-            // Adjacent bits map to Pico values differing by at most
-            // ceil(num/den) + 1 (the +1 covers the div_euclid rounding
-            // boundary and the saturation plateau). This rules out
-            // silent wrap — a wrap would produce a jump of ~2⁶⁴.
-            let step = p1.wrapping_sub(p0);
-            let max_step = (psc.num / psc.den) as i64 + 1;
+            // First: adjacency must be monotone. `wrapping_sub` would
+            // turn a regressed wrap (`p0 = i64::MAX`, `p1 = i64::MIN`)
+            // into a tiny positive step and silently pass the bound
+            // check; an explicit `p1 >= p0` guard catches that.
             prop_assert!(
-                step >= 0 && step <= max_step,
-                "bits {}→{}: step {} not in 0..={}",
+                p1 >= p0,
+                "bits {}→{}: output regressed from {} to {}",
+                bits, bits + 1, p0, p1
+            );
+            // And the forward step is bounded by ceil(num/den) + 1
+            // (the +1 covers div_euclid rounding and the saturation
+            // plateau). Cast to i128 for non-wrapping subtraction.
+            let step = i128::from(p1) - i128::from(p0);
+            let max_step = (psc.num / psc.den) + 1;
+            prop_assert!(
+                step <= max_step,
+                "bits {}→{}: step {} exceeds max {}",
                 bits, bits + 1, step, max_step
             );
         }

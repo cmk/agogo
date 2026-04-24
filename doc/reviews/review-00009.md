@@ -297,3 +297,69 @@ Fixed — the T0 API sketch now shows `Q48_16` samples with the pico-per-bit rat
 #### ↳ cmk ([2026-04-24 06:51 UTC](https://github.com/cmk/agogo/pull/9#discussion_r3135953810))
 
 Went with option (a). The plan's T0 proptest list now describes the five properties that actually shipped (adjoint upper/lower, monotone ceil/floor, floor≤ceil, inner-round-trip both directions) plus the `sample_tick_and_pico_sample_agree_at_120bpm_48k` spot check, with a note on why the triangle is a spot check rather than a proptest (needs a combined `(bpm, ppq, sr, tick)` bridge that agogo doesn't need outside this test).
+
+<!-- gh-id: 3136094155 -->
+### Copilot on [`crates/core/src/time/conn.rs:1303`](https://github.com/cmk/agogo/pull/9#discussion_r3136094155) (2026-04-24 07:21 UTC)
+
+`pico_sample_inner_adjacent_bits_differ_by_at_most_ratio` uses `wrapping_sub` to compute `step`. If `inner` ever regresses to a wraparound bug (e.g. `p0=i64::MAX`, `p1=i64::MIN`), `wrapping_sub` can yield a small positive value (like `1`) and the assertion may still pass, defeating the purpose of the test. Compute the delta with a non-wrapping subtraction (e.g. cast to `i128`/`u128` and subtract) and/or explicitly assert `p1 >= p0` before checking the max-step bound.
+```suggestion
+            prop_assert!(
+                p1 >= p0,
+                "bits {}→{}: output regressed from {} to {}",
+                bits, bits + 1, p0, p1
+            );
+            let step = (p1 as i128) - (p0 as i128);
+            let max_step = (psc.num / psc.den) as i128 + 1;
+            prop_assert!(
+                step <= max_step,
+```
+
+<!-- gh-id: 4168652842 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-24 07:21 UTC](https://github.com/cmk/agogo/pull/9#pullrequestreview-4168652842))
+
+## Pull request overview
+
+Copilot reviewed 8 out of 9 changed files in this pull request and generated 2 comments.
+
+
+
+
+
+<!-- gh-id: 3136094213 -->
+### Copilot on [`crates/core/src/time/conn.rs:1105`](https://github.com/cmk/agogo/pull/9#discussion_r3136094213) (2026-04-24 07:21 UTC)
+
+`arb_pico` and `arb_q48_16` bound the generator domain “to keep intermediate arithmetic safe”, but the conversions here are i64×(sr×2^16) and i64×10^12, which still fit comfortably in `i128` even for the full `i64` input domain. This bounding reduces coverage in the exact regions where saturation/wrap bugs tend to hide and also conflicts with the proptest convention added in this PR (CLAUDE.md:87-96) to default to the full input-type domain. Consider switching these to `any::<i64>()` (with weighted `Just(i64::{MIN,MAX})` arms if needed) or update the comment to justify a different reason for bounding (e.g. performance/realistic-value bias) and add explicit boundary cases accordingly.
+```suggestion
+    /// Use the full `i64` domain: the pico/sample conversions here do
+    /// their intermediate arithmetic in `i128`, so `i64 × den` and
+    /// `i64 × 10¹²` remain safely representable while still exercising
+    /// boundary values where wrap/saturation bugs tend to hide.
+    fn arb_pico() -> impl Strategy<Value = Pico> {
+        any::<i64>().prop_map(Pico)
+    }
+
+    /// Use the full underlying Q48.16 bit domain for the same reason:
+    /// the conversion intermediates fit in `i128`, and full-range
+    /// generation gives much better coverage of edge cases.
+    fn arb_q48_16() -> impl Strategy<Value = Q48_16> {
+        any::<i64>().prop_map(Q48_16::from_bits)
+```
+
+<!-- gh-id: 3136126878 -->
+#### ↳ cmk ([2026-04-24 07:28 UTC](https://github.com/cmk/agogo/pull/9#discussion_r3136126878))
+
+Fixed — split the check into an explicit `p1 >= p0` monotonicity assertion (so a regressed wrap from `i64::MAX → i64::MIN` trips the guard rather than silently looking like a small positive step) and a non-wrapping `i128` subtraction for the bound check. Exactly the suggested shape.
+
+<!-- gh-id: 3136128495 -->
+#### ↳ cmk ([2026-04-24 07:28 UTC](https://github.com/cmk/agogo/pull/9#discussion_r3136128495))
+
+Right on — my own CLAUDE.md rule cited against me, exactly the anti-pattern I just codified.
+
+Fixed with a small refinement after running the expanded generator: `arb_pico` now `any::<i64>()` + explicit `Just(i64::MIN/MAX/0)` arms. `arb_q48_16` expanded the same way *did* expose a real boundary — at `|bits| ≳ i64::MAX × den / num`, `inner(s)` clamps to `Pico(i64::MIN/MAX)`, and the adjoint law degenerates at that flattening (many distinct s values all map to the same saturated pico). That's a designed behaviour of the saturating clamp, not a bug the adjoint law should catch.
+
+So the split:
+- `arb_pico`: full i64. Used by every adjoint/monotone test.
+- `arb_q48_16_non_saturating`: ±10¹⁵ bits, documented *why* (stay inside the non-saturating domain) with a pointer to `pico_sample_inner_saturates_at_i64_boundaries` which covers the saturation behaviour directly.
+- Full i64 Q48.16 exercises the monotonicity / adjacency tests via `any::<i64>()` inline rather than a named strategy — those tests don't depend on the adjoint law and actively want the saturation plateau exercised.
+
+Documented the "why bounded" rationale above the `arb_q48_16_non_saturating` definition and in each proptest using it, per the amended CLAUDE.md rule.
