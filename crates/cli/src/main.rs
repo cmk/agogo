@@ -547,6 +547,19 @@ pub mod channel_trace {
             }
             Tempo(scaled as u32)
         };
+        // Channel pipeline requires one of the six audio sample rates
+        // supported by `fxp::pico_to_samples` (the downstream Pico →
+        // Sample dispatch). Validate here rather than letting
+        // `micro_to_samples` panic deep inside the transform.
+        match args.sr {
+            44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => {}
+            _ => {
+                return Err(format!(
+                    "--sr {} unsupported; expected one of 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000",
+                    args.sr
+                ));
+            }
+        }
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
         // argv-boundary: ms (f64) → Micro via the upstream `F64F06`
         // lawful conn. Out-of-range saturations are user errors, not
