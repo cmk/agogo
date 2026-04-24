@@ -10,6 +10,14 @@ use agogo_core::fxp::{Micro, Quantum, Tempo};
 use crate::link::{HostTimeAnchor, LinkClock};
 use crate::transport::{TransportEvent, TransportFsm, TransportOutput, TransportState};
 
+// `LinkSession::quantum` was originally a T0 placeholder for a
+// session-level default quantum. T3's per-channel
+// `ch.snap_to_quantum` field superseded it: `arm_channel` reads
+// `ch.snap_to_quantum` directly, with `LinkWriteConfig::default_quantum`
+// held on `config` as the authoritative default. Removed to avoid
+// duplicating state that the v0.5 Sprint 01 developer might mistake
+// for load-bearing.
+
 /// Write-path configuration for `LinkSession`. Tunes which classes
 /// of transport / tempo events agogo emits vs. only observes.
 #[derive(Debug, Clone, Copy)]
@@ -40,13 +48,12 @@ impl Default for LinkWriteConfig {
     }
 }
 
-/// Thin orchestrator — owns a `LinkClock`, the transport FSM, and the
-/// per-session quantum. Plan 06's `Machine` eventually absorbs this.
+/// Thin orchestrator — owns a `LinkClock`, the transport FSM, and
+/// the write-path config. Plan 06's `Machine` eventually absorbs
+/// this.
 pub struct LinkSession {
     clock: LinkClock,
     transport: TransportFsm,
-    #[allow(dead_code)] // consumed in T3; placeholder in T0.
-    quantum: Quantum,
     config: LinkWriteConfig,
 }
 
@@ -61,19 +68,20 @@ impl LinkSession {
         Self {
             clock: LinkClock::new(initial_bpm, anchor),
             transport: rust_fsm::StateMachine::new(),
-            quantum: config.default_quantum,
             config,
         }
     }
 
-    /// Toggle peer discovery + session joining. When turning on and
-    /// `enable_start_stop_sync` is configured, also flips the
-    /// underlying Link instance's start-stop-sync so `is_playing`
-    /// propagates across peers (off by default in Link).
+    /// Toggle peer discovery + session joining. When
+    /// `enable_start_stop_sync` is configured, the underlying Link
+    /// instance's start-stop-sync flag follows `on` symmetrically so
+    /// `is_playing` propagates across peers (off by default in Link)
+    /// while the session is active, and is cleared on disable so
+    /// peers stop receiving publishes from this instance.
     pub fn enable(&self, on: bool) {
         self.clock.enable(on);
-        if on && self.config.enable_start_stop_sync {
-            self.clock.enable_start_stop_sync(true);
+        if self.config.enable_start_stop_sync {
+            self.clock.enable_start_stop_sync(on);
         }
     }
 
