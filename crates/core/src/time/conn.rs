@@ -311,6 +311,92 @@ impl SampleTickConn {
     }
 }
 
+/// Pico ↔ Sample bridge parameterised by sample rate.
+///
+/// Mirrors upstream `connections::Conn<Pico, Sxx>`'s adjoint
+/// triple but with a *runtime* rate. The sample side uses
+/// `connections::sample::Q48_16` (= `FixedI64<U16>`) exactly like
+/// `F12S48` / `F12S44` / etc. — this is what makes the bidirectional
+/// Galois laws exact for every IEEE-reasonable rate (44.1 kHz
+/// included), because the fractional sample type carries sub-sample
+/// Pico precision that plain `i64` samples cannot.
+///
+/// - `ceil(p) ≤ s  ⟺  p ≤ inner(s)`
+/// - `inner(s) ≤ p  ⟺  s ≤ floor(p)`
+///
+/// Not a real `Conn` because the conversion depends on runtime
+/// `sr` — needs a closure-capturing `Conn` variant upstream,
+/// tracked in `connections` §Deferred of plan-2026-04-24-01.
+///
+/// `i128` intermediate arithmetic; no floating-point.
+///
+/// Integer sample callers extract via `.ceil().to_num::<i64>()`
+/// (round up to the next whole sample) or `.floor().to_num::<i64>()`.
+#[derive(Copy, Clone, Debug)]
+pub struct PicoSampleConn {
+    /// pico-per-bit ratio = 10¹² / (sr × 2¹⁶), reduced by gcd.
+    num: i128,
+    den: i128,
+    sr: u32,
+}
+
+impl PicoSampleConn {
+    /// # Panics
+    ///
+    /// Panics if `sr == 0` — it's always validated at the CLI
+    /// / config boundary, and a zero rate is a programming error.
+    pub fn new(sr: u32) -> Self {
+        assert!(sr > 0, "sample rate must be positive");
+        // 1 Q48.16 bit = 10¹² / (sr × 2¹⁶) pico.
+        let num: i128 = 1_000_000_000_000;
+        let den: i128 = i128::from(sr) * (1_i128 << 16);
+        let g = gcd_i128(num, den);
+        Self { num: num / g, den: den / g, sr }
+    }
+
+    pub fn sr(&self) -> u32 {
+        self.sr
+    }
+
+    /// Sample (Q48.16) → Pico, flooring the exact product to integer
+    /// picoseconds. Matches upstream `F12SXX`'s `inner` direction.
+    pub fn inner(&self, s: connections::sample::Q48_16) -> connections::fixed::Pico {
+        let n: i128 = i128::from(s.to_bits()) * self.num;
+        connections::fixed::Pico(n.div_euclid(self.den) as i64)
+    }
+
+    /// Pico → Sample (Q48.16), rounding up: smallest `s` with
+    /// `inner(s) ≥ p`.
+    pub fn ceil(&self, p: connections::fixed::Pico) -> connections::sample::Q48_16 {
+        let n: i128 = i128::from(p.0) * self.den;
+        let q = n.div_euclid(self.num);
+        let r = n.rem_euclid(self.num);
+        let bits = if r != 0 { q + 1 } else { q };
+        connections::sample::Q48_16::from_bits(bits as i64)
+    }
+
+    /// Pico → Sample (Q48.16): the Galois right-adjoint of `inner`
+    /// — largest `s` with `inner(s) ≤ p`. For positive `p` this
+    /// agrees with the mathematical floor of `p × DEN / NUM`; for
+    /// negative `p` the Galois formula
+    /// `floor_div(p × DEN + DEN − 1, NUM)` differs from the naïve
+    /// floor by at most one ULP, and IS what the adjoint laws
+    /// require. Mirrors upstream `F12SXX::floor`.
+    pub fn floor(&self, p: connections::fixed::Pico) -> connections::sample::Q48_16 {
+        let n: i128 = i128::from(p.0) * self.den + (self.den - 1);
+        connections::sample::Q48_16::from_bits(n.div_euclid(self.num) as i64)
+    }
+}
+
+fn gcd_i128(mut a: i128, mut b: i128) -> i128 {
+    a = a.unsigned_abs() as i128;
+    b = b.unsigned_abs() as i128;
+    while b != 0 {
+        (a, b) = (b, a.rem_euclid(b));
+    }
+    a
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -960,6 +1046,182 @@ mod tests {
             s in 0u64..=10_000_000,
         ) {
             prop_assert!(stc.floor(s).0 <= stc.ceil(s).0);
+        }
+    }
+
+    // ── PicoSampleConn ───────────────────────────────────────────
+    //
+    // Runtime-parameterised Pico ↔ Sample bridge (Q48.16 samples).
+    // Laws mirror upstream `connections::Conn<Pico, Sxx>` exactly.
+
+    use connections::fixed::Pico;
+    use connections::sample::Q48_16;
+
+    /// All standard audio rates. Q48.16 carries sub-sample pico
+    /// precision, so the adjoint laws are exact at every rate —
+    /// including the 44.1 kHz family.
+    fn arb_pico_sample_conn() -> impl Strategy<Value = PicoSampleConn> {
+        prop_oneof![
+            Just(PicoSampleConn::new(44_100)),
+            Just(PicoSampleConn::new(48_000)),
+            Just(PicoSampleConn::new(88_200)),
+            Just(PicoSampleConn::new(96_000)),
+            Just(PicoSampleConn::new(176_400)),
+            Just(PicoSampleConn::new(192_000)),
+        ]
+    }
+
+    /// Bound Pico so `pico × den` fits in i128 comfortably. `den`
+    /// maxes at `192_000 × 2¹⁶ = 1.26×10¹⁰` (before gcd reduction);
+    /// keep Pico within ±10¹⁷ (~3 years) so the product stays under
+    /// 2¹²⁷ ≈ 1.7×10³⁸.
+    fn arb_pico() -> impl Strategy<Value = Pico> {
+        (-100_000_000_000_000_000_i64..=100_000_000_000_000_000).prop_map(Pico)
+    }
+
+    /// Bound Q48.16 so the inverse product stays in i128. `num ×
+    /// bits` with `num` up to 10¹² and `bits` in this range stays
+    /// under 2¹²⁷ comfortably.
+    fn arb_q48_16() -> impl Strategy<Value = Q48_16> {
+        // ±10¹⁵ bits = ±~15 billion samples. More than enough.
+        (-1_000_000_000_000_000_i64..=1_000_000_000_000_000).prop_map(Q48_16::from_bits)
+    }
+
+    #[test]
+    fn pico_sample_48k_exact_boundary() {
+        // 1 second = 10¹² pico = 48 000 samples at 48 kHz.
+        let psc = PicoSampleConn::new(48_000);
+        let one_sec = Pico(1_000_000_000_000);
+        let s48k = Q48_16::from_num(48_000);
+        assert_eq!(psc.ceil(one_sec), s48k);
+        assert_eq!(psc.floor(one_sec), s48k);
+        assert_eq!(psc.inner(s48k), one_sec);
+    }
+
+    #[test]
+    fn pico_sample_48k_half_sample_brackets() {
+        // Half a sample at 48 kHz: 10¹² / 96000 ≈ 10_416_666.67 pico.
+        // Below the exact half: floor = 0 whole samples (0 Q48.16 bits
+        // for integer part), ceil = 1 sample (2¹⁶ bits).
+        let psc = PicoSampleConn::new(48_000);
+        let one_sample = Q48_16::from_num(1);
+        // Pico(20_833_333) < exact 1-sample boundary → ceil is still 1
+        // sample (since some positive fraction means we must round up
+        // to at least 1 sample's worth of bits).
+        let nearly_one_sample = Pico(20_833_332);
+        assert_eq!(psc.ceil(nearly_one_sample), one_sample);
+        // And floor just below the boundary gives the fractional value
+        // strictly less than 1 sample, not 0 — because Q48.16 carries
+        // the fraction exactly.
+        let floored = psc.floor(nearly_one_sample);
+        assert!(floored < one_sample);
+        assert!(floored.to_bits() > 0);
+    }
+
+    #[test]
+    fn pico_sample_negative_offsets() {
+        let psc = PicoSampleConn::new(48_000);
+
+        // Exactly −1 second: −48 000 samples.
+        let neg_one_sec = Pico(-1_000_000_000_000);
+        let neg_48k = Q48_16::from_num(-48_000);
+        assert_eq!(psc.floor(neg_one_sec), neg_48k);
+        assert_eq!(psc.ceil(neg_one_sec), neg_48k);
+        assert_eq!(psc.inner(neg_48k), neg_one_sec);
+
+        // −500 ms = −24 000 samples.
+        let neg_half_sec = Pico(-500_000_000_000);
+        let neg_24k = Q48_16::from_num(-24_000);
+        assert_eq!(psc.floor(neg_half_sec), neg_24k);
+        assert_eq!(psc.ceil(neg_half_sec), neg_24k);
+    }
+
+    #[test]
+    fn pico_sample_44100_exact_on_bit_grid() {
+        // 1 Q48.16 bit at 44.1 kHz = 10¹² / (44_100 × 2¹⁶) pico.
+        // Reduce: num=10¹² gcd den = 2² × 5² ⇒ num/g = 10¹² / 100,
+        // den/g = 44_100 × 2¹⁶ / 100. Bit-grid round-trips are exact.
+        let psc = PicoSampleConn::new(44_100);
+        let one_sec = Pico(1_000_000_000_000);
+        let s44k = Q48_16::from_num(44_100);
+        assert_eq!(psc.ceil(one_sec), s44k);
+        assert_eq!(psc.floor(one_sec), s44k);
+        assert_eq!(psc.inner(s44k), one_sec);
+    }
+
+    proptest! {
+        /// Galois adjoint upper: `ceil(p) ≤ s ⟺ p ≤ inner(s)`.
+        #[test]
+        fn pico_sample_adjoint_upper(
+            psc in arb_pico_sample_conn(),
+            p in arb_pico(),
+            s in arb_q48_16(),
+        ) {
+            prop_assert_eq!(psc.ceil(p) <= s, p.0 <= psc.inner(s).0);
+        }
+
+        /// Galois adjoint lower: `inner(s) ≤ p ⟺ s ≤ floor(p)`.
+        #[test]
+        fn pico_sample_adjoint_lower(
+            psc in arb_pico_sample_conn(),
+            p in arb_pico(),
+            s in arb_q48_16(),
+        ) {
+            prop_assert_eq!(psc.inner(s).0 <= p.0, s <= psc.floor(p));
+        }
+
+        /// Monotone ceil.
+        #[test]
+        fn pico_sample_monotone_ceil(
+            psc in arb_pico_sample_conn(),
+            p1 in arb_pico(),
+            p2 in arb_pico(),
+        ) {
+            let (lo, hi) = if p1.0 <= p2.0 { (p1, p2) } else { (p2, p1) };
+            prop_assert!(psc.ceil(lo) <= psc.ceil(hi));
+        }
+
+        /// Monotone floor.
+        #[test]
+        fn pico_sample_monotone_floor(
+            psc in arb_pico_sample_conn(),
+            p1 in arb_pico(),
+            p2 in arb_pico(),
+        ) {
+            let (lo, hi) = if p1.0 <= p2.0 { (p1, p2) } else { (p2, p1) };
+            prop_assert!(psc.floor(lo) <= psc.floor(hi));
+        }
+
+        /// Floor ≤ ceil, differing by at most 1 Q48.16 bit.
+        #[test]
+        fn pico_sample_floor_le_ceil(
+            psc in arb_pico_sample_conn(),
+            p in arb_pico(),
+        ) {
+            let f = psc.floor(p);
+            let c = psc.ceil(p);
+            prop_assert!(f <= c);
+            prop_assert!(c.to_bits() - f.to_bits() <= 1);
+        }
+
+        /// `floor(inner(s)) == s` — inner lands on the exact pico
+        /// for integer-bit Q48.16 samples, floor is the left inverse.
+        #[test]
+        fn pico_sample_inner_round_trip_floor(
+            psc in arb_pico_sample_conn(),
+            s in arb_q48_16(),
+        ) {
+            prop_assert_eq!(psc.floor(psc.inner(s)), s);
+        }
+
+        /// `ceil(inner(s)) == s` symmetrically — inner is exact in
+        /// the other direction too.
+        #[test]
+        fn pico_sample_inner_round_trip_ceil(
+            psc in arb_pico_sample_conn(),
+            s in arb_q48_16(),
+        ) {
+            prop_assert_eq!(psc.ceil(psc.inner(s)), s);
         }
     }
 }
