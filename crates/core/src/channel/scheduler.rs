@@ -98,6 +98,7 @@ mod tests {
             },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
+            snap_to_quantum: None,
         }
     }
 
@@ -177,6 +178,7 @@ mod tests {
                 shuffle,
                 shift: Micro(shift_us),
                 offset: Micro(offset_us),
+                snap_to_quantum: None,
             };
             let end = buffer_start + frames as u64;
             let ev = tick_stream(&ch, &stc_120_48k(), buffer_start, frames);
@@ -210,6 +212,7 @@ mod tests {
                 shuffle,
                 shift: Micro(shift_us),
                 offset: Micro(offset_us),
+                snap_to_quantum: None,
             };
             let stc = stc_120_48k();
             let total = buf_size * n_buffers;
