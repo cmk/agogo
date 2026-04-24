@@ -119,3 +119,112 @@ future contributors know to check before blaming the gate.
   rusty-link` — 10 passed.
 - `cargo clippy --all-targets -- -D warnings` — clean.
 - `scripts/check-floats.sh` — OK.
+
+<!-- gh-id: 3136471937 -->
+### Copilot on [`scripts/check-floats.sh:70`](https://github.com/cmk/agogo/pull/11#discussion_r3136471937) (2026-04-24 08:37 UTC)
+
+`stripped="${line_body##*([[:space:]])}"` does not actually strip leading whitespace (and also relies on extglob), so indented comment lines like `    // ... f32 ...` will be treated as code and can incorrectly fail the gate. Consider replacing this with a whitespace-trim that works in plain bash parameter expansion (or enable extglob + use a correct pattern), so comment-only hits are reliably skipped.
+```suggestion
+    stripped="${line_body#"${line_body%%[![:space:]]*}"}"
+```
+
+<!-- gh-id: 4169102700 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-24 08:37 UTC](https://github.com/cmk/agogo/pull/11#pullrequestreview-4169102700))
+
+## Pull request overview
+
+Implements Plan 11’s “boundary sweep” by migrating remaining time/tempo/phase state from `f32`/`f64` into fixed-point newtypes, adding a CI gate to prevent new stray floats, and documenting the new repository rules that enforce these constraints.
+
+**Changes:**
+- Migrate core channel shift/offset config to `Micro` and route sample conversions through `PicoSampleConn` composition.
+- Update CLI parsing and Link integration to use `f64` only at argv/FFI boundaries, storing `Tempo`/`Phase` internally.
+- Add `scripts/check-floats.sh` plus CI wiring and documentation/rules updates.
+
+### Reviewed changes
+
+Copilot reviewed 11 out of 11 changed files in this pull request and generated 4 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| scripts/check-floats.sh | New float-usage gate script intended to prevent unallowlisted `f32`/`f64` in Rust sources. |
+| .github/workflows/ci.yml | Adds a `floats` job that runs the float gate in CI. |
+| .claude/settings.json | Adds float gate to the local commit hook command chain. |
+| crates/core/src/channel/transform.rs | Switches channel config to `Micro`, introduces `micro_to_samples`, updates transform logic and tests. |
+| crates/core/src/channel/scheduler.rs | Uses `Micro` shift/offset and shares the new `micro_to_samples` conversion path. |
+| crates/core/src/channel.rs | Re-exports `MAX_SHIFT` instead of `MAX_SHIFT_MS`. |
+| crates/host-link/src/link.rs | Changes `LinkClock` surface to take/return `Tempo` and confines f64 to Link FFI conversion lines; updates tests. |
+| crates/cli/src/main.rs | Moves CLI float args to `f64`, converts immediately to fxp types, and removes stored float fields from `ProbeRow`. |
+| CLAUDE.md | Documents new no-stored-float / Conn composition rules and exception glossary. |
+| doc/reviews/review-calibration.md | Adds Patterns 9–11 to calibrate future reviews against the new float/Conn rules. |
+| doc/reviews/review-00011.md | Adds the sprint review record for PR #11. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3136471997 -->
+### Copilot on [`CLAUDE.md:128`](https://github.com/cmk/agogo/pull/11#discussion_r3136471997) (2026-04-24 08:37 UTC)
+
+CLAUDE.md says `scripts/check-floats.sh` fails when an `f32`/`f64` “lacks its annotation comment within 2 lines”, but the script currently (1) skips allowlisted files entirely and (2) does not check for annotation comments near a hit. Either update the script to enforce the documented annotation rule, or adjust this description to match the gate’s actual behavior (file allowlist only).
+```suggestion
+  lives outside these documented exceptions / allowlisted files.
+  Use the annotation comments above to mark the permitted cases.
+```
+
+<!-- gh-id: 3136472023 -->
+### Copilot on [`CLAUDE.md:146`](https://github.com/cmk/agogo/pull/11#discussion_r3136472023) (2026-04-24 08:37 UTC)
+
+The Conn legend example appears inconsistent with current usage: the code composes `psc.ceil(F12F06.inner(micro_value))`, so `F12F06.inner` is being used as `Micro -> Pico`. Here it’s described as “`F12F06` = Pico → Micro”, which is likely backwards / ambiguous and could mislead future call sites. Please clarify the directionality (especially what `inner` maps) in this legend snippet.
+```suggestion
+  6-char convention. Read the legend in terms of the `Conn` pair,
+  but be explicit about call direction: for example, `F12F06`
+  connects Pico and Micro, and `F12F06.inner` maps `Micro -> Pico`;
+  `F12S48.inner` maps `S48 -> Pico`; `F64F06.inner` maps
+  `Micro -> f64-seconds`. The crate-level doc in
+  `connections/src/lib.rs` spells out the full legend.
+
+- **Cross-conversions compose existing `Conn`s — they are not
+  hardcoded.** If `A → C` is needed and `Conn<A, B>` + `Conn<B, C>`
+  already exist, compose the two at the call site:
+
+  ```rust
+  // Good: convert Micro -> Pico with F12F06.inner, then Pico -> Sample with
+  // PicoSampleConn.
+```
+
+<!-- gh-id: 3136472056 -->
+### Copilot on [`crates/core/src/channel/transform.rs:65`](https://github.com/cmk/agogo/pull/11#discussion_r3136472056) (2026-04-24 08:37 UTC)
+
+`micro_to_samples` is a new helper that encapsulates the Pico↔Sample composition, but CLAUDE.md’s “compose at the call site” rule explicitly lists a `micro_to_samples_at_sr` helper as an example of what *not* to add. Either inline the composition in both call sites, or update the documented rule to allow this specific helper (and explain why it doesn’t conflict with the composition guideline).
+
+<!-- gh-id: 3136509471 -->
+#### ↳ cmk ([2026-04-24 08:44 UTC](https://github.com/cmk/agogo/pull/11#discussion_r3136509471))
+
+Real bug, confirmed with a quick bash test: `${line_body##*([[:space:]])}` needs `shopt -s extglob` to actually work as a pattern and silently no-ops otherwise. Switched to the nested-expansion idiom you suggested (`${line_body#"${line_body%%[![:space:]]*}"}`) which works in plain bash. Verified by appending an indented `// f32` comment to a non-allowlisted file — now correctly skipped.
+
+<!-- gh-id: 3136511043 -->
+#### ↳ cmk ([2026-04-24 08:44 UTC](https://github.com/cmk/agogo/pull/11#discussion_r3136511043))
+
+Fixed — the rule text said "lacks its annotation comment within 2 lines" but the script is file-allowlist only. Rewrote that paragraph to match the gate's actual behaviour: file-level allowlist is the hard gate; the annotation comments inside allowlisted files are reviewer-oriented markers, not machine-enforced. Pattern 9 in review-calibration.md is the complementary human check that catches stored-state violations the gate misses (like the `ScheduleArgs.bpm: f32` I just fixed in the prior `fix:` commit).
+
+<!-- gh-id: 3136512724 -->
+#### ↳ cmk ([2026-04-24 08:44 UTC](https://github.com/cmk/agogo/pull/11#discussion_r3136512724))
+
+Fixed the ambiguity. The legend now says `F12F06: Conn<Pico, Micro>` and explicitly calls out which method goes which way: `ceil(Pico) → Micro` rounds a Pico value to the nearest Micro, `inner(Micro) → Pico` is the exact embed in the reverse direction. Same pattern spelled out for F64F06 and F12S48. The `psc.ceil(F12F06.inner(micro_value))` composition pattern is then unambiguous: `inner` goes Micro → Pico (up-refinement), then `ceil` goes Pico → Sample (down-coarsening).
+
+<!-- gh-id: 3136515345 -->
+#### ↳ cmk ([2026-04-24 08:45 UTC](https://github.com/cmk/agogo/pull/11#discussion_r3136515345))
+
+Went with updating the rule rather than inlining. The "bad example" in CLAUDE.md was too broad — it conflated "helper that HIDES a composition" with "any helper that composes." The spirit was about helpers that dress up a single Conn call in a new name, or open-code the arithmetic. `micro_to_samples` doesn't do either: its body shows the full `F12F06.inner + PicoSampleConn::ceil + Q48.16.round().to_num::<i64>()` chain, the name reflects the operation rather than hiding it, and it's called from both `transform` and `scheduler` where inlining would risk drift between the two paths.
+
+Rewrote the rule to draw the line more precisely:
+- **Good:** helper that wraps a *visible* composition (name reflects operation, body shows the chain) when used at ≥2 call sites that would otherwise drift. `micro_to_samples` is now explicitly cited as the example.
+- **Bad:** helper that hides a single Conn call behind a new name (just renaming). Now shown as `fn micro_to_pico(m: Micro) -> Pico { F12F06.inner(m) }` — nope.
+- **Bad:** open-coded arithmetic / bespoke `f64_*_to_*` where a Conn exists. Unchanged.
+
+The `ms_to_micro` helper I inlined earlier in this PR stays inlined — its composition was lighter (single `F64F06.ceil` call + unit-adjustment prefix), and the inline form reads fine.
