@@ -17,7 +17,7 @@
 
 use std::num::NonZeroU32;
 
-use agogo_core::fxp::{Phase, f64_phase_to_phase};
+use agogo_core::fxp::{Phase, Tempo, f64_phase_to_phase};
 use agogo_core::sync::PhaseSourceImpl;
 use rusty_link::{AblLink, SessionState};
 
@@ -61,9 +61,13 @@ impl LinkClock {
     ///
     /// Not RT-safe. Opens a UDP socket internally; run on the control
     /// thread only.
-    pub fn new(initial_bpm: f64, anchor: HostTimeAnchor) -> Self {
+    pub fn new(initial_bpm: Tempo, anchor: HostTimeAnchor) -> Self {
+        // Link FFI: AblLink's C++ constructor takes f64 BPM. Contain
+        // the one-shot `Tempo → f64` cast to this line; downstream
+        // agogo never sees the f64.
+        let initial_bpm_f64 = f64::from(initial_bpm.0) / 1.0e6;
         Self {
-            link: AblLink::new(initial_bpm),
+            link: AblLink::new(initial_bpm_f64),
             session: SessionState::new(),
             anchor,
         }
@@ -114,13 +118,16 @@ impl LinkClock {
         self.link.is_enabled()
     }
 
-    /// Current session tempo in BPM.
+    /// Current session tempo.
     ///
     /// RT-safe — captures the audio session state (lock-free) and
     /// reads the tempo field.
-    pub fn tempo(&mut self) -> f64 {
+    pub fn tempo(&mut self) -> Tempo {
         self.link.capture_audio_session_state(&mut self.session);
-        self.session.tempo()
+        // Link FFI: AblLink returns BPM as f64. `f64_bpm_to_tempo`
+        // handles the one-shot conversion to the `Tempo` newtype
+        // (µBPM u32, saturating on out-of-range).
+        agogo_core::fxp::f64_bpm_to_tempo(self.session.tempo())
     }
 
     /// Number of peers currently joined to the session.
@@ -183,26 +190,25 @@ mod tests {
         // peer discovery / multicast join never starts. (Link's C++
         // side still opens a UDP socket on construction; we just
         // don't announce presence to the LAN.)
-        for bpm in [60.0, 90.0, 120.0, 137.0, 200.0] {
-            let _c = LinkClock::new(bpm, zero_anchor_48k());
+        for bpm in [60u32, 90, 120, 137, 200] {
+            let _c = LinkClock::new(Tempo::from_bpm_integer(bpm), zero_anchor_48k());
         }
     }
 
     #[test]
     fn tempo_reads_back_initial_bpm() {
-        // Link internally clamps to [20, 999] — 137.0 passes through.
-        let mut c = LinkClock::new(137.0, zero_anchor_48k());
-        let t = c.tempo();
-        assert!(
-            (t - 137.0).abs() < 1e-9,
-            "tempo {t} differs from initial 137.0"
+        // Link internally clamps to [20, 999] — 137 BPM passes through.
+        let mut c = LinkClock::new(Tempo::from_bpm_integer(137), zero_anchor_48k());
+        assert_eq!(
+            c.tempo(), Tempo::from_bpm_integer(137),
+            "tempo differs from initial 137 BPM"
         );
     }
 
     #[test]
     fn num_peers_zero_before_enable() {
         // Disabled session has no discovery running → no peers.
-        let c = LinkClock::new(120.0, zero_anchor_48k());
+        let c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
         assert_eq!(c.num_peers(), 0);
     }
 
@@ -213,7 +219,7 @@ mod tests {
         // CI runners, but sandboxed / multicast-less environments
         // may fail. Plan 09 adds a `fixture_or_skip!`-style network
         // gate when the multicast-dependent integration tests land.
-        let c = LinkClock::new(120.0, zero_anchor_48k());
+        let c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
         assert!(!c.is_enabled());
         c.enable(true);
         assert!(c.is_enabled());
@@ -223,10 +229,10 @@ mod tests {
 
     #[test]
     fn feed_samples_is_noop_and_preserves_tempo() {
-        let mut c = LinkClock::new(120.0, zero_anchor_48k());
+        let mut c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
         c.feed_samples(&[0.1, 0.2, 0.3], 0);
         // Tempo unchanged by audio input.
-        assert!((c.tempo() - 120.0).abs() < 1e-9);
+        assert_eq!(c.tempo(), Tempo::from_bpm_integer(120));
     }
 
     // ── Phase bridge ──────────────────────────────────────────────
@@ -235,7 +241,7 @@ mod tests {
     fn phase_at_sample_returns_valid_phase() {
         // Bridge must always return a valid Phase (< 2^32); no
         // NaN/inf can sneak through `f64_phase_to_phase`.
-        let mut c = LinkClock::new(120.0, zero_anchor_48k());
+        let mut c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
         for n in [0u64, 1, 48_000, 1_000_000, 10_000_000_000] {
             let _ = c.phase_at_sample(n);
         }
@@ -257,7 +263,7 @@ mod tests {
     /// are near-equal after one wrap.
     #[test]
     fn phase_wraps_once_per_beat_at_120bpm_48k() {
-        let mut c = LinkClock::new(120.0, zero_anchor_48k());
+        let mut c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
         c.set_anchor(HostTimeAnchor {
             host_origin_micros: c.clock_micros(),
             sample_rate: sr_48k(),
@@ -357,7 +363,7 @@ mod tests {
 
     #[test]
     fn set_anchor_shifts_the_sample_mapping() {
-        let mut c = LinkClock::new(120.0, zero_anchor_48k());
+        let mut c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
         let now = c.clock_micros();
 
         // Query phase at n = 48 000 with anchor at `now` — this

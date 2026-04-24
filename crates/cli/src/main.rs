@@ -354,8 +354,9 @@ pub mod link_probe {
         // Construct with a placeholder anchor, read `clock_micros`,
         // then `set_anchor` with the real origin — avoids the
         // two-AblLink-instance throwaway pattern.
+        let initial_tempo = agogo_core::fxp::f64_bpm_to_tempo(initial_bpm);
         let mut clock = LinkClock::new(
-            initial_bpm,
+            initial_tempo,
             HostTimeAnchor {
                 host_origin_micros: 0,
                 sample_rate: sr,
@@ -379,14 +380,10 @@ pub mod link_probe {
             // rate, then query phase.
             let n = t_ms * u64::from(sr.get()) / 1_000;
             let phase_u32 = clock.phase_at_sample(n).0;
-            // `clock.tempo()` still returns f64 this PR — T5 reshapes
-            // the `LinkClock` surface to expose `Tempo` directly.
-            // Until then convert at the boundary via the argv
-            // helper.
             on_row(ProbeRow {
                 t_ms,
                 peers: clock.num_peers(),
-                tempo: agogo_core::fxp::f64_bpm_to_tempo(clock.tempo()),
+                tempo: clock.tempo(),
                 phase: agogo_core::fxp::Phase(phase_u32),
             });
             sleep(period);
