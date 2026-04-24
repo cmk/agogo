@@ -63,6 +63,62 @@ enum LinkSub {
         #[bpaf(long, argument("PERIOD_MS"), parse(parse_positive_u32), fallback(100))]
         period_ms: u32,
     },
+    /// One-shot tempo push: connect to the Link network, set the
+    /// session tempo, wait briefly so peers can capture the
+    /// committed state, then exit. Useful for scripted tempo
+    /// changes and for the manual E2E smoke test.
+    #[bpaf(command("push-tempo"))]
+    PushTempo {
+        /// New tempo in BPM.
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f64))]
+        bpm: f64,
+        /// How long to keep the network session alive after
+        /// committing, so peers see the change. Typical = 200 ms.
+        #[bpaf(long, argument("SETTLE_MS"), parse(parse_positive_u32), fallback(200))]
+        settle_ms: u32,
+    },
+    /// Headless transport FSM runner: subscribes to Link's
+    /// `is_playing`, optionally publishes one-shot `UserStart` /
+    /// `UserStop`, and prints transport-state transitions to
+    /// stdout. Scaffolding for the v0.5 Sprint 01 forerun FSM and
+    /// Sprint 02 PID sync.
+    #[bpaf(command("transport"))]
+    Transport {
+        /// Initial BPM.
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f64), fallback(120.0))]
+        bpm: f64,
+        /// Quantum in bars (used when armed channels land with
+        /// `snap_to_quantum` exposure via the preset sprint; ignored
+        /// by the bare `link transport` runner).
+        #[bpaf(long, argument("QUANTUM"), parse(parse_positive_f64), fallback(4.0))]
+        quantum: f64,
+        /// Sample rate (bound for the anchor; transport path itself
+        /// doesn't use it, but the anchor is non-optional).
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
+        sr: u32,
+        /// Total run duration, ms.
+        #[bpaf(long, argument("DURATION_MS"), parse(parse_positive_u32), fallback(5_000))]
+        duration_ms: u32,
+        /// Drive a `UserStart` at session start.
+        #[bpaf(long)]
+        start: bool,
+        /// Drive a `UserStop` just before exit.
+        #[bpaf(long)]
+        stop_on_exit: bool,
+    },
+    /// Print a single line summary of the current Link session
+    /// state: `peers,tempo_bpm,is_playing`. Useful from scripts.
+    #[bpaf(command("diag"))]
+    Diag {
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f64), fallback(120.0))]
+        bpm: f64,
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
+        sr: u32,
+        /// How long to join the network before reading state. Too
+        /// short and `peers` under-reports.
+        #[bpaf(long, argument("SETTLE_MS"), parse(parse_positive_u32), fallback(500))]
+        settle_ms: u32,
+    },
 }
 
 #[derive(Debug, Clone, Bpaf)]
@@ -294,6 +350,32 @@ fn main() {
                 );
             });
         }
+        #[cfg(feature = "link")]
+        Some(Command::Link {
+            sub: LinkSub::PushTempo { bpm, settle_ms },
+        }) => {
+            link_commands::push_tempo(bpm, settle_ms);
+        }
+        #[cfg(feature = "link")]
+        Some(Command::Link {
+            sub:
+                LinkSub::Transport {
+                    bpm,
+                    quantum,
+                    sr,
+                    duration_ms,
+                    start,
+                    stop_on_exit,
+                },
+        }) => {
+            link_commands::transport(bpm, quantum, sr, duration_ms, start, stop_on_exit);
+        }
+        #[cfg(feature = "link")]
+        Some(Command::Link {
+            sub: LinkSub::Diag { bpm, sr, settle_ms },
+        }) => {
+            link_commands::diag(bpm, sr, settle_ms);
+        }
         None => {
             #[cfg(feature = "core")]
             let tag = "with core";
@@ -425,6 +507,130 @@ pub mod link_probe {
                 phase_cycles
             );
         }
+    }
+}
+
+#[cfg(feature = "link")]
+pub mod link_commands {
+    //! Plan 09 link subcommands: `push-tempo`, `transport`, `diag`.
+    //! All three exit after a bounded duration — none is a persistent
+    //! daemon. `transport` drives the FSM headlessly; audio-callback
+    //! integration (real `agogo run --link`) lands with Plan 05.
+
+    use agogo_core::fxp::{Tempo, f64_beats_to_quantum, f64_bpm_to_tempo};
+    use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig};
+    use std::num::NonZeroU32;
+    use std::thread::sleep;
+    use std::time::{Duration, Instant};
+
+    fn anchor_for(sr: u32) -> HostTimeAnchor {
+        let sr = NonZeroU32::new(sr).expect("sr validated at argv boundary");
+        HostTimeAnchor {
+            host_origin_micros: 0,
+            sample_rate: sr,
+        }
+    }
+
+    /// One-shot tempo push. Enables the network, calls
+    /// `session.set_tempo`, sleeps `settle_ms` so peers can capture,
+    /// disables, and exits.
+    pub fn push_tempo(bpm: f64, settle_ms: u32) {
+        // argv boundary — f64 BPM → Tempo.
+        let bpm_tempo: Tempo = f64_bpm_to_tempo(bpm);
+        let mut session = LinkSession::new(
+            bpm_tempo,
+            anchor_for(48_000),
+            LinkWriteConfig::default(),
+        );
+        session.enable(true);
+        session.set_tempo(bpm_tempo);
+        sleep(Duration::from_millis(u64::from(settle_ms)));
+        session.enable(false);
+        // stdout for scripts: single line with the pushed BPM.
+        println!("pushed_bpm={bpm}");
+    }
+
+    /// Headless transport runner. Subscribes to Link's `is_playing`
+    /// via `poll_transport` every 10 ms, prints state transitions,
+    /// and optionally drives `UserStart` / `UserStop` at the bounds.
+    pub fn transport(
+        bpm: f64,
+        quantum: f64,
+        sr: u32,
+        duration_ms: u32,
+        start: bool,
+        stop_on_exit: bool,
+    ) {
+        // argv boundary — f64 BPM / quantum dies here.
+        let bpm_tempo: Tempo = f64_bpm_to_tempo(bpm);
+        let quantum = f64_beats_to_quantum(quantum);
+        let config = LinkWriteConfig {
+            default_quantum: quantum,
+            ..LinkWriteConfig::default()
+        };
+        let mut session = LinkSession::new(bpm_tempo, anchor_for(sr), config);
+        session.enable(true);
+        if start {
+            session.user_start();
+        }
+        let deadline = Instant::now() + Duration::from_millis(u64::from(duration_ms));
+        let poll_period = Duration::from_millis(10);
+        let mut last_playing = session.is_playing();
+        let mut last_peers = session.num_peers();
+        let mut last_tempo = session.tempo();
+        println!("t_ms,peers,tempo_bpm,is_playing");
+        let start_instant = Instant::now();
+        println!(
+            "{},{},{:.4},{}",
+            0, last_peers,
+            f64::from(last_tempo.0) / 1_000_000.0,
+            last_playing as u8,
+        );
+        while Instant::now() < deadline {
+            sleep(poll_period);
+            session.poll_transport();
+            let playing = session.is_playing();
+            let peers = session.num_peers();
+            let tempo = session.tempo();
+            if playing != last_playing || peers != last_peers || tempo != last_tempo {
+                let t_ms = start_instant.elapsed().as_millis() as u64;
+                println!(
+                    "{},{},{:.4},{}",
+                    t_ms, peers,
+                    f64::from(tempo.0) / 1_000_000.0,
+                    playing as u8,
+                );
+                last_playing = playing;
+                last_peers = peers;
+                last_tempo = tempo;
+            }
+        }
+        if stop_on_exit {
+            session.user_stop();
+        }
+        session.enable(false);
+    }
+
+    /// Single-line diagnostic summary.
+    pub fn diag(bpm: f64, sr: u32, settle_ms: u32) {
+        let bpm_tempo: Tempo = f64_bpm_to_tempo(bpm);
+        let mut session = LinkSession::new(
+            bpm_tempo,
+            anchor_for(sr),
+            LinkWriteConfig::default(),
+        );
+        session.enable(true);
+        sleep(Duration::from_millis(u64::from(settle_ms)));
+        session.poll_transport();
+        let peers = session.num_peers();
+        let tempo = session.tempo();
+        let playing = session.is_playing();
+        session.enable(false);
+        println!(
+            "peers={peers} tempo_bpm={:.4} is_playing={}",
+            f64::from(tempo.0) / 1_000_000.0,
+            playing as u8,
+        );
     }
 }
 
