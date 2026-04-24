@@ -228,3 +228,74 @@ Rewrote the rule to draw the line more precisely:
 - **Bad:** open-coded arithmetic / bespoke `f64_*_to_*` where a Conn exists. Unchanged.
 
 The `ms_to_micro` helper I inlined earlier in this PR stays inlined — its composition was lighter (single `F64F06.ceil` call + unit-adjustment prefix), and the inline form reads fine.
+
+<!-- gh-id: 3136573799 -->
+### Copilot on [`CLAUDE.md:151`](https://github.com/cmk/agogo/pull/11#discussion_r3136573799) (2026-04-24 08:56 UTC)
+
+`F64F06` legend still references `FloatExt(seconds)`, but the codebase uses `ExtendedFloat` (renamed upstream). This is a factual mismatch that could mislead readers; update the example to use `ExtendedFloat::Finite(seconds)` (or the current wrapper type used with `F64F06.ceil`).
+```suggestion
+    pattern — `.ceil(ExtendedFloat::Finite(seconds)) → Extended<Micro>`.
+```
+
+<!-- gh-id: 4169215342 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-24 08:56 UTC](https://github.com/cmk/agogo/pull/11#pullrequestreview-4169215342))
+
+## Pull request overview
+
+Copilot reviewed 11 out of 11 changed files in this pull request and generated 4 comments.
+
+
+
+
+
+<!-- gh-id: 3136573847 -->
+### Copilot on [`scripts/check-floats.sh:75`](https://github.com/cmk/agogo/pull/11#discussion_r3136573847) (2026-04-24 08:56 UTC)
+
+The `case` pattern treats any line whose first non-whitespace character is `*` as a comment. This can create false negatives for real Rust code lines that legitimately start with `*` (e.g., deref or multiplication), letting `f32`/`f64` slip past the gate. Consider narrowing this to only match block-comment continuation lines (e.g., `\* `) rather than any leading `*`.
+
+<!-- gh-id: 3136573870 -->
+### Copilot on [`scripts/check-floats.sh:81`](https://github.com/cmk/agogo/pull/11#discussion_r3136573870) (2026-04-24 08:56 UTC)
+
+The grep pattern uses `\b` word boundaries with `grep -E`. `\b` is not portable across grep implementations (notably BSD grep), which could weaken the local pre-commit hook on non-GNU systems. Consider switching to a POSIX-compatible boundary pattern (e.g., `(^|[^[:alnum:]_])(f32|f64)([^[:alnum:]_]|$)`) or explicitly using a grep mode/implementation that guarantees `\b` support.
+```suggestion
+  done < <(grep -nE '(^|[^[:alnum:]_])(f32|f64)([^[:alnum:]_]|$)' "$file" || true)
+```
+
+<!-- gh-id: 3136573894 -->
+### Copilot on [`crates/cli/src/main.rs:562`](https://github.com/cmk/agogo/pull/11#discussion_r3136573894) (2026-04-24 08:56 UTC)
+
+In `channel_trace::trace`, out-of-range `--shift-ms` / `--offset-ms` values (finite but outside `Micro`’s representable range) are mapped to `Micro::ZERO` via the `Extended::NegInf | Extended::PosInf` arm. This means extremely large shifts/offsets silently become *no shift/offset* rather than saturating/clamping (e.g., large positive shift should probably become `MAX_SHIFT` after clamping) or producing an error. Consider handling `PosInf`/`NegInf` in a direction-preserving way (or returning a range error) so the CLI doesn’t unexpectedly drop user-provided values to zero.
+```suggestion
+        // lawful conn. Reject out-of-range values instead of silently
+        // mapping them to `Micro::ZERO`, which would drop user intent.
+        let parse_micro_ms = |flag: &str, ms: f64| -> Result<Micro, String> {
+            match F64F06.ceil(ExtendedFloat::Finite(ms * 1.0e-3)) {
+                Extended::Finite(m) => Ok(m),
+                Extended::NegInf | Extended::PosInf => {
+                    Err(format!("{flag} {ms}ms out of range"))
+                }
+            }
+        };
+        let shift = parse_micro_ms("--shift-ms", args.shift_ms)?;
+        let offset = parse_micro_ms("--offset-ms", args.offset_ms)?;
+```
+
+<!-- gh-id: 3136654139 -->
+#### ↳ cmk ([2026-04-24 09:11 UTC](https://github.com/cmk/agogo/pull/11#discussion_r3136654139))
+
+Fixed — `FloatExt` → `ExtendedFloat` (post-upstream rename). Pure typo carried over from an earlier rev of the rule text.
+
+<!-- gh-id: 3136654355 -->
+#### ↳ cmk ([2026-04-24 09:11 UTC](https://github.com/cmk/agogo/pull/11#discussion_r3136654355))
+
+Fixed — narrowed the pattern to skip only `* ` (with trailing space, rustfmt-produced doc-block continuation) and `*/`. Bare leading `*` like `*mut_ptr = 0.0_f32;` is now correctly flagged, which a quick positive test confirms.
+
+<!-- gh-id: 3136654621 -->
+#### ↳ cmk ([2026-04-24 09:11 UTC](https://github.com/cmk/agogo/pull/11#discussion_r3136654621))
+
+Fixed — switched to `(^|[^[:alnum:]_])(f32|f64)([^[:alnum:]_]|$)` which is POSIX-compatible across BSD and GNU grep. Added an inline comment explaining why. (Also: the POSIX form correctly excludes `_f32` / `_f64` numeric literal suffixes from flagging, because `_` is in `[:alnum:]_`, same as `\b`'s behaviour — so no semantic drift.)
+
+<!-- gh-id: 3136654880 -->
+#### ↳ cmk ([2026-04-24 09:11 UTC](https://github.com/cmk/agogo/pull/11#discussion_r3136654880))
+
+Fixed — wrapped the Micro conversion in an `ms_to_micro(flag, ms)` closure that returns `Result<Micro, String>`. Out-of-range values now produce a clear argv error (`"--shift-ms <value> out of range"`) rather than silently collapsing to `Micro::ZERO`. `parse_non_negative_f64` / `parse_finite_f64` at the bpaf layer already reject NaN / ±∞, so the `Extended::PosInf` / `NegInf` path now exclusively represents "finite but outside i64 µs range," which is genuine user error.

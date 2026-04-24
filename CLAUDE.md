@@ -148,7 +148,7 @@ core = ["dep:project-core"]
     the nearest Micro. `F12F06.inner(Micro) → Pico` is the exact
     embed going the other direction.
   - `F64F06: Conn<ExtendedFloat<f64>, Extended<Micro>>`. Same
-    pattern — `.ceil(FloatExt(seconds)) → Extended<Micro>`.
+    pattern — `.ceil(ExtendedFloat::Finite(seconds)) → Extended<Micro>`.
   - `F12S48: Conn<Pico, S48>`. `.ceil(Pico) → S48 (Q48.16)`,
     `.inner(S48) → Pico`.
 

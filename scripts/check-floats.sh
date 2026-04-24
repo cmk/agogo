@@ -70,15 +70,24 @@ while IFS= read -r -d '' file; do
     # extglob (off by default); the nested-expansion idiom below
     # works in plain bash.
     stripped="${line_body#"${line_body%%[![:space:]]*}"}"
+    # Matched cases: line-comments (`//`), block-comment starts
+    # (`/*`), block-comment ends (`*/`), and doc-block-comment
+    # continuation lines (`* ` with trailing space, as rustfmt
+    # produces). We deliberately do NOT match bare leading `*`
+    # since that's a valid Rust token (deref, multiplication) and
+    # a false-negative would let `*mut_ptr = 0.0_f32;` slip past.
     case "$stripped" in
-      "//"*|"/*"*|"*"*|"*/"*) continue ;;
+      "//"*|"/*"*|"*/"*|"* "*) continue ;;
     esac
 
     printf '%s:%s: unannotated f32/f64 (move to an allowlisted module or refactor to fxp)\n' \
       "$rel_file" "$line_num" >&2
     printf '    %s\n' "$line_body" >&2
     FAIL=1
-  done < <(grep -nE '\bf32\b|\bf64\b' "$file" || true)
+    # POSIX-compatible word-boundary: `\b` in grep isn't portable
+    # across BSD / GNU implementations; the explicit non-alnum
+    # character class works everywhere grep -E runs.
+  done < <(grep -nE '(^|[^[:alnum:]_])(f32|f64)([^[:alnum:]_]|$)' "$file" || true)
 done < <(find crates -type f -name '*.rs' -path '*/src/*' -not -path '*/target/*' -print0)
 
 if (( FAIL )); then
