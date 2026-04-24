@@ -514,7 +514,7 @@ mod sync_trace {
 #[cfg(feature = "core")]
 pub mod channel_trace {
     use agogo_core::channel::{Channel, ChannelMode, tick_stream};
-    use agogo_core::fxp::Tempo;
+    use agogo_core::fxp::{Extended, ExtendedFloat, F64F06, Micro, Tempo};
     use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
@@ -530,6 +530,18 @@ pub mod channel_trace {
         pub offset_ms: f32,
         pub frames: usize,
         pub buffers: u32,
+    }
+
+    /// argv-boundary: convert an `f32` ms value (already validated as
+    /// finite by bpaf's `parse_*_f32`) into a `Micro` via the upstream
+    /// `F64F06` lawful conn. Out-of-range saturates to `Micro::ZERO`
+    /// for `ms = 0` compatibility.
+    fn ms_f32_to_micro(ms: f32) -> Micro {
+        let seconds = f64::from(ms) * 1.0e-3;
+        match F64F06.ceil(ExtendedFloat::Finite(seconds)) {
+            Extended::Finite(m) => m,
+            Extended::NegInf | Extended::PosInf => Micro::ZERO,
+        }
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -566,8 +578,8 @@ pub mod channel_trace {
                 amount: args.shuffle,
                 multiplier: 1,
             },
-            shift_ms: args.shift_ms,
-            offset_ms: args.offset_ms,
+            shift: ms_f32_to_micro(args.shift_ms),
+            offset: ms_f32_to_micro(args.offset_ms),
         };
         // Pre-flight: reject ranges where `buffers × frames` would
         // overflow `u64`. Silent wrap in release builds would produce

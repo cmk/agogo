@@ -11,9 +11,10 @@
 //! parameter is omitted rather than kept unused; documented in the
 //! sprint's Review section.
 
-use crate::channel::transform::{Channel, MAX_SHIFT_MS, ScheduledEvent, transform};
+use crate::channel::transform::{Channel, MAX_SHIFT, ScheduledEvent, micro_to_samples, transform};
 use crate::time::conn::SampleTickConn;
 use crate::time::tick::Tick;
+use connections::conn::fixed::Micro;
 
 /// Compute all `ScheduledEvent`s whose `sample_index` falls in
 /// `[buffer_start_sample, buffer_start_sample + frames)`.
@@ -37,11 +38,13 @@ pub fn tick_stream(
     // Inverse of the transform's sample offset: event.sample_index =
     // stc.inner(swung_tick) + shift_samples + offset_samples. For an
     // event to land in [start, end), the swung_tick's natural sample
-    // must land in [start - delta, end - delta).
-    let shift_ms = channel.shift_ms.clamp(0.0, MAX_SHIFT_MS);
-    let sr_f = stc.sr() as f32;
-    let shift_samples: i64 = (shift_ms * sr_f / 1000.0).round() as i64;
-    let offset_samples: i64 = (channel.offset_ms * sr_f / 1000.0).round() as i64;
+    // must land in [start - delta, end - delta). Same
+    // `F12F06 ∘ PicoSampleConn::ceil` composition as `transform`,
+    // routed through `micro_to_samples` so the two stages are
+    // impossible to drift.
+    let shift_clamped = Micro(channel.shift.0.clamp(0, MAX_SHIFT.0));
+    let shift_samples: i64 = micro_to_samples(shift_clamped, stc.sr());
+    let offset_samples: i64 = micro_to_samples(channel.offset, stc.sr());
     // Promote to i128 so `buffer_start_sample - delta` can't wrap —
     // `buffer_start_sample as i64` would lose the high bit for streams
     // past ~6×10¹² seconds and produce spurious bounds.
@@ -93,8 +96,8 @@ mod tests {
                 amount: 0,
                 multiplier: 1,
             },
-            shift_ms: 0.0,
-            offset_ms: 0.0,
+            shift: Micro::ZERO,
+            offset: Micro::ZERO,
         }
     }
 
@@ -163,8 +166,8 @@ mod tests {
         #[test]
         fn scheduler_events_in_window(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
-            shift_ms in 0.0f32..=MAX_SHIFT_MS,
-            offset_ms in -5.0f32..=5.0f32,
+            shift_us in 0_i64..=MAX_SHIFT.0,
+            offset_us in -5_000_i64..=5_000,
             buffer_start in 0u64..=1_000_000,
             frames in 1usize..=8_192,
         ) {
@@ -172,8 +175,8 @@ mod tests {
                 mode: ChannelMode::MidiClock,
                 divider,
                 shuffle,
-                shift_ms,
-                offset_ms,
+                shift: Micro(shift_us),
+                offset: Micro(offset_us),
             };
             let end = buffer_start + frames as u64;
             let ev = tick_stream(&ch, &stc_120_48k(), buffer_start, frames);
@@ -196,8 +199,8 @@ mod tests {
         #[test]
         fn scheduler_block_equivalence(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
-            shift_ms in 0.0f32..=MAX_SHIFT_MS,
-            offset_ms in -5.0f32..=5.0f32,
+            shift_us in 0_i64..=MAX_SHIFT.0,
+            offset_us in -5_000_i64..=5_000,
             buf_size in 64usize..=2_048,
             n_buffers in 1usize..=16,
         ) {
@@ -205,8 +208,8 @@ mod tests {
                 mode: ChannelMode::MidiClock,
                 divider,
                 shuffle,
-                shift_ms,
-                offset_ms,
+                shift: Micro(shift_us),
+                offset: Micro(offset_us),
             };
             let stc = stc_120_48k();
             let total = buf_size * n_buffers;
