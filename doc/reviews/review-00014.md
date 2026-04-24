@@ -130,3 +130,158 @@ Deferred section.
   the working tree at `doc/plans/plan-2026-04-24-02.md`; kicks off
   once this lands. Adds the cpal audio host + midir sink + rtrb
   control plane + `agogo demo` CLI.
+
+## Local review (2026-04-24)
+
+**Branch:** plan/2026-04-24-01
+**Commits:** 7 (origin/main..plan/2026-04-24-01)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+
+Seven commits, all with valid conventional-commit prefixes (`plan:`,
+`feat(out):`, `feat(cli):`, `doc:`). Subjects are under 72
+characters. The task-to-commit mapping is clean: one commit per task
+(T1–T5), a sprint-opener, and a finalization commit. No CI-repair
+commits or merge commits are present. This section is clean.
+
+### Code Quality
+
+**Module layout.** `crates/core/src/out.rs` as a file alongside a
+`src/out/` directory is correct modern Rust module layout.
+`#![forbid(unsafe_code)]` is already set crate-wide. No `mod.rs`
+used. All conventions followed.
+
+**`TestSink` is public in `agogo-core`.** `TestSink`, `TestRecord`,
+and `render_clock_block` / `render_buffer` are all `pub`. This means
+they are part of `agogo-core`'s public API surface. For a test-only
+type, this is appropriate since downstream crates (Plan 13's midir
+integration tests) will use it — the plan anticipates this. Worth
+noting for Plan 13 when the real `MidiSink` implementors land.
+
+**`r.bytes[0]` index in `midi_trace::trace`.**
+`crates/cli/src/main.rs:781-782` indexes without a length check.
+The surrounding comment acknowledges the assumption. At present
+safe because `render_clock_block` and `render_buffer` only call
+`send_at` with one-byte slices. A future empty-slice `send_at` would
+panic here. Adequate for now; see Follow-up.
+
+**No dead code, no redundant logic, no clippy-visible issues** from
+reading the diff. `clear()` is used in the test suite. All public
+items have doc comments.
+
+**No new external dependencies.** Verified — no `Cargo.toml`
+changes.
+
+### Test Coverage
+
+**All six Verification-table properties present**, each mapped
+cleanly to a named proptest:
+
+| Plan property | Test name | Present |
+|---|---|---|
+| `clock_every_event_produces_one_record` | same | yes |
+| `clock_sample_order_preserved` | same | yes |
+| `transport_byte_in_expected_range` | `midi_rt_byte_in_expected_range` | yes |
+| `render_buffer_emits_transport_first` | `render_buffer_emits_rt_byte_first` | yes |
+| `non_clock_modes_are_noop` | same | yes |
+| `block_render_matches_scheduler` | same | yes |
+
+**Generator domains.** `clock_every_event_produces_one_record` and
+`clock_sample_order_preserved` use `any::<u64>()` — full domain,
+correct per CLAUDE.md. `render_buffer_emits_rt_byte_first` uses
+`any::<u64>()` for both `buffer_start` and sample values — correct.
+
+`block_render_matches_scheduler` bounds `buffer_start in
+0u64..=1_000_000` and `frames in 1usize..=8_192`. These bounds are
+not full-domain, and CLAUDE.md states bounding to avoid arithmetic
+is an anti-pattern. Here the bounds are set to stay within
+`tick_stream`'s own tested domain (the render path itself does no
+arithmetic on these values), so this is a defensible judgment call,
+but an inline comment would prevent a future reader from flagging
+it as coverage-faking. See Follow-up.
+
+**`non_clock_modes_are_noop` uses a fixed `MidiCc` value.**
+`prop::sample::select` draws from a slice containing only
+`ChannelMode::MidiCc { cc: 74, range: (0, 127) }`. Since the no-op
+arm is `ChannelMode::MidiCc { .. } => {}`, the actual cc/range
+values are irrelevant — the test passes for any `MidiCc` by the
+match arm alone. Fine.
+
+**`TestSink` concurrency spot check** (`test_sink_send_across_threads`)
+uses `thread::scope`, which handles join correctly. Well written.
+
+**No fixture-gated tests** in this diff; no `fixture_or_skip!`
+needed.
+
+**One missing CLI spot check.** Plan's spot-check list includes
+`--frames 4096 --buffers 16 --start` producing 16 rows at multiples
+of 24 000. The implemented tests use 24 000-sample buffers rather
+than 4 096 (to hit whole-beat positions cleanly). Covers the
+substance; deviation is defensible but unacknowledged. Not a
+must-fix.
+
+### Plan Conformance
+
+**Task-to-commit mapping exact.**
+
+- T1 (trait + constants + TestSink): `6b9f904` — API verbatim.
+- T2 (render_clock_block): `df54198` — signature matches.
+- T3 (MidiRtByte + render_buffer): `acebc72` — enum + signature
+  match.
+- T4 (render_channel_block): `4033ed5` — exhaustive match, same
+  arms.
+- T5 (lib.rs wire-up + CLI): `accda88` — `pub mod out;` added;
+  `agogo midi trace` with all planned flags.
+
+**`TransportEvent` → `MidiRtByte` rename** is consistent across
+code and docs; no stale references.
+
+**One CLI flag type deviation.** Plan specifies `--buffers <usize>`,
+implementation declares `u32` in `MidiSub::Trace` and
+`TraceArgs.buffers`. Harmless narrowing (on a 64-bit host `usize`
+and `u32` overlap below 2^32) but undocumented. See Follow-up.
+
+### Risks
+
+**`r.bytes[0]` panic path.** Noted above. CLI diagnostic tool, so
+impact is a confusing crash rather than production outage.
+
+**`ChannelMode` exhaustiveness.** Match is exhaustive (`Din |
+AnalogPulse | AnalogLfo | MidiCc { .. } => {}`). Future `ChannelMode`
+variants produce a compile error — correct design.
+
+**`Mutex::lock().unwrap()` in `TestSink`.** Poisoning only propagates
+across a shared instance, and `TestSink` is always fresh per test
+(no global state). `unwrap()` is appropriate.
+
+**BPM range inconsistency.** Range check uses `..u32::MAX`
+(exclusive) but the error message prints `]` (inclusive). No user
+impact at musical BPMs (~4294 BPM boundary) but latent doc bug.
+See Follow-up.
+
+### Recommendations
+
+**Must fix before push:**
+
+None. No convention violations, broken tests, or bugs block
+landing.
+
+**Follow-up (future work):**
+
+1. **`r.bytes[0]` index in `midi_trace::trace`**
+   (`crates/cli/src/main.rs:781`). When Plan 14 widens the CSV
+   schema for multi-byte messages, replace the unchecked index with
+   a length guard that returns an error rather than panicking.
+2. **`block_render_matches_scheduler` generator bounds**
+   (`crates/core/src/out/midi.rs:449-450`). Add an inline comment
+   explaining the bounds stay within `tick_stream`'s tested domain,
+   not to avoid arithmetic in the render path.
+3. **BPM error message / range inconsistency**
+   (`crates/cli/src/main.rs:728`). Fix either the range to
+   `..=u32::MAX` or the message to `)`.
+4. **`--buffers` type deviation from plan** (`usize` → `u32`).
+   Document the choice in a comment at the field declaration or in
+   the plan's Review section.
