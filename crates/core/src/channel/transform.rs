@@ -14,7 +14,7 @@
 //!    offset.
 
 use crate::channel::mode::ChannelMode;
-use crate::fxp::pico_to_samples;
+use crate::fxp::{Quantum, pico_to_samples};
 use crate::time::conn::SampleTickConn;
 use crate::time::swing::{self, SwingConfig};
 use crate::time::tbase::TBase;
@@ -39,6 +39,15 @@ pub struct Channel {
     /// Signed calibration offset. Not clamped here — CLI / UI should
     /// pick a musical range (agogo.md §6 cites ±5 ms = ±5 000 µs).
     pub offset: Micro,
+    /// Optional Link-quantum snap. When `Some(q)` and the active
+    /// `PhaseSource` is Link, the orchestrator (Plan 09's
+    /// `LinkSession::arm_channel`) bakes a `Micro` offset into
+    /// `offset` at arm time so the channel's first tick lands on the
+    /// next `q`-boundary. The `tick_stream` scheduler stays
+    /// Link-unaware — Plan 03's `scheduler_block_equivalence`
+    /// property must remain bit-for-bit unchanged when
+    /// `snap_to_quantum = None`.
+    pub snap_to_quantum: Option<Quantum>,
 }
 
 /// A master-tick-driven event scheduled at a specific sample index.
@@ -125,6 +134,7 @@ mod tests {
             },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
+            snap_to_quantum: None,
         }
     }
 
@@ -227,6 +237,7 @@ mod tests {
                 shuffle,
                 shift: Micro(shift_us),
                 offset: Micro(offset_us),
+                snap_to_quantum: None,
             };
             let master: Vec<Tick> = (0..=max_tick).map(Tick).collect();
             let ev = transform(master, &ch, &stc_120_48k());

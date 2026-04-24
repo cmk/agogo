@@ -17,7 +17,7 @@
 
 use std::num::NonZeroU32;
 
-use agogo_core::fxp::{Phase, Tempo, f64_phase_to_phase};
+use agogo_core::fxp::{Micro, Phase, Quantum, Tempo, f64_phase_to_phase};
 use agogo_core::sync::PhaseSourceImpl;
 use rusty_link::{AblLink, SessionState};
 
@@ -170,6 +170,44 @@ impl LinkClock {
         self.session
             .set_is_playing(playing, self.link.clock_micros());
         self.link.commit_audio_session_state(&self.session);
+    }
+
+    /// Micro-seconds until the next `quantum`-boundary after `now`.
+    /// Pure query — no publish, no commit. Returns `Micro::ZERO` if
+    /// `quantum` is non-positive, or if the computed delta would be
+    /// negative (paranoid guard; should not happen unless Link's
+    /// session is wildly stale).
+    ///
+    /// Both agogo's `Micro` and Link's host-time domain are
+    /// microseconds, so the result is already in the right lattice —
+    /// no sample-rate conversion needed. The caller adds this `Micro`
+    /// delta to `channel.offset`; the downstream
+    /// `transform::micro_to_samples` then applies the sample rate.
+    ///
+    /// # RT-safety
+    ///
+    /// Not RT-safe — `capture_audio_session_state` refreshes the
+    /// cached session. Run on the control thread.
+    pub fn snap_offset_micro(&mut self, quantum: Quantum) -> Micro {
+        // Link FFI — Quantum (microbeats) → f64 beats.
+        let q_f64 = (quantum.0.0 as f64) / 1_000_000.0;
+        if q_f64 <= 0.0 || q_f64.is_nan() {
+            return Micro::ZERO;
+        }
+        self.link.capture_audio_session_state(&mut self.session);
+        let now = self.link.clock_micros();
+        let current_beat = self.session.beat_at_time(now, q_f64);
+        // Next quantum boundary: smallest multiple of `q_f64` that is
+        // ≥ `current_beat`. `ceil(current/q) * q` is stable across
+        // small f64 rounding — a beat already exactly on a boundary
+        // stays on it.
+        let next_boundary = (current_beat / q_f64).ceil() * q_f64;
+        let time_at_next = self.session.time_at_beat(next_boundary, q_f64);
+        let delta_us = time_at_next.saturating_sub(now);
+        if delta_us < 0 {
+            return Micro::ZERO;
+        }
+        Micro(delta_us)
     }
 }
 
@@ -394,6 +432,60 @@ mod tests {
                 err < (1u32 << 22),
                 "delta != expected: diff={}, expected={}, err_ulp={}, bpm_µ={}",
                 diff, expected, err, bpm_mbpm
+            );
+        }
+    }
+
+    // ── Snap-offset ────────────────────────────────────────────────
+
+    /// `quantum_snap_nonneg`: the snap offset for any positive
+    /// quantum is always ≥ `Micro::ZERO` — snap moves forward to the
+    /// next boundary, never backward.
+    #[test]
+    fn quantum_snap_nonneg_at_representative_quanta() {
+        let mut c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
+        for bars in [1u32, 2, 4, 7, 16] {
+            let q = Quantum::from_bars(bars);
+            let delta = c.snap_offset_micro(q);
+            assert!(
+                delta.0 >= 0,
+                "snap_offset_micro({:?}) returned negative: {:?}",
+                q, delta
+            );
+        }
+    }
+
+    /// `snap_offset_micro` on `Quantum::ZERO` (or negative) returns
+    /// `Micro::ZERO` — the guard against `q_f64 <= 0.0`. Divide-by-zero
+    /// inside the math would otherwise panic in debug / produce inf
+    /// in release.
+    #[test]
+    fn snap_offset_zero_quantum_is_zero() {
+        let mut c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
+        assert_eq!(c.snap_offset_micro(Quantum::ZERO), Micro::ZERO);
+    }
+
+    /// Snap offset bounds: for `Quantum::from_bars(n)` at BPM B, the
+    /// time until the next n-beat boundary can never exceed the time
+    /// of one full n-beat span — i.e. `delta < n × 60 / B × 10⁶` µs.
+    /// At 120 BPM / `from_bars(4)` this is 2 × 10⁶ µs. Verified on a
+    /// representative set rather than as a full proptest because the
+    /// Link session's beat-origin is machine-local and varies between
+    /// runs; the bound holds unconditionally.
+    #[test]
+    fn snap_offset_bounded_by_one_quantum_span() {
+        let mut c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
+        for bars in [1u32, 4, 16] {
+            let q = Quantum::from_bars(bars);
+            let delta = c.snap_offset_micro(q);
+            // One bar at 120 BPM = 4 beats × 500 ms = 2 s = 2_000_000 µs.
+            let one_quantum_span_us: i64 = (bars as i64) * 2_000_000;
+            // Plus one µs of slack for floor/ceil rounding on `ceil()`.
+            let bound = one_quantum_span_us + 1;
+            assert!(
+                delta.0 <= bound,
+                "snap {:?} at {} bars exceeds one-quantum span bound {}",
+                delta, bars, bound
             );
         }
     }

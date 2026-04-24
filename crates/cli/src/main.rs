@@ -587,6 +587,7 @@ pub mod channel_trace {
             },
             shift,
             offset,
+            snap_to_quantum: None,
         };
         // Pre-flight: reject ranges where `buffers × frames` would
         // overflow `u64`. Silent wrap in release builds would produce
