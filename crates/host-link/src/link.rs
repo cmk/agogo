@@ -474,27 +474,30 @@ mod tests {
         assert_eq!(c.snap_offset_micro(Quantum::ZERO), Micro::ZERO);
     }
 
-    /// Snap offset bounds: for `Quantum::from_bars(n)` at BPM B, the
-    /// time until the next n-beat boundary can never exceed the time
-    /// of one full n-beat span — i.e. `delta < n × 60 / B × 10⁶` µs.
-    /// At 120 BPM / `from_bars(4)` this is 2 × 10⁶ µs. Verified on a
-    /// representative set rather than as a full proptest because the
-    /// Link session's beat-origin is machine-local and varies between
-    /// runs; the bound holds unconditionally.
+    /// Snap offset bounds: for `Quantum::from_bars(n)` — which is
+    /// `n` microbeats-million = `n` beats — at BPM B, the time
+    /// until the next n-beat boundary can never exceed the time of
+    /// one full n-beat span — i.e. `delta < n × 60 / B × 10⁶` µs.
+    /// At 120 BPM, one beat = 500 000 µs, so an n-beat quantum
+    /// spans `n × 500 000` µs. Verified on a representative set
+    /// rather than as a full proptest because the Link session's
+    /// beat-origin is machine-local and varies between runs; the
+    /// bound holds unconditionally.
     #[test]
     fn snap_offset_bounded_by_one_quantum_span() {
         let mut c = LinkClock::new(Tempo::from_bpm_integer(120), zero_anchor_48k());
-        for bars in [1u32, 4, 16] {
-            let q = Quantum::from_bars(bars);
+        for beats in [1u32, 4, 16] {
+            let q = Quantum::from_bars(beats);
             let delta = c.snap_offset_micro(q);
-            // One bar at 120 BPM = 4 beats × 500 ms = 2 s = 2_000_000 µs.
-            let one_quantum_span_us: i64 = (bars as i64) * 2_000_000;
+            // At 120 BPM, one beat is 500_000 µs, so an n-beat
+            // quantum spans `n * 500_000` µs.
+            let one_quantum_span_us: i64 = (beats as i64) * 500_000;
             // Plus one µs of slack for floor/ceil rounding on `ceil()`.
             let bound = one_quantum_span_us + 1;
             assert!(
                 delta.0 <= bound,
-                "snap {:?} at {} bars exceeds one-quantum span bound {}",
-                delta, bars, bound
+                "snap {:?} at {} beats exceeds one-quantum span bound {}",
+                delta, beats, bound
             );
         }
     }

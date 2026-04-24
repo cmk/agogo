@@ -208,14 +208,15 @@ fn quantum_snap_produces_positive_offset() {
     agogo_session.arm_channel(&mut ch);
     agogo_session.enable(false);
 
-    // At 120 BPM, 4 bars = 4 × 4 beats × 500 ms = 8 s = 8_000_000 µs.
-    // Snap delta must be within [0, 8_000_001) (+1 µs rounding slack).
+    // At 120 BPM, Quantum::from_bars(4) spans 4 beats (one 4/4 bar):
+    // 4 × 500 ms = 2 s = 2_000_000 µs.
+    // Snap delta must be within [0, 2_000_001) (+1 µs rounding slack).
     assert!(
         ch.offset.0 >= 0,
         "snap produced negative offset: {:?}", ch.offset
     );
     assert!(
-        ch.offset.0 < 8_000_001,
+        ch.offset.0 < 2_000_001,
         "snap offset {:?} exceeds one-quantum span at 120 BPM", ch.offset
     );
     // Also: the offset shouldn't accidentally saturate MAX_SHIFT
