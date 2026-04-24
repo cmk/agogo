@@ -72,14 +72,14 @@ enum SyncSub {
     /// One row per detected peak: `sample_index,bpm_estimate,phase_estimate`.
     #[bpaf(command("trace"))]
     Trace {
-        #[bpaf(long, argument("BPM"), parse(parse_positive_f32))]
-        bpm: f32,
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f64))]
+        bpm: f64,
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
         #[bpaf(long, argument("PPQ"), parse(parse_positive_u32))]
         ppq: u32,
-        #[bpaf(long, argument("JITTER_US"), parse(parse_non_negative_f32), fallback(0.0))]
-        jitter_us: f32,
+        #[bpaf(long, argument("JITTER_US"), parse(parse_non_negative_f64), fallback(0.0))]
+        jitter_us: f64,
         #[bpaf(long, argument("PULSES"), parse(parse_positive_u32))]
         pulses: u32,
         #[bpaf(long, argument("SEED"), fallback(1))]
@@ -119,11 +119,11 @@ enum ChannelSub {
         /// Positive latency shift in ms; clamped to `[0, 300]` inside
         /// the transform. Non-finite or negative values rejected at
         /// the CLI boundary.
-        #[bpaf(long, argument("SHIFT_MS"), parse(parse_non_negative_f32), fallback(0.0))]
-        shift_ms: f32,
+        #[bpaf(long, argument("SHIFT_MS"), parse(parse_non_negative_f64), fallback(0.0))]
+        shift_ms: f64,
         /// Signed calibration offset in ms. Must be finite.
-        #[bpaf(long, argument("OFFSET_MS"), parse(parse_finite_f32), fallback(0.0))]
-        offset_ms: f32,
+        #[bpaf(long, argument("OFFSET_MS"), parse(parse_finite_f64), fallback(0.0))]
+        offset_ms: f64,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
         frames: usize,
@@ -131,30 +131,6 @@ enum ChannelSub {
         #[bpaf(long, argument("BUFFERS"), parse(parse_positive_u32))]
         buffers: u32,
     },
-}
-
-fn parse_positive_f32(v: f32) -> Result<f32, String> {
-    if v.is_finite() && v > 0.0 {
-        Ok(v)
-    } else {
-        Err(format!("must be a positive finite number, got {v}"))
-    }
-}
-
-fn parse_non_negative_f32(v: f32) -> Result<f32, String> {
-    if v.is_finite() && v >= 0.0 {
-        Ok(v)
-    } else {
-        Err(format!("must be a non-negative finite number, got {v}"))
-    }
-}
-
-fn parse_finite_f32(v: f32) -> Result<f32, String> {
-    if v.is_finite() {
-        Ok(v)
-    } else {
-        Err(format!("must be a finite number, got {v}"))
-    }
 }
 
 fn parse_positive_u32(v: u32) -> Result<u32, String> {
@@ -170,6 +146,22 @@ fn parse_positive_f64(v: f64) -> Result<f64, String> {
         Ok(v)
     } else {
         Err(format!("must be a positive finite number, got {v}"))
+    }
+}
+
+fn parse_non_negative_f64(v: f64) -> Result<f64, String> {
+    if v.is_finite() && v >= 0.0 {
+        Ok(v)
+    } else {
+        Err(format!("must be a non-negative finite number, got {v}"))
+    }
+}
+
+fn parse_finite_f64(v: f64) -> Result<f64, String> {
+    if v.is_finite() {
+        Ok(v)
+    } else {
+        Err(format!("must be a finite number, got {v}"))
     }
 }
 
@@ -291,9 +283,14 @@ fn main() {
         }) => {
             println!("t_ms,peers,tempo_bpm,phase");
             link_probe::probe(initial_bpm, sr, duration_ms, period_ms, |row| {
+                // Display-only conversion: fxp → f64 at println! time,
+                // never stored in `ProbeRow`. f64 dies inside this
+                // format string.
+                let tempo_bpm = f64::from(row.tempo.0) / 1.0e6;
+                let phase = f64::from(row.phase.0) / (1u64 << 32) as f64;
                 println!(
                     "{},{},{:.4},{:.6}",
-                    row.t_ms, row.peers, row.tempo_bpm, row.phase
+                    row.t_ms, row.peers, tempo_bpm, phase
                 );
             });
         }
@@ -322,10 +319,10 @@ pub mod link_probe {
         /// monotonically-increasing timestamps end-to-end.
         pub t_ms: u64,
         pub peers: u64,
-        pub tempo_bpm: f64,
+        pub tempo: agogo_core::fxp::Tempo,
         /// Beat-phase in `[0, 1)` at sample `t_ms × sr / 1000`,
         /// mapped through the anchor captured at probe start.
-        pub phase: f64,
+        pub phase: agogo_core::fxp::Phase,
     }
 
     /// Run a probe loop for `duration_ms`, sampling every `period_ms`.
@@ -382,11 +379,15 @@ pub mod link_probe {
             // rate, then query phase.
             let n = t_ms * u64::from(sr.get()) / 1_000;
             let phase_u32 = clock.phase_at_sample(n).0;
+            // `clock.tempo()` still returns f64 this PR — T5 reshapes
+            // the `LinkClock` surface to expose `Tempo` directly.
+            // Until then convert at the boundary via the argv
+            // helper.
             on_row(ProbeRow {
                 t_ms,
                 peers: clock.num_peers(),
-                tempo_bpm: clock.tempo(),
-                phase: f64::from(phase_u32) / (1u64 << 32) as f64,
+                tempo: agogo_core::fxp::f64_bpm_to_tempo(clock.tempo()),
+                phase: agogo_core::fxp::Phase(phase_u32),
             });
             sleep(period);
         }
@@ -413,15 +414,18 @@ pub mod link_probe {
             assert!(!rows.is_empty(), "probe returned no rows");
             let first = rows[0];
             assert_eq!(first.peers, 0);
-            assert!(
-                (first.tempo_bpm - 125.0).abs() < 1e-9,
-                "tempo {} differs from initial 125.0",
-                first.tempo_bpm
+            // Tempo is integer µBPM: 125 BPM → 125_000_000.
+            assert_eq!(
+                first.tempo, agogo_core::fxp::Tempo(125_000_000),
+                "tempo {:?} differs from initial Tempo(125_000_000)",
+                first.tempo
             );
+            // Phase is Q0.32 — in [0, 2^32), representing [0, 1) cycles.
+            let phase_cycles = f64::from(first.phase.0) / (1u64 << 32) as f64;
             assert!(
-                (0.0..1.0).contains(&first.phase),
+                (0.0..1.0).contains(&phase_cycles),
                 "phase {} not in [0, 1)",
-                first.phase
+                phase_cycles
             );
         }
     }
@@ -456,35 +460,22 @@ mod sync_trace {
     }
 
     pub fn trace(
-        bpm_f32: f32,
+        bpm_f64: f64,
         ppq: u32,
-        jitter_us: f32,
+        jitter_us: f64,
         pulses: u32,
         seed: u64,
     ) -> Vec<TraceRow> {
-        // argv-boundary conversions.
-        let bpm: Tempo = f64_bpm_to_tempo(bpm_f32 as f64);
-        // µs → seconds → Pico via upstream `F64F12`. NaN / ±∞ are
-        // rejected by the `is_finite` guard and map to `Pico(0)`
-        // (the previous `f32_jitter_us_to_sigma` helper's "safe
-        // default" on non-finite input). For finite jitter values
-        // outside the rung's representable range, `F64F12.ceil`
-        // returns `Extended::PosInf` / `Extended::NegInf`, which
-        // the match arm collapses to `Pico(0)` as well.
-        //
-        // Rounding: the old helper used `.round()` (nearest); this
-        // uses `F64F12.ceil` (round up). For jitter-sigma this is
-        // more conservative — never under-estimates — and agrees
-        // exactly on the values that matter for the CLI (50 µs at
-        // exact integer-pico boundary).
-        let jitter_s = f64::from(jitter_us) * 1.0e-6;
-        let jitter: Pico = if !jitter_s.is_finite() {
-            Pico(0)
-        } else {
-            match F64F12.ceil(ExtendedFloat::Finite(jitter_s)) {
-                Extended::Finite(p) => p,
-                Extended::NegInf | Extended::PosInf => Pico(0),
-            }
+        // argv-boundary conversions. f64 dies on these two lines.
+        let bpm: Tempo = f64_bpm_to_tempo(bpm_f64);
+        // µs → seconds → Pico via upstream `F64F12` (lawful conn over
+        // `ExtendedFloat<f64>`). `parse_non_negative_f64` at the bpaf
+        // layer already rejected NaN / ±∞, so a finite-wrap here is
+        // safe; the `PosInf` match arm catches out-of-range values.
+        let jitter_s = jitter_us * 1.0e-6;
+        let jitter: Pico = match F64F12.ceil(ExtendedFloat::Finite(jitter_s)) {
+            Extended::Finite(p) => p,
+            Extended::NegInf | Extended::PosInf => Pico(0),
         };
 
         let (samples, _truth): (Vec<f32>, Vec<S48>) =
@@ -526,18 +517,19 @@ pub mod channel_trace {
         pub sr: u32,
         pub divider: String,
         pub shuffle: i32,
-        pub shift_ms: f32,
-        pub offset_ms: f32,
+        pub shift_ms: f64,
+        pub offset_ms: f64,
         pub frames: usize,
         pub buffers: u32,
     }
 
-    /// argv-boundary: convert an `f32` ms value (already validated as
-    /// finite by bpaf's `parse_*_f32`) into a `Micro` via the upstream
-    /// `F64F06` lawful conn. Out-of-range saturates to `Micro::ZERO`
-    /// for `ms = 0` compatibility.
-    fn ms_f32_to_micro(ms: f32) -> Micro {
-        let seconds = f64::from(ms) * 1.0e-3;
+    /// argv-boundary: convert an `f64` ms value (already validated
+    /// as finite by bpaf's `parse_*_f64`) into a `Micro` via the
+    /// upstream `F64F06` lawful conn. Out-of-range saturates to
+    /// `Micro::ZERO` — same "safe default" as the previous bespoke
+    /// helper.
+    fn ms_to_micro(ms: f64) -> Micro {
+        let seconds = ms * 1.0e-3;
         match F64F06.ceil(ExtendedFloat::Finite(seconds)) {
             Extended::Finite(m) => m,
             Extended::NegInf | Extended::PosInf => Micro::ZERO,
@@ -578,8 +570,8 @@ pub mod channel_trace {
                 amount: args.shuffle,
                 multiplier: 1,
             },
-            shift: ms_f32_to_micro(args.shift_ms),
-            offset: ms_f32_to_micro(args.offset_ms),
+            shift: ms_to_micro(args.shift_ms),
+            offset: ms_to_micro(args.offset_ms),
         };
         // Pre-flight: reject ranges where `buffers × frames` would
         // overflow `u64`. Silent wrap in release builds would produce
