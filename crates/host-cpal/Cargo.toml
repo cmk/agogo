@@ -1,0 +1,28 @@
+[package]
+name = "agogo-host-cpal"
+edition = "2024"
+version = "0.1.0"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+
+# `agogo-host-cpal` is NOT a `[workspace].members` entry — it's
+# pulled in only as an optional path dep from `crates/cli/Cargo.toml`
+# when `agogo-cli --features cpal` (or `--features demo`) is on,
+# starting in Plan 13 T5. The detached status keeps `cargo test
+# --workspace` from eagerly pulling cpal + its platform system deps
+# (libasound on Linux, CoreAudio on macOS, WASAPI on Windows) into
+# the default CI path. A dedicated `cargo test -p agogo-host-cpal`
+# job in `.github/workflows/ci.yml` exercises this crate with the
+# runner's `libasound2-dev` preinstalled.
+
+[dependencies]
+agogo-core = { path = "../core" }
+# cpal 0.15 is the current stable; no newer version has changed the
+# `build_input_stream` ABI we rely on.
+cpal = "0.15"
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+proptest = "1"
