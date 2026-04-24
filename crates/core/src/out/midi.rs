@@ -84,9 +84,31 @@ impl MidiSink for TestSink {
     }
 }
 
+// ── Clock rendering ─────────────────────────────────────────────────
+
+use crate::channel::ScheduledEvent;
+
+/// Render a block of MidiClock [`ScheduledEvent`]s. Emits one
+/// `0xF8` byte per event at its `sample_index`. No allocation — the
+/// one-byte slice is stack-local per iteration.
+pub fn render_clock_block(events: &[ScheduledEvent], sink: &dyn MidiSink) {
+    for ev in events {
+        sink.send_at(&[MIDI_CLOCK], ev.sample_index);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::tick::Tick;
+    use proptest::prelude::*;
+
+    fn ev(at_sample: u64) -> ScheduledEvent {
+        ScheduledEvent {
+            sample_index: at_sample,
+            tick: Tick(0),
+        }
+    }
 
     #[test]
     fn status_byte_constants_match_spec() {
@@ -149,5 +171,60 @@ mod tests {
         });
 
         assert_eq!(sink.len(), 2_000);
+    }
+
+    // ── render_clock_block ────────────────────────────────────────
+
+    #[test]
+    fn render_clock_block_spot_check_four_events() {
+        let evs = [ev(0), ev(24_000), ev(48_000), ev(72_000)];
+        let sink = TestSink::new();
+        render_clock_block(&evs, &sink);
+        let recs = sink.records();
+        assert_eq!(recs.len(), 4);
+        for (r, e) in recs.iter().zip(evs.iter()) {
+            assert_eq!(r.at_sample, e.sample_index);
+            assert_eq!(r.bytes, vec![MIDI_CLOCK]);
+        }
+    }
+
+    #[test]
+    fn render_clock_block_empty_is_noop() {
+        let sink = TestSink::new();
+        render_clock_block(&[], &sink);
+        assert!(sink.is_empty());
+    }
+
+    proptest! {
+        /// Plan 12 property `clock_every_event_produces_one_record`:
+        /// rendering N events produces exactly N records, each a
+        /// single `0xF8` byte.
+        #[test]
+        fn clock_every_event_produces_one_record(
+            samples in prop::collection::vec(any::<u64>(), 0..64),
+        ) {
+            let evs: Vec<ScheduledEvent> = samples.iter().copied().map(ev).collect();
+            let sink = TestSink::new();
+            render_clock_block(&evs, &sink);
+            let recs = sink.records();
+            prop_assert_eq!(recs.len(), evs.len());
+            for r in &recs {
+                prop_assert_eq!(r.bytes.as_slice(), &[MIDI_CLOCK]);
+            }
+        }
+
+        /// Plan 12 property `clock_sample_order_preserved`: record
+        /// `at_sample` values appear in the same FIFO order as input
+        /// `ScheduledEvent.sample_index` values.
+        #[test]
+        fn clock_sample_order_preserved(
+            samples in prop::collection::vec(any::<u64>(), 0..64),
+        ) {
+            let evs: Vec<ScheduledEvent> = samples.iter().copied().map(ev).collect();
+            let sink = TestSink::new();
+            render_clock_block(&evs, &sink);
+            let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();
+            prop_assert_eq!(emitted, samples);
+        }
     }
 }
