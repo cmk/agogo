@@ -1254,6 +1254,108 @@ mod tests {
     // `PicoSampleConn` doesn't capture — a full proptest would
     // require wrapping the two conns in a combined bridge that
     // agogo doesn't have yet and doesn't need outside this test.
+    // The three arithmetic-boundary tests below exist because an
+    // earlier revision of `PicoSampleConn::inner` did `as i64` on the
+    // i128 intermediate, which silently wrapped for Q48.16 bits in
+    // roughly ±2⁴⁸..2⁶³. The `arb_q48_16` proptest generator bounded
+    // inputs to ±10¹⁵ bits — under the wrap threshold — so the main
+    // Galois-law battery never saw the bug. Expanding the generator
+    // here to hit the full i64 range is the test that should have
+    // caught it.
+
+    // `pico_sample_inner_monotone_full_i64`: `inner` is monotone
+    // non-decreasing across the full i64 bit range. With the old
+    // `as i64` wrap, very large bits would silently flip sign and
+    // break monotonicity; with the saturating clamp, monotonicity
+    // is restored (with equality plateaus at the ±i64 boundaries).
+    proptest! {
+        #[test]
+        fn pico_sample_inner_monotone_full_i64(
+            psc in arb_pico_sample_conn(),
+            a in any::<i64>(),
+            b in any::<i64>(),
+        ) {
+            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+            let inner_lo = psc.inner(Q48_16::from_bits(lo));
+            let inner_hi = psc.inner(Q48_16::from_bits(hi));
+            prop_assert!(inner_lo.0 <= inner_hi.0);
+        }
+
+        // `pico_sample_inner_adjacent_bits_differ_by_at_most_ratio`:
+        // the semantic check for no-silent-wrap — adjacent-bit inputs
+        // produce Pico values differing by at most `ceil(num/den)+1`.
+        // A wrap would produce a jump of ~2⁶⁴; a saturation plateau
+        // produces a step of 0.
+        #[test]
+        fn pico_sample_inner_adjacent_bits_differ_by_at_most_ratio(
+            psc in arb_pico_sample_conn(),
+            bits in (i64::MIN + 1)..=(i64::MAX - 1),
+        ) {
+            let p0 = psc.inner(Q48_16::from_bits(bits)).0;
+            let p1 = psc.inner(Q48_16::from_bits(bits + 1)).0;
+            // Adjacent bits map to Pico values differing by at most
+            // ceil(num/den) + 1 (the +1 covers the div_euclid rounding
+            // boundary and the saturation plateau). This rules out
+            // silent wrap — a wrap would produce a jump of ~2⁶⁴.
+            let step = p1.wrapping_sub(p0);
+            let max_step = (psc.num / psc.den) as i64 + 1;
+            prop_assert!(
+                step >= 0 && step <= max_step,
+                "bits {}→{}: step {} not in 0..={}",
+                bits, bits + 1, step, max_step
+            );
+        }
+    }
+
+    #[test]
+    fn pico_sample_inner_saturates_at_i64_boundaries() {
+        // At 48 kHz, num/den reduces to 1_953_125 / 6_144 ≈ 317.87 pico
+        // per bit. i64::MAX bits would map to ~2.93e21 pico, which is
+        // way beyond i64::MAX (≈9.22e18), so the output must saturate.
+        let psc = PicoSampleConn::new(48_000);
+        assert_eq!(
+            psc.inner(Q48_16::from_bits(i64::MAX)),
+            Pico(i64::MAX),
+            "inner(i64::MAX bits) must saturate to Pico(i64::MAX), not wrap"
+        );
+        assert_eq!(
+            psc.inner(Q48_16::from_bits(i64::MIN)),
+            Pico(i64::MIN),
+            "inner(i64::MIN bits) must saturate to Pico(i64::MIN), not wrap"
+        );
+
+        // Same at 44.1 kHz (where NUM/DEN doesn't reduce to trivial
+        // powers of 2).
+        let psc = PicoSampleConn::new(44_100);
+        assert_eq!(psc.inner(Q48_16::from_bits(i64::MAX)), Pico(i64::MAX));
+        assert_eq!(psc.inner(Q48_16::from_bits(i64::MIN)), Pico(i64::MIN));
+    }
+
+    #[test]
+    fn pico_sample_new_reduces_gcd_correctly() {
+        // Semantic invariant: num/den ≡ 10¹² / (sr × 2¹⁶) regardless
+        // of reduction. Check by cross-multiplication at each rate.
+        let two_to_16: i128 = 1 << 16;
+        let ten_to_12: i128 = 1_000_000_000_000;
+        for sr in [44_100_u32, 48_000, 88_200, 96_000, 176_400, 192_000] {
+            let psc = PicoSampleConn::new(sr);
+            assert_eq!(
+                psc.num * i128::from(sr) * two_to_16,
+                psc.den * ten_to_12,
+                "sr = {}: num·sr·2¹⁶ = {} ≠ den·10¹² = {}",
+                sr,
+                psc.num * i128::from(sr) * two_to_16,
+                psc.den * ten_to_12,
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "sample rate must be positive")]
+    fn pico_sample_new_panics_on_zero_sr() {
+        let _ = PicoSampleConn::new(0);
+    }
+
     #[test]
     fn sample_tick_and_pico_sample_agree_at_120bpm_48k() {
         // 120 BPM / ppq=192 / 48 kHz: each quarter note = 0.5 s =
