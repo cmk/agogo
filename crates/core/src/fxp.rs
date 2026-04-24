@@ -488,4 +488,32 @@ mod tests {
         let p = f64_phase_to_phase(1.0 - 1.0e-15);
         assert!(p.0 == 0 || p.0 < u32::MAX);
     }
+
+    // `pico_to_samples` is a hand-written `match` dispatching on `sr`
+    // to the upstream `F12Sxx` conns. Upstream's per-rate proptests
+    // catch arithmetic bugs inside each `F12Sxx`, but nothing there
+    // catches a local wiring mistake like "oops, the 96k arm calls
+    // F12S88 by accident." These tests lock in the dispatch table.
+
+    #[test]
+    fn pico_to_samples_one_second_maps_to_sr() {
+        // 1 second = 10¹² pico = `sr` samples at every supported rate.
+        // Any cross-wired arm (e.g. 96k → F12S88) would return 88_200
+        // instead of 96_000 and fail here.
+        let one_second = Pico(1_000_000_000_000);
+        for sr in [44_100, 48_000, 88_200, 96_000, 176_400, 192_000] {
+            assert_eq!(
+                pico_to_samples(one_second, sr),
+                Some(sr as i64),
+                "sr = {sr}: expected {sr} samples at 1 s"
+            );
+        }
+    }
+
+    #[test]
+    fn pico_to_samples_rejects_unsupported_and_zero() {
+        assert_eq!(pico_to_samples(Pico(1_000_000_000_000), 22_050), None);
+        assert_eq!(pico_to_samples(Pico(1_000_000_000_000), 44_099), None);
+        assert_eq!(pico_to_samples(Pico(0), 0), None);
+    }
 }

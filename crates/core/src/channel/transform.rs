@@ -55,14 +55,20 @@ pub struct ScheduledEvent {
 /// the adjoint-law composition `F12F06 ∘ pico_to_samples`. Shared
 /// by `transform` and `scheduler`.
 ///
+/// # Panics
+///
 /// Panics if `sr` isn't one of the six supported rates (same set as
-/// `pico_to_samples`); `SampleTickConn::new` already enforces a
-/// matching invariant upstream of every caller, so this panic is
-/// unreachable in practice.
+/// `pico_to_samples`). Every production caller goes through the CLI
+/// or a test helper that validates `sr` before constructing the
+/// `SampleTickConn`, so this panic surfaces programmer error (an
+/// un-validated `sr` reached the transform) rather than user input.
+/// `SampleTickConn::new` itself only asserts `sr > 0` — the audio-
+/// rate allowlist is a separate invariant enforced at the CLI /
+/// config boundary.
 pub(crate) fn micro_to_samples(m: Micro, sr: u32) -> i64 {
     let pico = F12F06.inner(m);
     pico_to_samples(pico, sr).unwrap_or_else(|| {
-        panic!("channel: unsupported sample rate {sr} (expected 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000)")
+        panic!("channel: unsupported sample rate {sr} (expected 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000); validate `sr` at the CLI / config boundary before constructing the channel pipeline")
     })
 }
 
