@@ -549,17 +549,22 @@ pub mod channel_trace {
         };
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
         // argv-boundary: ms (f64) → Micro via the upstream `F64F06`
-        // lawful conn, saturating to `Micro::ZERO` for out-of-range.
-        // Inlined per the compose-don't-hardcode rule (CLAUDE.md
-        // §Repository conventions; review-calibration Pattern 11).
-        let shift = match F64F06.ceil(ExtendedFloat::Finite(args.shift_ms * 1.0e-3)) {
-            Extended::Finite(m) => m,
-            Extended::NegInf | Extended::PosInf => Micro::ZERO,
+        // lawful conn. Out-of-range saturations are user errors, not
+        // silent defaults — `parse_non_negative_f64` / `parse_finite_f64`
+        // already validated finiteness, so an `Extended::PosInf` /
+        // `Extended::NegInf` result means the user asked for a value
+        // outside `Micro`'s ±i64 range (billions of years). Surface
+        // that as an error rather than silently mapping to zero.
+        let ms_to_micro = |flag: &str, ms: f64| -> Result<Micro, String> {
+            match F64F06.ceil(ExtendedFloat::Finite(ms * 1.0e-3)) {
+                Extended::Finite(m) => Ok(m),
+                Extended::NegInf | Extended::PosInf => {
+                    Err(format!("{flag} {ms} out of range"))
+                }
+            }
         };
-        let offset = match F64F06.ceil(ExtendedFloat::Finite(args.offset_ms * 1.0e-3)) {
-            Extended::Finite(m) => m,
-            Extended::NegInf | Extended::PosInf => Micro::ZERO,
-        };
+        let shift = ms_to_micro("--shift-ms", args.shift_ms)?;
+        let offset = ms_to_micro("--offset-ms", args.offset_ms)?;
         let channel = Channel {
             mode: ChannelMode::MidiClock,
             divider,
