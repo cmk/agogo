@@ -1,0 +1,210 @@
+//! Audio-host trait + RT-callback shape.
+//!
+//! Mirrors Plan 12's `MidiSink` / `MidirSink` split: core holds the
+//! trait contract, back-end crates hold the implementations. Plan 13's
+//! `host-cpal` is the first implementor; future JACK / CoreAudio /
+//! ASIO back-ends plug in via the same shape.
+//!
+//! See `doc/agogo.md` §5 for the pinned trait shape and
+//! `doc/designs/control-plane.md` for the RT-safety contract.
+//!
+//! **RT-safety contract.** The callback handed to [`AudioHost::run`]
+//! runs on the host's audio thread. Implementations must not block,
+//! allocate, or take locks inside the callback. Parameter updates
+//! from the control thread come in via an atomic snapshot at the top
+//! of each buffer (`control-plane.md:17-43`, v0.3 scope).
+
+use thiserror::Error;
+
+/// Cross-platform audio-host trait. Concrete back-ends live in
+/// sibling crates (`host-cpal`, future `host-jack`, ...) and
+/// implement this trait against their native audio stream API.
+pub trait AudioHost {
+    /// Start the audio stream with `cb` installed as the per-buffer
+    /// callback. Ownership of the underlying platform stream lives
+    /// inside the returned [`Handle`]; dropping the handle tears the
+    /// stream down.
+    fn run(
+        self,
+        cfg: Config,
+        cb: Box<dyn FnMut(&mut AudioIo) + Send>,
+    ) -> Result<Handle, AudioHostError>;
+}
+
+/// Per-buffer callback payload.
+///
+/// Marked `#[non_exhaustive]` so v0.5's Link work can add a cpal
+/// `timestamp().playback` field without breaking downstream pattern
+/// matches — `doc/designs/link.md:23-29` requires the
+/// "first-sample-hits-DAC" instant for sync-accurate Link queries.
+#[non_exhaustive]
+pub struct AudioIo<'a> {
+    /// Captured input samples for this buffer. Empty when the host
+    /// was opened without an input device.
+    pub input: &'a [f32],
+    /// Output buffer for this buffer. Empty in input-only configs
+    /// (Plan 13 scope — CV output arrives in v0.4's `out/audio`).
+    /// When non-empty, back-ends give the callback undefined-content
+    /// memory and the callback must write every sample
+    /// (`doc/designs/cv-pulse.md:47-52`).
+    pub output: &'a mut [f32],
+    /// Stream-global sample index of `input[0]` / `output[0]`.
+    /// Monotonic across calls within a single stream session.
+    pub buffer_start_sample: u64,
+    /// Sample rate reported by the host for this stream.
+    pub sample_rate: u32,
+    /// Number of frames (samples per channel) in this buffer.
+    pub frames: usize,
+}
+
+impl<'a> AudioIo<'a> {
+    /// Construct an `AudioIo` for a back-end's per-buffer callback.
+    /// Back-ends (like `host-cpal`) use this rather than the struct
+    /// literal because `AudioIo` is `#[non_exhaustive]` for
+    /// forward-compat with future fields (see the struct doc for
+    /// the v0.5 Link timestamp rationale). When a new field lands,
+    /// this constructor's signature breaks intentionally so every
+    /// back-end is forced to acknowledge it.
+    pub fn new(
+        input: &'a [f32],
+        output: &'a mut [f32],
+        buffer_start_sample: u64,
+        sample_rate: u32,
+        frames: usize,
+    ) -> Self {
+        Self {
+            input,
+            output,
+            buffer_start_sample,
+            sample_rate,
+            frames,
+        }
+    }
+}
+
+/// Stream configuration passed to [`AudioHost::run`].
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Input device name; `None` selects the host's default input.
+    /// Back-ends that don't know how to resolve a name return
+    /// [`AudioHostError::DeviceNotFound`].
+    pub input_device: Option<String>,
+    /// Output device name; `None` selects the host's default output.
+    /// Plan 13 passes `None` and ignores the output slice (CV out
+    /// lands in v0.4).
+    pub output_device: Option<String>,
+    /// Target sample rate. Back-ends surface unsupported rates as
+    /// [`AudioHostError::UnsupportedSampleRate`] rather than
+    /// silently resampling.
+    pub sample_rate: u32,
+    /// Target buffer size in frames. Back-ends may round to the
+    /// nearest value the OS allows.
+    pub buffer_frames: u32,
+    pub input_channels: u16,
+    pub output_channels: u16,
+}
+
+/// Opaque stream handle. Back-ends wrap whatever they need to own
+/// for the stream's lifetime (a `cpal::Stream`, a JACK client, ...)
+/// inside the payload; dropping the `Handle` drops the payload,
+/// which is how back-ends tear down their streams without exposing
+/// a platform-specific type in `agogo-core`.
+pub struct Handle {
+    _payload: Box<dyn std::any::Any + Send>,
+}
+
+impl Handle {
+    /// Wrap a back-end-specific payload. `Any + Send` gives us
+    /// type-erased ownership without requiring downcasting: the
+    /// `Handle` doesn't *do* anything with the payload except drop
+    /// it when the handle itself is dropped.
+    pub fn from_payload<T: std::any::Any + Send>(payload: T) -> Self {
+        Self {
+            _payload: Box::new(payload),
+        }
+    }
+}
+
+impl std::fmt::Debug for Handle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Handle").finish_non_exhaustive()
+    }
+}
+
+/// Errors a back-end can surface from [`AudioHost::run`].
+#[derive(Debug, Error)]
+pub enum AudioHostError {
+    #[error("no default input device")]
+    NoInputDevice,
+    #[error("device not found: {0}")]
+    DeviceNotFound(String),
+    #[error("unsupported sample rate: {0}")]
+    UnsupportedSampleRate(u32),
+    /// Back-end-specific failure (cpal build error, JACK client
+    /// error, etc.). Wrapped so `agogo-core` can surface the message
+    /// without linking the back-end's error type.
+    #[error("back-end: {0}")]
+    Backend(Box<dyn std::error::Error + Send + Sync>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Handle` drops its payload, which is how back-ends signal
+    /// stream teardown. Uses an `Arc<AtomicBool>` witness: the
+    /// payload sets the flag in its `Drop` impl; dropping the
+    /// `Handle` must flip the flag.
+    #[test]
+    fn handle_drops_payload() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct Witness {
+            flag: Arc<AtomicBool>,
+        }
+        impl Drop for Witness {
+            fn drop(&mut self) {
+                self.flag.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let handle = Handle::from_payload(Witness {
+            flag: Arc::clone(&flag),
+        });
+        assert!(!flag.load(Ordering::SeqCst));
+        drop(handle);
+        assert!(flag.load(Ordering::SeqCst));
+    }
+
+    /// The `Send` bound on the `AudioHost::run` callback plus
+    /// `Handle`'s `Any + Send` payload lets a back-end move a
+    /// stream across threads. Trait-object construction check —
+    /// compiles iff the bounds line up.
+    #[test]
+    fn audio_host_trait_object_is_constructible() {
+        fn _accepts_dyn_audio_host(_h: Box<dyn AudioHost>) {}
+    }
+
+    /// Exhaustive match on `AudioHostError` — adding a new variant
+    /// trips this test, forcing a decision on how back-ends should
+    /// surface it.
+    #[test]
+    fn audio_host_error_exhaustive() {
+        let errs = [
+            AudioHostError::NoInputDevice,
+            AudioHostError::DeviceNotFound("x".into()),
+            AudioHostError::UnsupportedSampleRate(12_345),
+            AudioHostError::Backend("stub".into()),
+        ];
+        for e in errs {
+            match e {
+                AudioHostError::NoInputDevice
+                | AudioHostError::DeviceNotFound(_)
+                | AudioHostError::UnsupportedSampleRate(_)
+                | AudioHostError::Backend(_) => {}
+            }
+        }
+    }
+}
