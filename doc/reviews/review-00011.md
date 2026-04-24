@@ -72,3 +72,50 @@ and gate-clean on its own.
 - [x] CSV output of `agogo link probe` is character-for-character
   identical to pre-T4 (format preserved; only the intermediate
   type is stricter).
+
+## Local review (2026-04-24)
+
+**Branch:** `plan/2026-04-23-08`
+**Commits:** 6 (origin/main..HEAD)
+**Reviewer:** Claude (sonnet, independent)
+
+### Findings
+
+**Critical — Finding 2 (must fix):** `crates/host-link/src/link.rs` tests
+at lines 295 and 333–336 passed raw `f64` to `LinkClock::new`, which
+after T5 takes `Tempo`. My earlier `cargo test --workspace --features
+link` report was misleading — `--features link` on the workspace
+doesn't activate `rusty-link` on the host-link crate itself;
+`cargo test --manifest-path crates/host-link/Cargo.toml --features
+rusty-link` produced two E0308 type errors. **Fixed** by converting
+both call sites: the spot-check test uses
+`Tempo::from_bpm_integer(bpm_u32)` with the integer BPMs [30, 120,
+200, 999]; the proptest constructs `Tempo(bpm_mbpm)` directly since
+the generator is already µBPM. 10 host-link tests now pass under
+`--features rusty-link`.
+
+**Important — Finding 1 (must fix):** `crates/cli/src/main.rs` had
+`ScheduleArgs.bpm: f32` (stored, unused — "informational only") and
+`ScheduleArgs.swing: f32`. Main.rs is allowlisted for the grep gate
+but the stored-state rule applies regardless. **Fixed**: dropped the
+unused `bpm` field; promoted `swing` to `f64` (consistent with T3's
+argv-f64 convention) and updated `swing_to_config` signature. The
+eprintln header drops the bpm mention since there's no data.
+
+**Follow-up — Finding 4 (fixed):** `ms_to_micro` was a bespoke
+helper that Pattern 11 specifically flags. Inlined both call sites
+with the `F64F06.ceil(ExtendedFloat::Finite(ms × 1e-3))` + saturation
+match. Added an inline comment pointing at the rule.
+
+**Follow-up — Finding 3 (doc):** `check-floats.sh` grep can
+false-positive on string literals / format-string tokens. Added a
+"Known limitation" paragraph to the script's header comment so
+future contributors know to check before blaming the gate.
+
+### Build verification (post-fixes)
+
+- `cargo test --workspace` — 234 passed (223 core + 11 cli).
+- `cargo test --manifest-path crates/host-link/Cargo.toml --features
+  rusty-link` — 10 passed.
+- `cargo clippy --all-targets -- -D warnings` — clean.
+- `scripts/check-floats.sh` — OK.
