@@ -3,31 +3,48 @@
 ## Goal
 
 **Close the open-question list from `doc/agogo.md` §10.** Transport
-FSM with NEG/POS one-bar forerun semantics, Ableton Link as a
-`PhaseSource` variant, heterogeneous per-channel output format
-(MIDI / OSC / CV / MTC), and MTC quarter-frame generation.
+FSM with NEG/POS one-bar forerun semantics, `PhaseSource::Link` PID
+sync (building on the Plan 09 write-path foundation), heterogeneous
+per-channel output format (MIDI / OSC / CV / MTC), and MTC
+quarter-frame generation.
 
 This is feature expansion on top of a stable stdio-core integration:
 v0.3 proved the dispatch seam, v0.4 proved the telemetry seam, so
 each new feature here slots into existing tool schemas and
 observation payloads rather than forcing redesigns.
 
+Plan 09 (pre-v0.5) lands the Link write-path foundation: tempo push,
+a minimal `{Stopped, Playing}` `rust-fsm 0.7` declaration with
+Link-subscription seam + one-shot publish, and per-channel
+`snap_to_quantum: Option<Quantum>`. Sprints 01 and 02 build on that
+foundation — Sprint 01 extends the FSM declaration with forerun
+states; Sprint 02 restructures `LinkClock` from direct
+`PhaseSourceImpl` to PID-smoothed reference per
+`doc/designs/link.md`.
+
 ## Sprint slots
 
 | # | Slug | Status | Scope |
 |---|------|--------|-------|
-| 01 | `plan-2026-04-2N-01` (TBD) | next | Transport FSM: the concrete spec `doc/agogo.md` §10 calls for. `Play` / `Stop` / `Locate` with NEG/POS one-bar forerun semantics; bar-boundary alignment; interaction with `PhaseSource` variants. Proptests for forerun correctness across arbitrary time-signature and tempo-change sequences. |
-| 02 | `plan-2026-04-2N-02` (TBD) | next-next | `PhaseSource::Link` — wrap the Ableton Link C++ library through its official `rusty_link` binding or equivalent. PID tuning against Link's continuous timeline for hard-sync threshold (teleport vs glide). Prototype in `doc/notes/note-2026-04-23-03.md` lines 1028–1631 is the starting point. |
+| 01 | `plan-2026-04-2N-01` (TBD) | next | Transport FSM forerun semantics: **extend** Plan 09's `rust-fsm 0.7` declaration in `crates/host-link/src/transport.rs` (do not rewrite) with `PreRoll` + forerun-aware stop states, `Locate` command, NEG/POS one-bar forerun per `doc/agogo.md` §10, and bar-boundary alignment. Interaction with `PhaseSource` variants. Proptests for forerun correctness across arbitrary time-signature and tempo-change sequences. |
+| 02 | `plan-2026-04-2N-02` (TBD) | next-next | `PhaseSource::Link` PID sync: **demote** `LinkClock` from direct `PhaseSourceImpl` to PID-smoothed reference per `doc/designs/link.md` Adopt §§1–6. Introduces: per-buffer atomic-seqlock `HostTimeAnchor`, per-buffer `capture_app_session_state()`, `cpal_info.timestamp().playback` as query instant, wrapped-error PID over Link timeline, `Stopped → Starting` reset-phase-and-zero-integrator. Depends on Plan 05 (audio callback). The rusty_link binding + lifecycle surface already landed in PRs #6 / #8; tempo push + FSM seam + quantum snap land in Plan 09. |
 | 03 | `plan-2026-04-2N-03` (TBD) | then | Heterogeneous output dispatch: per-channel `OutputFormat` enum (MIDI / OSC / CV / MTC) routed through a single dispatch layer; per-format latency compensation table so sample-accuracy survives format plurality. |
 | 04 | `plan-2026-04-2N-04` (TBD) | last | MTC quarter-frame generator: SMPTE 24/25/29.97/30 fps selection; alignment with Link-driven BPM changes; quarter-frame transmission over MIDI. Resolves note lines 2199–2248. |
 
 ## Properties (must pass)
 
+Plan 09 already owns `transport_fsm_deterministic`,
+`transport_fsm_no_spurious_publishes`, `tempo_push_monotone`,
+`quantum_snap_idempotent`, and `quantum_snap_nonneg`. The v0.5
+Sprint 01/02 properties below are additive.
+
 | Property | Module | Invariant |
 |----------|--------|-----------|
-| `transport_forerun_lands_on_bar` | `transport::fsm` | For any `(time_sig, bpm, pre_roll_bars)` combination, the computed NEG-forerun start offset places the first emitted tick exactly on a bar boundary. |
-| `transport_fsm_never_deadlocks` | `transport::fsm` | Arbitrary `Play` / `Stop` / `Locate` command sequences reach a terminal transport state within a bounded number of steps (no infinite loops in the FSM). |
-| `link_follower_converges` | `sync::link` | Given a Link peer injecting arbitrary BPM steps within the PID's settling spec, agogo's tick stream converges to the Link timeline within the PID's documented settling time. |
+| `transport_forerun_lands_on_bar` | `host-link::transport` | For any `(time_sig, bpm, pre_roll_bars)` combination, the computed NEG-forerun start offset places the first emitted tick exactly on a bar boundary. |
+| `transport_fsm_never_deadlocks` | `host-link::transport` | Arbitrary `Play` / `Stop` / `Locate` command sequences reach a terminal transport state within a bounded number of steps (no infinite loops in the forerun-extended FSM). |
+| `host_time_anchor_torn_read_safe` | `host-link::anchor` | 1000-iteration racing writer/reader never yields a torn `(host_origin_micros, sample_rate)` pair; seqlock generation-counter retry catches all tears. |
+| `wrapped_error_within_halfquantum` | `host-link::pid` | Wrapped-error computation against a Link target phase never returns an error magnitude exceeding half the quantum; tested across arbitrary quantum settings and phase pairs. |
+| `link_follower_converges` | `host-link::pid` | Given a Link peer injecting arbitrary BPM steps within the PID's settling spec, agogo's tick stream converges to the Link timeline within the PID's documented settling time. |
 | `hetero_dispatch_preserves_tick_order` | `out::dispatch` | For any multi-channel `Machine` with mixed `OutputFormat`s, emitted events across channels preserve the tick-order of the master stream (no format reorders a tick). |
 | `mtc_quarter_frame_round_trips` | `out::mtc` | A generated MTC quarter-frame stream, fed back through a reference MTC reader, recovers the original SMPTE timecode exactly. |
 | `per_format_latency_compensation_is_sample_accurate` | `out::dispatch` | With the documented latency compensation applied, a tick timestamped at master sample `s` lands on the wire at exactly `s` sample-aligned, regardless of which output format it targets. |
@@ -67,6 +84,10 @@ hardware firmware, encoder UI.
 ## Reference
 
 - `doc/agogo.md` §10 — the open-question list this version closes.
+- `doc/designs/link.md` — Adopt/Defer/Reject triage of the Gemini
+  chat's Link design; drives Sprint 02's PID-sync restructuring.
+- `doc/plans/plan-2026-04-23-06.md` — Plan 09, the Link write-path
+  foundation that Sprints 01 and 02 build on.
 - `doc/notes/note-2026-04-23-03.md` lines 1028–1631 (Link + PID
   prototype), lines 2073–2198 (heterogeneous output design), lines
   2199–2248 (MTC).
