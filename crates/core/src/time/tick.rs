@@ -13,7 +13,7 @@
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-use connections::order::Ple;
+use connections::lattice::Ple;
 
 use crate::time::tbase::TBase;
 

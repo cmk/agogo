@@ -5,7 +5,7 @@
 //! preorder. T2 layers lattice ops (join/meet/heyting/coheyting) on
 //! top.
 
-use connections::order::Ple;
+use connections::lattice::Ple;
 
 /// Musical time base (grid resolution) at 192 PPQN.
 ///

@@ -431,7 +431,7 @@ pub mod link_probe {
 mod sync_trace {
     use agogo_core::arb::pulse_train;
     use agogo_core::fxp::{
-        Extended, F64F12, FloatExt, Pico, S48, SampleRate, SampleTime, Tempo,
+        Extended, F64F12, ExtendedFloat, Pico, S48, SampleRate, SampleTime, Tempo,
         f64_bpm_to_tempo,
     };
     use agogo_core::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
@@ -481,7 +481,7 @@ mod sync_trace {
         let jitter: Pico = if !jitter_s.is_finite() {
             Pico(0)
         } else {
-            match F64F12.ceil(FloatExt::Finite(jitter_s)) {
+            match F64F12.ceil(ExtendedFloat::Finite(jitter_s)) {
                 Extended::Finite(p) => p,
                 Extended::NegInf | Extended::PosInf => Pico(0),
             }
