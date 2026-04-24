@@ -242,25 +242,16 @@ present or documented-as-replaced with acceptable rationale in
   used mutably, so not `Send + Sync`. Correct for
   single-threaded control-path use.
 
-### Must Fix Before Push
+### Must Fix Before Push — resolved in commit `394e10b`
 
-**M1. `session.rs` line 73-78 — symmetric enable/disable for
-start-stop-sync.**
+**M1.** `session.rs` line 73-78 — symmetric enable/disable for
+start-stop-sync. **Fixed.** `LinkSession::enable` now follows
+`on` symmetrically via `enable_start_stop_sync(on)` when
+`config.enable_start_stop_sync` is true.
 
-```rust
-pub fn enable(&self, on: bool) {
-    self.clock.enable(on);
-    if self.config.enable_start_stop_sync {
-        self.clock.enable_start_stop_sync(on);
-    }
-}
-```
-
-**M2. `session.rs` lines 48-49 — remove the unused `quantum`
-field** (or wire it up as the `ch.snap_to_quantum = None`
-fallback). As-is it duplicates `config.default_quantum` and
-the `#[allow(dead_code)]` suppresses a warning that signals a
-genuine omission.
+**M2.** `session.rs` lines 48-49 — unused `quantum` field.
+**Fixed.** Field removed; `LinkWriteConfig::default_quantum`
+held on `config` is the authoritative session-level default.
 
 ### Follow-Up (Future Work)
 
@@ -274,3 +265,159 @@ genuine omission.
 - `LinkClock::is_enabled_tracks_enable_call` opens UDP multicast
   unconditionally — not gated behind `fixture_or_skip!`. Move
   inside the gate when the pattern is more established.
+
+<!-- gh-id: 3136721732 -->
+### Copilot on [`crates/host-link/src/link.rs:489`](https://github.com/cmk/agogo/pull/12#discussion_r3136721732) (2026-04-24 09:23 UTC)
+
+`one_quantum_span_us` is computed as `bars * 2_000_000`, which assumes the loop variable is “bars” (2 s each at 120 BPM). But `Quantum::from_bars(n)` is `n` *beats* (microbeats), so at 120 BPM the span should be `n * 500_000` µs. This makes the bound 4× too lax for `n=4`; adjust the calculation (and variable naming/comment) so the test actually verifies the intended invariant.
+```suggestion
+        for beats in [1u32, 4, 16] {
+            let q = Quantum::from_bars(beats);
+            let delta = c.snap_offset_micro(q);
+            // At 120 BPM, one beat is 500_000 µs, so an n-beat quantum spans
+            // `n * 500_000` µs.
+            let one_quantum_span_us: i64 = (beats as i64) * 500_000;
+            // Plus one µs of slack for floor/ceil rounding on `ceil()`.
+            let bound = one_quantum_span_us + 1;
+            assert!(
+                delta.0 <= bound,
+                "snap {:?} at {} beats exceeds one-quantum span bound {}",
+                delta, beats, bound
+```
+
+<!-- gh-id: 3136721780 -->
+### Copilot on [`crates/core/src/channel/transform.rs:85`](https://github.com/cmk/agogo/pull/12#discussion_r3136721780) (2026-04-24 09:23 UTC)
+
+`transform()` constructs a new `PicoSampleConn` on every call. Since this is per-buffer/per-channel scheduling logic, repeatedly running `gcd` + i128 setup here could show up on the audio thread. Consider caching `PicoSampleConn` (e.g. store it alongside `SampleTickConn`, or pass a prebuilt `PicoSampleConn` into `transform`/`tick_stream`) so steady-state scheduling avoids per-call setup work.
+
+<!-- gh-id: 3136721805 -->
+### Copilot on [`crates/core/src/channel/scheduler.rs:45`](https://github.com/cmk/agogo/pull/12#discussion_r3136721805) (2026-04-24 09:23 UTC)
+
+`tick_stream()` constructs `PicoSampleConn::new(stc.sr())` on every call. Given this is per-audio-buffer scheduling, consider hoisting/caching `PicoSampleConn` so the audio path doesn’t pay the setup cost every buffer (even if small), and so both `tick_stream` and `transform` can share the same precomputed conn.
+
+<!-- gh-id: 3136721843 -->
+### Copilot on [`doc/plans/plan-2026-04-23-06.md:48`](https://github.com/cmk/agogo/pull/12#discussion_r3136721843) (2026-04-24 09:23 UTC)
+
+This plan section still claims Plan 09 “depends on the post-fxp enforcement sprint landing first”, but later in this same document’s §Review it says the key enforcement changes (Channel Micro flip + LinkClock Tempo surface) were pulled into this plan/PR. Please update Prerequisites to reflect the current reality (either remove the dependency or clearly mark it as historical context) to avoid misleading readers.
+```suggestion
+This plan was originally drafted against a separate post-fxp
+enforcement sprint (branch TBD — see
+`~/.claude/plans/please-plan-and-then-cozy-wadler.md` for that
+sprint's design). In the current plan/PR, the key enforcement
+changes it needed are pulled in here directly: retiring the bespoke
+`f32_*_to_*` / `f64_*_to_*` helpers in favour of named `Conn`
+constants, flipping `Channel::{shift_ms, offset_ms}: f32` to
+`Micro`, and surfacing the `Tempo` conversion used at the Link
+boundary. The list below therefore records the post-enforcement
+state Plan 09 now includes, rather than an external dependency that
+must land first.
+```
+
+<!-- gh-id: 3136721881 -->
+### Copilot on [`doc/reviews/review-00012.md:249`](https://github.com/cmk/agogo/pull/12#discussion_r3136721881) (2026-04-24 09:23 UTC)
+
+This review record’s “Must Fix Before Push” section lists M1/M2 (and the earlier “Risks” bullet mentions an unused `LinkSession::quantum` field), but the current code in this PR already makes `enable()` symmetric and removes the unused quantum field. Please update the review doc to mark these items as resolved (or move them to a “Fixed in …” note) so the review record matches the final PR state.
+
+<!-- gh-id: 4169378072 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-24 09:23 UTC](https://github.com/cmk/agogo/pull/12#pullrequestreview-4169378072))
+
+## Pull request overview
+
+This PR lands the write-path foundation for Ableton Link bidirectional behavior (tempo push, transport state seam, and quantum snap) that later v0.5 Link work will extend.
+
+**Changes:**
+- Adds a minimal `{Stopped, Playing}` transport FSM (rust-fsm) and a thin `LinkSession` orchestrator to publish/observe Link transport and tempo.
+- Introduces `Quantum(Micro)` (microbeats) + `f64_beats_to_quantum` and threads `snap_to_quantum` through channel configuration and arming.
+- Converts channel `shift/offset` from `f32 ms` to deterministic `Micro` and updates scheduling/transform logic and CLI link subcommands.
+
+### Reviewed changes
+
+Copilot reviewed 13 out of 14 changed files in this pull request and generated 7 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00012.md | Adds a review record for Plan 09 implementation and verification notes. |
+| doc/plans/plan-2026-04-23-06.md | Adds the Plan 09 design/verification plan and deviations section. |
+| crates/host-link/tests/bidirectional.rs | Adds two-peer multicast-loopback integration tests for tempo/transport/snap behaviors. |
+| crates/host-link/src/transport.rs | Introduces the rust-fsm transport state machine and its properties/tests. |
+| crates/host-link/src/session.rs | Implements `LinkSession` orchestration (tempo push, transport polling/publish, channel arming snap). |
+| crates/host-link/src/link.rs | Extends `LinkClock` with Tempo-typed API, tempo push, transport publish/observe, and snap offset query. |
+| crates/host-link/src/lib.rs | Exposes new host-link modules and re-exports session/transport types. |
+| crates/host-link/Cargo.toml | Adds optional `rust-fsm` dependency under the `rusty-link` feature. |
+| crates/core/src/fxp.rs | Adds `Quantum` newtype and f64→Quantum conversion with tests. |
+| crates/core/src/channel/transform.rs | Migrates shift/offset to `Micro`, adds `snap_to_quantum`, and introduces `micro_to_samples`. |
+| crates/core/src/channel/scheduler.rs | Updates scheduler math to Micro-based shift/offset conversion via `micro_to_samples`. |
+| crates/core/src/channel.rs | Updates re-exports for renamed MAX_SHIFT constant. |
+| crates/cli/src/main.rs | Adds `agogo link push-tempo`, `transport`, `diag` commands and updates Link probe and channel trace conversions. |
+| Cargo.lock | Locks new `rust-fsm` dependencies. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3136721913 -->
+### Copilot on [`crates/core/src/fxp.rs:167`](https://github.com/cmk/agogo/pull/12#discussion_r3136721913) (2026-04-24 09:23 UTC)
+
+`f64_beats_to_quantum` docs say overflow saturates to `Quantum::ZERO` / `i64::MAX`, but the implementation also saturates large negative values to `i64::MIN` (and preserves negative values generally). Please either update the doc comment to describe the negative-range behavior, or clamp `q <= 0.0` to `Quantum::ZERO` if negative quantum is meant to be rejected.
+```suggestion
+/// saturates to `Quantum::ZERO`; finite values preserve their sign and
+/// saturate on overflow to `i64::MAX` / `i64::MIN`. A noisy return
+/// would force the caller to handle an error at every argv boundary
+/// without gain, since non-finite quantum is already a user mistake.
+```
+
+<!-- gh-id: 3136721938 -->
+### Copilot on [`crates/host-link/tests/bidirectional.rs:218`](https://github.com/cmk/agogo/pull/12#discussion_r3136721938) (2026-04-24 09:23 UTC)
+
+The comment and bound treat `Quantum::from_bars(4)` as “4 bars” (= 8 s at 120 BPM), but `Quantum` is microbeats and `from_bars(4)` corresponds to 4 beats (one 4/4 bar), i.e. 2 s at 120 BPM. As written, the assertion is 4× too lax and could miss regressions; tighten the bound (and fix the explanatory comment) to match the actual quantum span.
+```suggestion
+    // At 120 BPM, Quantum::from_bars(4) spans 4 beats (one 4/4 bar):
+    // 4 × 500 ms = 2 s = 2_000_000 µs.
+    // Snap delta must be within [0, 2_000_001) (+1 µs rounding slack).
+    assert!(
+        ch.offset.0 >= 0,
+        "snap produced negative offset: {:?}", ch.offset
+    );
+    assert!(
+        ch.offset.0 < 2_000_001,
+```
+
+<!-- gh-id: 3136785488 -->
+#### ↳ cmk ([2026-04-24 09:34 UTC](https://github.com/cmk/agogo/pull/12#discussion_r3136785488))
+
+Fixed in 018f610 — you're right, `Quantum::from_bars(n)` is n microbeats-million = n *beats* (not n bars). Bound was 4× too lax. Taking the suggestion verbatim (beats as loop var, 500 000 µs/beat at 120 BPM).
+
+<!-- gh-id: 3136786682 -->
+#### ↳ cmk ([2026-04-24 09:34 UTC](https://github.com/cmk/agogo/pull/12#discussion_r3136786682))
+
+Deferring — valid concern, but caching `PicoSampleConn` across `transform`/`tick_stream` calls needs either a new field on `SampleTickConn` or a threading-through-the-API refactor, both outside Plan 09's scope. Tracking as a follow-up for the audio-callback sprint (Plan 05) where per-buffer cost actually lands on the RT thread.
+
+<!-- gh-id: 3136787505 -->
+#### ↳ cmk ([2026-04-24 09:35 UTC](https://github.com/cmk/agogo/pull/12#discussion_r3136787505))
+
+Deferring — same rationale as the sibling comment on `transform.rs:85`. Plan 05 (audio callback) is the natural sprint to do a coordinated `PicoSampleConn` caching pass.
+
+<!-- gh-id: 3136788239 -->
+#### ↳ cmk ([2026-04-24 09:35 UTC](https://github.com/cmk/agogo/pull/12#discussion_r3136788239))
+
+Fixed in 018f610 — rewrote the Prerequisites section as historical context per your suggestion. The Plan 09 doc now points forward to §Review for the details of what was pulled in, rather than claiming an external dependency.
+
+<!-- gh-id: 3136789396 -->
+#### ↳ cmk ([2026-04-24 09:35 UTC](https://github.com/cmk/agogo/pull/12#discussion_r3136789396))
+
+Fixed in 018f610 — the Must Fix Before Push section now shows M1/M2 as resolved in commit `394e10b`, with the code changes described inline.
+
+<!-- gh-id: 3136790464 -->
+#### ↳ cmk ([2026-04-24 09:35 UTC](https://github.com/cmk/agogo/pull/12#discussion_r3136790464))
+
+Fixed in 018f610 — updated the doc to describe negative-overflow saturation to `i64::MIN` alongside the existing non-finite→ZERO and positive-overflow→MAX cases. Negative quantum isn't a user-facing pattern but preserving sign is the honest thing to document.
+
+<!-- gh-id: 3136791281 -->
+#### ↳ cmk ([2026-04-24 09:35 UTC](https://github.com/cmk/agogo/pull/12#discussion_r3136791281))
+
+Fixed in 018f610 — took the suggestion verbatim. The integration test bound is now 2_000_001 µs (one 4/4 bar at 120 BPM), tightened from 8_000_001. Tests still green against real Link multicast loopback with the new bound.

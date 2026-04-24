@@ -163,8 +163,9 @@ impl Quantum {
 
 /// f64 beats → `Quantum`. Rounds identically to Link's own
 /// `Beats(double)` constructor (`std::llround(q * 1e6)`) so the two
-/// sides agree bit-for-bit at the Link FFI boundary. Non-finite input
-/// and overflow saturate to `Quantum::ZERO` / `i64::MAX` — a noisy
+/// sides agree bit-for-bit at the Link FFI boundary. Non-finite
+/// input saturates to `Quantum::ZERO`; finite values preserve their
+/// sign and saturate on overflow to `i64::MAX` / `i64::MIN`. A noisy
 /// return would force the caller to handle an error at every argv
 /// boundary without gain, since non-finite quantum is already a user
 /// mistake.
