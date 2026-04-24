@@ -11,8 +11,9 @@
 //! parameter is omitted rather than kept unused; documented in the
 //! sprint's Review section.
 
-use crate::channel::transform::{Channel, MAX_SHIFT, ScheduledEvent, micro_to_samples, transform};
+use crate::channel::transform::{Channel, MAX_SHIFT, ScheduledEvent, micro_to_samples};
 use crate::time::conn::SampleTickConn;
+use crate::time::swing;
 use crate::time::tick::Tick;
 use connections::conn::fixed::Micro;
 
@@ -24,14 +25,38 @@ use connections::conn::fixed::Micro;
 /// range together yield each tick exactly once — no dupes, no gaps
 /// (see the `scheduler_block_equivalence` property in the test
 /// module).
+///
+/// Thin wrapper over [`tick_stream_into`]: allocates a fresh `Vec`
+/// and delegates. Use `tick_stream_into` directly from RT code to
+/// reuse a pre-sized buffer and stay allocation-free.
 pub fn tick_stream(
     channel: &Channel,
     stc: &SampleTickConn,
     buffer_start_sample: u64,
     frames: usize,
 ) -> Vec<ScheduledEvent> {
+    let mut buf = Vec::new();
+    tick_stream_into(&mut buf, channel, stc, buffer_start_sample, frames);
+    buf
+}
+
+/// Allocation-free variant of [`tick_stream`]: pushes every accepted
+/// `ScheduledEvent` into `buf` rather than returning a fresh `Vec`.
+/// When `buf.capacity() >= max_events_for_buffer(channel, frames)`,
+/// this call allocates zero bytes on the heap — the contract Plan 13's
+/// audio callback relies on.
+///
+/// `buf` is not cleared on entry; callers who want a fresh window
+/// should `buf.clear()` before the call.
+pub fn tick_stream_into(
+    buf: &mut Vec<ScheduledEvent>,
+    channel: &Channel,
+    stc: &SampleTickConn,
+    buffer_start_sample: u64,
+    frames: usize,
+) {
     if frames == 0 {
-        return Vec::new();
+        return;
     }
     let buffer_end = buffer_start_sample.saturating_add(frames as u64);
 
@@ -65,14 +90,37 @@ pub fn tick_stream(
     let hi_tick = hi_tick_i.clamp(0, u32::MAX as i64) as u32;
 
     if lo_tick > hi_tick {
-        return Vec::new();
+        return;
     }
 
-    let master = (lo_tick..=hi_tick).map(Tick);
-    transform(master, channel, stc)
-        .into_iter()
-        .filter(|e| e.sample_index >= buffer_start_sample && e.sample_index < buffer_end)
-        .collect()
+    // Inlined `transform` pipeline: divider → shuffle → Tick→Sample
+    // → shift → offset, with the window filter applied before
+    // push. Duplicated from `transform` so each accepted event goes
+    // straight into `buf` — no intermediate Vec, no heap allocation
+    // when `buf` is pre-sized. Change either path's arithmetic and
+    // the `scheduler_block_equivalence` /
+    // `tick_stream_into_matches_tick_stream` proptests both trip.
+    let divisor = channel.divider.tick_count();
+    let shift_fwd = shift_samples.max(0) as u64;
+    for t in (lo_tick..=hi_tick).map(Tick) {
+        if t.0 % divisor != 0 {
+            continue;
+        }
+        let swung = swing::effective_tick(&channel.shuffle, t);
+        let base = stc.inner(swung);
+        let with_shift = base.saturating_add(shift_fwd);
+        let final_sample = if offset_samples >= 0 {
+            with_shift.saturating_add(offset_samples as u64)
+        } else {
+            with_shift.saturating_sub(offset_samples.unsigned_abs())
+        };
+        if final_sample >= buffer_start_sample && final_sample < buffer_end {
+            buf.push(ScheduledEvent {
+                sample_index: final_sample,
+                tick: swung,
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -192,6 +240,72 @@ mod tests {
                     "event sample {} >= end {}", e.sample_index, end
                 );
             }
+        }
+
+        /// Plan 13 property `tick_stream_into_matches_tick_stream`:
+        /// pushing into a preallocated `Vec` via `tick_stream_into`
+        /// produces the same sequence `tick_stream` returns. Pins the
+        /// contract that Plan 13's RT callback relies on — the inlined
+        /// pipeline inside `tick_stream_into` stays bit-identical to
+        /// `transform`'s forward path.
+        #[test]
+        fn tick_stream_into_matches_tick_stream(
+            (divider, shuffle) in arb_divider_with_bounded_swing(),
+            shift_us in 0_i64..=MAX_SHIFT.0,
+            offset_us in -5_000_i64..=5_000,
+            buffer_start in 0u64..=1_000_000,
+            frames in 1usize..=8_192,
+        ) {
+            let ch = Channel {
+                mode: ChannelMode::MidiClock,
+                divider,
+                shuffle,
+                shift: Micro(shift_us),
+                offset: Micro(offset_us),
+                snap_to_quantum: None,
+            };
+            let stc = stc_120_48k();
+            let returned = tick_stream(&ch, &stc, buffer_start, frames);
+            let mut pushed = Vec::new();
+            tick_stream_into(&mut pushed, &ch, &stc, buffer_start, frames);
+            prop_assert_eq!(returned, pushed);
+        }
+
+        /// Plan 13 property `tick_stream_into_no_realloc`: when the
+        /// caller pre-sizes `buf` with enough capacity, the call
+        /// leaves `buf.capacity()` unchanged. Pins the allocation-free
+        /// contract — the RT callback relies on reusing one
+        /// pre-allocated scratch buffer per channel across buffers.
+        #[test]
+        fn tick_stream_into_no_realloc(
+            (divider, shuffle) in arb_divider_with_bounded_swing(),
+            shift_us in 0_i64..=MAX_SHIFT.0,
+            offset_us in -5_000_i64..=5_000,
+            buffer_start in 0u64..=1_000_000,
+            frames in 1usize..=8_192,
+        ) {
+            let ch = Channel {
+                mode: ChannelMode::MidiClock,
+                divider,
+                shuffle,
+                shift: Micro(shift_us),
+                offset: Micro(offset_us),
+                snap_to_quantum: None,
+            };
+            let stc = stc_120_48k();
+            // Upper bound: every master tick in the window could
+            // produce an event. `frames` is the sample count; at PPQN
+            // 192 / 48 kHz / 120 BPM the densest divider (T128t = 1
+            // tick / step) is ~125 master ticks per 1000 samples.
+            // 4× `frames` is a generous ceiling for the shrink domain.
+            let cap = frames * 4 + 32;
+            let mut buf = Vec::with_capacity(cap);
+            let cap_before = buf.capacity();
+            tick_stream_into(&mut buf, &ch, &stc, buffer_start, frames);
+            prop_assert_eq!(
+                buf.capacity(), cap_before,
+                "tick_stream_into grew buf capacity — pre-alloc too small?"
+            );
         }
 
         /// Plan properties `scheduler_no_dupes` + `scheduler_no_gaps`
