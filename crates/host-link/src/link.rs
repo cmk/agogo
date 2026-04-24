@@ -136,6 +136,41 @@ impl LinkClock {
     pub fn num_peers(&self) -> u64 {
         self.link.num_peers()
     }
+
+    /// Push a new BPM to the Link session at the current host-time.
+    /// Link smooths peer-side; no local ramp.
+    ///
+    /// # RT-safety
+    ///
+    /// Not RT-safe. `commit_audio_session_state` allocates internally
+    /// in rusty_link. Run on the control thread, never the audio
+    /// thread.
+    pub fn push_tempo(&mut self, bpm: Tempo) {
+        self.link.capture_audio_session_state(&mut self.session);
+        // Link FFI — Tempo (µBPM) → f64 BPM at the set_tempo boundary.
+        let bpm_f64 = f64::from(bpm.0) / 1_000_000.0;
+        self.session.set_tempo(bpm_f64, self.link.clock_micros());
+        self.link.commit_audio_session_state(&self.session);
+    }
+
+    /// Observe the session's current `is_playing` flag. Refreshes the
+    /// cached session state via `capture_audio_session_state` and
+    /// reads the flag. RT-safe.
+    pub fn is_playing_session(&mut self) -> bool {
+        self.link.capture_audio_session_state(&mut self.session);
+        self.session.is_playing()
+    }
+
+    /// One-shot publish of a transport state change to the Link
+    /// session. `true` → all peers see `is_playing = true`; `false` →
+    /// `is_playing = false`. Control-thread only — invokes
+    /// `commit_audio_session_state`.
+    pub fn publish_is_playing(&mut self, playing: bool) {
+        self.link.capture_audio_session_state(&mut self.session);
+        self.session
+            .set_is_playing(playing, self.link.clock_micros());
+        self.link.commit_audio_session_state(&self.session);
+    }
 }
 
 impl PhaseSourceImpl for LinkClock {
@@ -304,15 +339,15 @@ mod tests {
         }
     }
 
-    /// `set_anchor` shifts the sample-index → host-time mapping. Same
-    /// `LinkClock` (same Link session), two anchors differing by
-    /// `Δ_us`, queries offset by `Δ_us × sr / 10⁶` samples should hit
-    /// the same host-time and therefore return near-equal phases.
-    ///
-    /// Using one clock is load-bearing: two independent `AblLink`
-    /// instances share the platform monotonic clock but have
-    /// independent session states (tempo, beat origin), so their
-    /// `phase_at_time(t, 1.0)` values diverge.
+    // `set_anchor` shifts the sample-index → host-time mapping. Same
+    // `LinkClock` (same Link session), two anchors differing by
+    // `Δ_us`, queries offset by `Δ_us × sr / 10⁶` samples should hit
+    // the same host-time and therefore return near-equal phases.
+    //
+    // Using one clock is load-bearing: two independent `AblLink`
+    // instances share the platform monotonic clock but have
+    // independent session states (tempo, beat origin), so their
+    // `phase_at_time(t, 1.0)` values diverge.
     proptest::proptest! {
         /// The per-stride phase delta must match the tempo-driven
         /// expectation (stride samples at `sample_rate` → `stride × bpm
