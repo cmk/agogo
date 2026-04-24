@@ -951,7 +951,7 @@ pub mod midi_trace {
             let scaled = (args.bpm * 1.0e6).round();
             if !(0.0..u32::MAX as f64).contains(&scaled) {
                 return Err(format!(
-                    "--bpm {} out of range (expected (0, {}] BPM)",
+                    "--bpm {} out of range (expected (0, {}) BPM)",
                     args.bpm,
                     u32::MAX as f64 / 1.0e6
                 ));
@@ -1002,6 +1002,13 @@ pub mod midi_trace {
             let start_sample = u64::from(b)
                 .checked_mul(frames_u64)
                 .expect("checked above");
+            // Precedence when both `--start` and `--stop-on-exit`
+            // target the same buffer (happens only with
+            // `--buffers 1`): Start wins. `render_buffer` emits at
+            // most one transport byte per call, and "stop before
+            // start" is not musically meaningful — the caller is
+            // expected to run a separate tracer for the stop side
+            // if both bytes are required.
             let transport = match (args.start && b == 0, args.stop_on_exit && b == last) {
                 (true, _) => Some(MidiRtByte::Start),
                 (_, true) => Some(MidiRtByte::Stop),

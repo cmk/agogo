@@ -445,6 +445,12 @@ mod tests {
         /// `tick_stream(...)`'s `ScheduledEvent.sample_index` list
         /// bit-for-bit. Pins the composition contract Plan 13's RT
         /// callback relies on.
+        // Bounds stay within `tick_stream`'s own tested domain
+        // (`scheduler_block_equivalence` covers the same window).
+        // The render path has no arithmetic on these values — this
+        // test verifies the scheduler → render composition, not
+        // `tick_stream`'s internal invariants, so the bounds are
+        // about shrinkage speed rather than coverage-faking.
         #[test]
         fn block_render_matches_scheduler(
             buffer_start in 0u64..=1_000_000,

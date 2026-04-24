@@ -108,8 +108,8 @@ at_sample,byte
   `TBase::T32t` (32nd-note triplet). The E2E example uses `t4` (one
   byte per beat) for human readability; pick `t32t` for a
   spec-compliant 24 PPQN stream. Plan 14's `agogo run` will default
-  to `t32t` for the same reason. `output.md:37-41` is the design
-  source.
+  to `t32t` for the same reason. `doc/designs/output.md:37-41` is
+  the design source.
 - No new external dependencies. Zero `unsafe` code
   (`#![forbid(unsafe_code)]` already set crate-wide).
 - No stored floats added outside the existing CLI argv-boundary
@@ -161,12 +161,12 @@ type, this is appropriate since downstream crates (Plan 13's midir
 integration tests) will use it — the plan anticipates this. Worth
 noting for Plan 13 when the real `MidiSink` implementors land.
 
-**`r.bytes[0]` index in `midi_trace::trace`.**
-`crates/cli/src/main.rs:781-782` indexes without a length check.
-The surrounding comment acknowledges the assumption. At present
-safe because `render_clock_block` and `render_buffer` only call
-`send_at` with one-byte slices. A future empty-slice `send_at` would
-panic here. Adequate for now; see Follow-up.
+**`r.bytes[0]` index in `midi_trace::trace`.** The `midi_trace::trace`
+path in `crates/cli/src/main.rs` indexes `r.bytes[0]` without a
+length check. The surrounding comment acknowledges the assumption.
+At present safe because `render_clock_block` and `render_buffer`
+only call `send_at` with one-byte slices. A future empty-slice
+`send_at` would panic here. Adequate for now; see Follow-up.
 
 **No dead code, no redundant logic, no clippy-visible issues** from
 reading the diff. `clear()` is used in the test suite. All public
@@ -272,16 +272,112 @@ landing.
 **Follow-up (future work):**
 
 1. **`r.bytes[0]` index in `midi_trace::trace`**
-   (`crates/cli/src/main.rs:781`). When Plan 14 widens the CSV
-   schema for multi-byte messages, replace the unchecked index with
-   a length guard that returns an error rather than panicking.
+   (`crates/cli/src/main.rs`). When Plan 14 widens the CSV schema
+   for multi-byte messages, replace the unchecked index with a
+   length guard that returns an error rather than panicking.
 2. **`block_render_matches_scheduler` generator bounds**
-   (`crates/core/src/out/midi.rs:449-450`). Add an inline comment
+   (`crates/core/src/out/midi.rs`). Add an inline comment
    explaining the bounds stay within `tick_stream`'s tested domain,
    not to avoid arithmetic in the render path.
-3. **BPM error message / range inconsistency**
-   (`crates/cli/src/main.rs:728`). Fix either the range to
-   `..=u32::MAX` or the message to `)`.
+3. **BPM error message / range inconsistency** in
+   `midi_trace::trace` (`crates/cli/src/main.rs`). Fix either the
+   range to `..=u32::MAX` or the message to `)`.
 4. **`--buffers` type deviation from plan** (`usize` → `u32`).
    Document the choice in a comment at the field declaration or in
    the plan's Review section.
+
+<!-- gh-id: 3140417069 -->
+### Copilot on [`crates/cli/src/main.rs:1007`](https://github.com/cmk/agogo/pull/14#discussion_r3140417069) (2026-04-24 21:35 UTC)
+
+When `--start` and `--stop-on-exit` are both set and `--buffers` is 1, this match emits only `Start` and never emits `Stop` because the `(true, _)` arm wins. If the flags are meant to be independent, handle the `buffers == 1` case explicitly (emit both bytes at `start_sample`) or document the precedence.
+```suggestion
+            let emit_start = args.start && b == 0;
+            let emit_stop = args.stop_on_exit && b == last;
+            let transport = match (emit_start, emit_stop, args.buffers == 1) {
+                // With a single buffer both flags target the same block.
+                // Keep Start precedence here because this trace path passes
+                // only one transport byte into `render_channel_block`.
+                (true, true, true) => Some(MidiRtByte::Start),
+                (true, _, _) => Some(MidiRtByte::Start),
+                (_, true, _) => Some(MidiRtByte::Stop),
+```
+
+<!-- gh-id: 3140417108 -->
+### Copilot on [`doc/reviews/review-00014.md:169`](https://github.com/cmk/agogo/pull/14#discussion_r3140417108) (2026-04-24 21:35 UTC)
+
+This review note contains stale line references (e.g. `crates/cli/src/main.rs:781-782` / `:728` no longer match the current file; `r.bytes[0]` is much later in the new `midi_trace` module). Consider updating these to current line numbers or, better, referencing the symbol/section name so the note stays accurate as the file grows. Also, `output.md:37-41` should likely be referenced as `doc/designs/output.md:37-41` to avoid ambiguity.
+```suggestion
+The `midi_trace::trace` path in `crates/cli/src/main.rs` indexes
+`r.bytes[0]` without a length check. The surrounding comment
+acknowledges the assumption. At present safe because
+`render_clock_block` and `render_buffer` only call `send_at` with
+one-byte slices. A future empty-slice `send_at` would panic here.
+Adequate for now; see Follow-up.
+```
+
+<!-- gh-id: 4173542395 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-24 21:35 UTC](https://github.com/cmk/agogo/pull/14#pullrequestreview-4173542395))
+
+## Pull request overview
+
+Adds the first v0.1 output-chain layer for MIDI by introducing a backend-agnostic `MidiSink` contract, pure logic rendering for MIDI clock/transport bytes, and a CLI tracer that exercises the scheduler + renderer end-to-end.
+
+**Changes:**
+- Added `agogo-core::out::midi` with `MidiSink`, MIDI real-time byte constants, `TestSink`, and rendering functions (`render_clock_block` / `render_buffer` / `render_channel_block`).
+- Wired the new `out` module into `agogo-core` and added `agogo midi trace` to emit `(at_sample, byte)` CSV from a synthetic run.
+- Added/updated plan + review docs for Plan 12.
+
+### Reviewed changes
+
+Copilot reviewed 5 out of 6 changed files in this pull request and generated 4 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00014.md | Adds a PR review record for Plan 12 changes. |
+| doc/plans/plan-2026-04-24-01.md | Adds the Plan 12 implementation plan and verification checklist. |
+| crates/core/src/out/midi.rs | Implements the MIDI sink trait, test sink, and clock/transport renderers + tests. |
+| crates/core/src/out.rs | Introduces `out` module root and exports `midi`. |
+| crates/core/src/lib.rs | Exposes `pub mod out;` from `agogo-core`. |
+| crates/cli/src/main.rs | Adds `midi trace` subcommand and a `midi_trace` module to run scheduler+renderer and print CSV. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3140417133 -->
+### Copilot on [`doc/plans/plan-2026-04-24-01.md:245`](https://github.com/cmk/agogo/pull/14#discussion_r3140417133) (2026-04-24 21:35 UTC)
+
+The CLI synopsis in T5 is out of sync with the implementation: `--buffers` is documented as `<usize>` but the code uses `u32`, and the `--bpm` comment mentions `F64TMP` even though the implementation does a manual `f64 -> Tempo` conversion. Also `output.md:37-41` is ambiguous given the file lives at `doc/designs/output.md`; consider updating the reference to the full path. (There’s also a potential inconsistency with the later Review/Outcome commit count vs the local review doc.)
+
+<!-- gh-id: 3140417154 -->
+### Copilot on [`crates/cli/src/main.rs:954`](https://github.com/cmk/agogo/pull/14#discussion_r3140417154) (2026-04-24 21:35 UTC)
+
+The `--bpm` range check excludes `u32::MAX` (`(0.0..u32::MAX as f64)`), but the error message says the upper bound is inclusive (`(0, ...]`). This is internally inconsistent and rejects the value the message claims is allowed; adjust either the range (`..=`) or the message (use `)` / clarify exclusivity).
+```suggestion
+                    "--bpm {} out of range (expected (0, {}) BPM)",
+```
+
+<!-- gh-id: 3140447420 -->
+#### ↳ cmk ([2026-04-24 21:41 UTC](https://github.com/cmk/agogo/pull/14#discussion_r3140447420))
+
+Fixed — added a comment on the match documenting Start-wins precedence for the single-buffer case. `render_buffer` emits at most one transport byte per call and 'stop before start' has no musical meaning, so the two-arm form with an explanatory comment stays simpler than threading a third tuple value.
+
+<!-- gh-id: 3140447802 -->
+#### ↳ cmk ([2026-04-24 21:42 UTC](https://github.com/cmk/agogo/pull/14#discussion_r3140447802))
+
+Fixed — replaced the brittle line-number refs (`main.rs:781-782`, `:728`, `midi.rs:449-450`) with symbol-level refs (`midi_trace::trace`, `block_render_matches_scheduler`) in the local review section, and expanded `output.md:37-41` to `doc/designs/output.md:37-41`.
+
+<!-- gh-id: 3140448061 -->
+#### ↳ cmk ([2026-04-24 21:42 UTC](https://github.com/cmk/agogo/pull/14#discussion_r3140448061))
+
+Fixed — dropped the stale `F64TMP` reference (no such Conn on main; the sprint opener was aspirational), corrected `--buffers` in the synopsis to `<u32>`, and expanded the `output.md` reference to its full `doc/designs/output.md` path. The Reuse-section `Tempo` entry now spells out the inline `f64 × 10⁶ → u32` boundary conversion that mirrors `channel_trace`.
+
+<!-- gh-id: 3140448426 -->
+#### ↳ cmk ([2026-04-24 21:42 UTC](https://github.com/cmk/agogo/pull/14#discussion_r3140448426))
+
+Fixed — changed the error message from `(0, {}] BPM` to `(0, {}) BPM` to match the exclusive upper bound of the `0.0..u32::MAX` range check. `channel_trace` has the same pre-existing inconsistency (same pattern, same line shape) but that's out of scope for this PR.
