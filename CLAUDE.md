@@ -74,6 +74,93 @@ core = ["dep:project-core"]
   (addressing reviewer feedback from an earlier push) remain standalone
   so the audit trail survives.
 - **No unsafe code**: every crate root must declare `#![forbid(unsafe_code)]`.
+- **No stored `f32`/`f64` outside the five documented exceptions.**
+
+  **Glossary.**
+  > **PI controller** — the proportional-integral control loop in
+  > `crates/core/src/sync/pll.rs`. It reads the phase error (observed
+  > vs. expected pulse spacing), scales it by a proportional gain
+  > `kp` and an accumulated integrator term `ki × ∑error`, and steers
+  > the NCO's frequency toward the true tempo. "PI-exempt" means a
+  > value *participates in this specific feedback loop*, whose math
+  > is genuinely continuous-valued analog DSP — not just any float
+  > in the crate.
+  >
+  > **ABI-local** — a float that exists inside a function body to
+  > interoperate with an external binary interface (PCM audio via
+  > cpal; rational coefficients in a parabolic curve fit) and dies
+  > inside the function scope. Nothing stored, nothing returned
+  > outside the comment-marked locals.
+  >
+  > **argv boundary** — a float that reaches us from the terminal
+  > via bpaf because the user typed a decimal at the command line.
+  > It dies on the first line of the handler via `f64_bpm_to_tempo`,
+  > `F64F06.ceil(...)`, `F64F12.ceil(...)`, or one of the other
+  > named `agogo_core::fxp` Conns.
+  >
+  > **Link FFI** — a float that flows through rusty_link / AblLink's
+  > C++ ABI. Contained to `crates/host-link`; every site converts
+  > to/from `Tempo` / `Phase` within one or two lines of the FFI
+  > call, with a `// Link FFI` comment on the conversion line.
+  >
+  > **PCM ABI** — a PCM audio sample slice `&[f32]` at the cpal
+  > boundary. Comment: `// PCM ABI`.
+
+  The five allowed uses:
+
+  1. PI controller state and gains in `sync::pll` (`PllSettings`,
+     `PllState`, and the control-law body). Mark intermediate
+     locals `// PI-exempt`.
+  2. PCM audio sample slices (`&[f32]`) at the cpal ABI boundary.
+     Mark `// PCM ABI`.
+  3. Parabolic-fit f64 locals inside `sync::detect` (contained to
+     a handful of lines, converted to Q48.16 before escape). Mark
+     `// ABI-local`.
+  4. CLI argv parsers — `f64` accepts a human-typed decimal, then
+     dies at the handler's first line via `f64_bpm_to_tempo` /
+     `F64F06` / `F64F12`. Mark `// argv boundary`.
+  5. Link FFI inside `crates/host-link` — AblLink's C++ ABI hands
+     us `f64` tempo and phase; we convert to `Tempo` / `Phase`
+     within 1–2 lines. Mark `// Link FFI`.
+
+  `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
+  lives outside these exceptions or lacks its annotation comment
+  within 2 lines.
+
+- **Every numerical conversion comes from a named `Conn` (or a
+  Conn-lookalike with proptested adjoint laws).** Bespoke `fn
+  f64_some_thing_to_other(x: f64) -> Other` helpers in `fxp.rs` are
+  only allowed for types that can't be expressed as a lawful
+  `Conn` (e.g. `Phase` is a wrapping quotient onto a torus, not a
+  monotone map — the bespoke `f64_phase_to_phase` is the one
+  legitimate exception). Naming follows the Haskell `fXYfZW`
+  6-char convention: `F12F06` = Pico → Micro, `F12S48` = Pico →
+  S48, `F64F06` = f64-seconds → Micro, etc. The crate-level doc
+  in `connections/src/lib.rs` spells out the full legend.
+
+- **Cross-conversions compose existing `Conn`s — they are not
+  hardcoded.** If `A → C` is needed and `Conn<A, B>` + `Conn<B, C>`
+  already exist, compose the two at the call site:
+
+  ```rust
+  // Good: compose Pico→Micro (F12F06) with Pico→Sample (PicoSampleConn).
+  let samples = psc.ceil(F12F06.inner(micro_value));
+
+  // Bad: open-code the arithmetic.
+  let samples = (micro_value.0 * sr as i128 * 10 / ...);   // nope
+
+  // Also bad: a new helper that hides the composition.
+  fn micro_to_samples_at_sr(m: Micro, sr: u32) -> u64 { ... }  // nope
+
+  // Also bad: a bespoke `f64_*_to_*` function where a Conn constant
+  // would do.
+  pub fn f64_ms_to_micro(ms: f64) -> Micro { ... }   // nope — use F64F06.
+  ```
+
+  If repeated composition becomes ergonomic debt, the fix is
+  upstream (e.g. a `Conn::then` composition primitive in the
+  `connections` crate) — not a local hardcoded helper.
+
 - **Test fixtures are gitignored**, and a fresh checkout must pass
   `cargo test --workspace` with zero setup. Tests that depend on a
   fixture file must use the `fixture_or_skip!` macro from the core
