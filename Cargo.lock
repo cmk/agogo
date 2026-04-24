@@ -177,7 +177,7 @@ dependencies = [
 [[package]]
 name = "connections"
 version = "0.1.0"
-source = "git+https://gitlab.com/cmk/connections.git?rev=15d3791e281e30c4eacaa4e499ee5788894d9ab6#15d3791e281e30c4eacaa4e499ee5788894d9ab6"
+source = "git+https://gitlab.com/cmk/connections.git?rev=883b4ea7a5b72b82d68872d4f246151f1ee388cf#883b4ea7a5b72b82d68872d4f246151f1ee388cf"
 dependencies = [
  "fixed",
 ]
