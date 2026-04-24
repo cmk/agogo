@@ -422,6 +422,32 @@ mod tests {
         assert_eq!(f64_bpm_to_tempo(f64::NAN), Tempo::ZERO);
     }
 
+    // Hand-computed witnesses for the two PI-exempt helpers,
+    // independent of the formula-as-test proptests above.
+    #[test]
+    fn tempo_to_hz_hand_computed() {
+        // 120 BPM, 24 PPQ: 120/60 × 24 = 48 Hz pulse rate.
+        assert_eq!(tempo_to_hz(Tempo::from_bpm_integer(120), 24), 48.0);
+        // 60 BPM, 1 PPQ: 1 Hz.
+        assert_eq!(tempo_to_hz(Tempo::from_bpm_integer(60), 1), 1.0);
+        // 180 BPM, 4 PPQ: 3 × 4 = 12 Hz.
+        assert_eq!(tempo_to_hz(Tempo::from_bpm_integer(180), 4), 12.0);
+    }
+
+    #[test]
+    fn bits_q48_16_to_seconds_hand_computed() {
+        // 48 000 Hz, 48 000 × 2¹⁶ bits = 3_145_728_000 bits ≡ 1 second.
+        assert_eq!(bits_q48_16_to_seconds(3_145_728_000, 48_000), 1.0);
+        // 48 000 Hz, one sample = 65 536 bits = 1/48000 seconds.
+        let one_sample = bits_q48_16_to_seconds(65_536, 48_000);
+        assert!((one_sample - 1.0 / 48_000.0).abs() < 1e-15);
+        // 44 100 Hz, half-second = 22 050 × 2¹⁶ bits.
+        let half_sec = bits_q48_16_to_seconds(22_050 * 65_536, 44_100);
+        assert!((half_sec - 0.5).abs() < 1e-15);
+        // Negative bits round consistently (no `div_euclid` boundary issue).
+        assert_eq!(bits_q48_16_to_seconds(-3_145_728_000, 48_000), -1.0);
+    }
+
     #[test]
     fn f64_phase_saturation_near_one() {
         // Values close enough to 1.0 that scaling reaches 2^32 must wrap
