@@ -66,10 +66,15 @@ impl LinkSession {
         }
     }
 
-    /// Toggle peer discovery + session joining. Delegates to the
-    /// underlying `LinkClock`.
+    /// Toggle peer discovery + session joining. When turning on and
+    /// `enable_start_stop_sync` is configured, also flips the
+    /// underlying Link instance's start-stop-sync so `is_playing`
+    /// propagates across peers (off by default in Link).
     pub fn enable(&self, on: bool) {
         self.clock.enable(on);
+        if on && self.config.enable_start_stop_sync {
+            self.clock.enable_start_stop_sync(true);
+        }
     }
 
     /// Number of peers currently joined.

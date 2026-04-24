@@ -111,6 +111,15 @@ impl LinkClock {
         self.link.enable(on);
     }
 
+    /// Toggle Link's start-stop synchronization. **Required** for
+    /// `set_is_playing` / `is_playing` to propagate across peers —
+    /// off by default in Link. Agogo's `LinkSession` calls this
+    /// through from `LinkWriteConfig.enable_start_stop_sync`. Not
+    /// RT-safe.
+    pub fn enable_start_stop_sync(&self, on: bool) {
+        self.link.enable_start_stop_sync(on);
+    }
+
     /// Whether peer discovery is currently on.
     ///
     /// RT-safe.
