@@ -11,5 +11,16 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(cargo test *)",
+      "Bash(cargo build *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt --all -- --check)",
+      "Bash(scripts/extract_pr_body.sh *)",
+      "Bash(scripts/next_pr_number.sh)",
+      "Bash(scripts/review_path.sh *)"
+    ]
   }
 }
