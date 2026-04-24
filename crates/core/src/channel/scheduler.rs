@@ -39,7 +39,7 @@ pub fn tick_stream(
     // stc.inner(swung_tick) + shift_samples + offset_samples. For an
     // event to land in [start, end), the swung_tick's natural sample
     // must land in [start - delta, end - delta). Same
-    // `F12F06 ∘ PicoSampleConn::ceil` composition as `transform`,
+    // `F12F06 ∘ pico_to_samples` composition as `transform`,
     // routed through `micro_to_samples` so the two stages are
     // impossible to drift.
     let shift_clamped = Micro(channel.shift.0.clamp(0, MAX_SHIFT.0));

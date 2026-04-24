@@ -26,7 +26,10 @@ pub use connections::conn::fixed::{
     Pico, Uni,
 };
 pub use connections::conn::float::ExtendedFloat;
-pub use connections::conn::sample::{S44, S48, S88, S96, S176, S192, SampleRate};
+pub use connections::conn::sample::{
+    F12S44, F12S48, F12S88, F12S96, F12S176, F12S192,
+    S44, S48, S88, S96, S176, S192, SampleRate,
+};
 pub use connections::extended::Extended;
 
 // ────────────────────────────────────────────────────────────────────
@@ -194,6 +197,36 @@ pub fn tempo_to_hz(bpm: Tempo, ppq: u32) -> f64 {
 pub fn bits_q48_16_to_seconds(bits: i64, sr: u32) -> f64 {
     // PI-exempt.
     (bits as f64) / ((sr as f64) * (1u64 << 16) as f64)
+}
+
+/// Pico → whole sample count at a runtime sample rate.
+///
+/// Dispatches on `sr` to the upstream lawful `F12Sxx` Conn for that
+/// rate, calls its `ceil` (Pico → Q48.16), then rounds to the
+/// nearest integer sample. Returns `None` for non-audio rates —
+/// the supported set is the six standard rates enumerated upstream
+/// (44.1, 48, 88.2, 96, 176.4, 192 kHz).
+///
+/// Replaces the runtime `PicoSampleConn` Conn-lookalike: since the
+/// set of audio sample rates is small and compile-time known, a
+/// match dispatch to the lawful pre-composed constants is cleaner
+/// than a runtime-parameterised struct, and it reuses the
+/// connections crate's own proptest battery for each rate instead
+/// of duplicating it downstream.
+pub fn pico_to_samples(p: Pico, sr: u32) -> Option<i64> {
+    // Each `F12Sxx.ceil(pico)` returns the rate-specific Sxx
+    // newtype; `.0` unwraps to the underlying `Q48_16`, `.round()`
+    // snaps to a whole-sample Q48_16, and `.to_num::<i64>()`
+    // extracts the integer sample count.
+    Some(match sr {
+        44_100 => F12S44.ceil(p).0.round().to_num(),
+        48_000 => F12S48.ceil(p).0.round().to_num(),
+        88_200 => F12S88.ceil(p).0.round().to_num(),
+        96_000 => F12S96.ceil(p).0.round().to_num(),
+        176_400 => F12S176.ceil(p).0.round().to_num(),
+        192_000 => F12S192.ceil(p).0.round().to_num(),
+        _ => return None,
+    })
 }
 
 // ────────────────────────────────────────────────────────────────────

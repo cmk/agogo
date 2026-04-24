@@ -7,14 +7,15 @@
 //!    earlier by `amount × multiplier`; on-beats pass through).
 //! 3. **Tick → Sample** via [`SampleTickConn::inner`].
 //! 4. **Shift** — add `clamp(shift, 0, MAX_SHIFT)` → Pico → Sample
-//!    via `F12F06 ∘ PicoSampleConn`. Plan 03 does not implement
+//!    via `F12F06 ∘ pico_to_samples`. Plan 03 does not implement
 //!    negative shift (needs a forward-look ring buffer, deferred to
 //!    v0.2).
 //! 5. **Offset** — same composition chain for the signed calibration
 //!    offset.
 
 use crate::channel::mode::ChannelMode;
-use crate::time::conn::{PicoSampleConn, SampleTickConn};
+use crate::fxp::pico_to_samples;
+use crate::time::conn::SampleTickConn;
 use crate::time::swing::{self, SwingConfig};
 use crate::time::tbase::TBase;
 use crate::time::tick::Tick;
@@ -51,17 +52,18 @@ pub struct ScheduledEvent {
 }
 
 /// Convert a `Micro` offset into a whole-sample count at `sr` via
-/// the adjoint-law composition `F12F06 ∘ PicoSampleConn::ceil`.
-/// Rounds to the nearest whole sample (matching the old
-/// `round() as i64` semantics). Shared by `transform` and `scheduler`.
+/// the adjoint-law composition `F12F06 ∘ pico_to_samples`. Shared
+/// by `transform` and `scheduler`.
+///
+/// Panics if `sr` isn't one of the six supported rates (same set as
+/// `pico_to_samples`); `SampleTickConn::new` already enforces a
+/// matching invariant upstream of every caller, so this panic is
+/// unreachable in practice.
 pub(crate) fn micro_to_samples(m: Micro, sr: u32) -> i64 {
     let pico = F12F06.inner(m);
-    let psc = PicoSampleConn::new(sr);
-    // `psc.ceil` returns a Q48.16 whose integer part is the sample
-    // count; round to nearest whole sample to match pre-refactor
-    // behaviour bit-exactly at the CLI spot checks (`10 ms @ 48 kHz
-    // = 480 samples`, etc.).
-    psc.ceil(pico).round().to_num::<i64>()
+    pico_to_samples(pico, sr).unwrap_or_else(|| {
+        panic!("channel: unsupported sample rate {sr} (expected 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000)")
+    })
 }
 
 /// Run the divider → shuffle → sample → shift → offset pipeline over
