@@ -124,8 +124,13 @@ core = ["dep:project-core"]
      within 1–2 lines. Mark `// Link FFI`.
 
   `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
-  lives outside these exceptions or lacks its annotation comment
-  within 2 lines.
+  lives outside the file-level allowlist (the script encodes the
+  seven exception modules). The annotation comments above are
+  reviewer-oriented markers inside allowlisted files — they're not
+  enforced by the grep gate itself, which would need a full Rust
+  parser to classify each use. Pattern 9 in
+  `doc/reviews/review-calibration.md` is the complementary review
+  check that catches stored-state violations the gate misses.
 
 - **Every numerical conversion comes from a named `Conn` (or a
   Conn-lookalike with proptested adjoint laws).** Bespoke `fn
@@ -134,32 +139,62 @@ core = ["dep:project-core"]
   `Conn` (e.g. `Phase` is a wrapping quotient onto a torus, not a
   monotone map — the bespoke `f64_phase_to_phase` is the one
   legitimate exception). Naming follows the Haskell `fXYfZW`
-  6-char convention: `F12F06` = Pico → Micro, `F12S48` = Pico →
-  S48, `F64F06` = f64-seconds → Micro, etc. The crate-level doc
-  in `connections/src/lib.rs` spells out the full legend.
+  6-char convention: each pair of tier codes names a `Conn<A, B>`
+  where `A` and `B` are the two tiers. Direction then depends on
+  which method you call:
+
+  - `F12F06: Conn<Pico, Micro>`. `F12F06.ceil(Pico) → Micro` and
+    `F12F06.floor(Pico) → Micro` round a Pico value up / down to
+    the nearest Micro. `F12F06.inner(Micro) → Pico` is the exact
+    embed going the other direction.
+  - `F64F06: Conn<ExtendedFloat<f64>, Extended<Micro>>`. Same
+    pattern — `.ceil(FloatExt(seconds)) → Extended<Micro>`.
+  - `F12S48: Conn<Pico, S48>`. `.ceil(Pico) → S48 (Q48.16)`,
+    `.inner(S48) → Pico`.
+
+  The crate-level doc in `connections/src/lib.rs` spells out the
+  full legend.
 
 - **Cross-conversions compose existing `Conn`s — they are not
   hardcoded.** If `A → C` is needed and `Conn<A, B>` + `Conn<B, C>`
-  already exist, compose the two at the call site:
+  already exist, compose the two at the call site. A small helper
+  that wraps a *visible* composition (name reflects the operation,
+  body shows the chain) is fine if it's used at ≥2 call sites
+  that would otherwise drift — e.g. `transform::micro_to_samples`
+  wraps `F12F06.inner` + `PicoSampleConn::ceil` +
+  `Q48.16.round().to_num::<i64>()` and is called from both
+  `transform` and `scheduler` to guarantee rounding agreement. A
+  helper is **not** fine if it hides what would otherwise be a
+  single direct `Conn` call (that's just renaming) or if it
+  open-codes the arithmetic.
 
   ```rust
-  // Good: compose Pico→Micro (F12F06) with Pico→Sample (PicoSampleConn).
+  // Good: compose Micro → Pico → Sample at the call site.
   let samples = psc.ceil(F12F06.inner(micro_value));
+
+  // Good: helper that wraps the composition for ≥2 call sites.
+  // The body shows the chain; `.round().to_num::<i64>()` is the
+  // final non-Conn extraction that motivates the helper.
+  fn micro_to_samples(m: Micro, sr: u32) -> i64 {
+      let pico = F12F06.inner(m);
+      PicoSampleConn::new(sr).ceil(pico).round().to_num::<i64>()
+  }
 
   // Bad: open-code the arithmetic.
   let samples = (micro_value.0 * sr as i128 * 10 / ...);   // nope
 
-  // Also bad: a new helper that hides the composition.
-  fn micro_to_samples_at_sr(m: Micro, sr: u32) -> u64 { ... }  // nope
+  // Bad: a helper that hides a single Conn call behind a new name.
+  fn micro_to_pico(m: Micro) -> Pico { F12F06.inner(m) }   // nope
 
-  // Also bad: a bespoke `f64_*_to_*` function where a Conn constant
+  // Bad: a bespoke `f64_*_to_*` function where a Conn constant
   // would do.
   pub fn f64_ms_to_micro(ms: f64) -> Micro { ... }   // nope — use F64F06.
   ```
 
-  If repeated composition becomes ergonomic debt, the fix is
-  upstream (e.g. a `Conn::then` composition primitive in the
-  `connections` crate) — not a local hardcoded helper.
+  If repeated composition becomes ergonomic debt beyond the narrow
+  helper case above, the fix is upstream (e.g. a `Conn::then`
+  composition primitive in the `connections` crate) — not a
+  local hardcoded helper.
 
 - **Test fixtures are gitignored**, and a fresh checkout must pass
   `cargo test --workspace` with zero setup. Tests that depend on a

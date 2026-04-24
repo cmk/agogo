@@ -66,8 +66,10 @@ while IFS= read -r -d '' file; do
     line_num="${hit%%:*}"
     line_body="${hit#*:}"
 
-    # Strip leading whitespace.
-    stripped="${line_body##*([[:space:]])}"
+    # Strip leading whitespace. `${var##*([[:space:]])}` requires
+    # extglob (off by default); the nested-expansion idiom below
+    # works in plain bash.
+    stripped="${line_body#"${line_body%%[![:space:]]*}"}"
     case "$stripped" in
       "//"*|"/*"*|"*"*|"*/"*) continue ;;
     esac
