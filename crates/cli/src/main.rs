@@ -464,12 +464,27 @@ mod sync_trace {
     ) -> Vec<TraceRow> {
         // argv-boundary conversions.
         let bpm: Tempo = f64_bpm_to_tempo(bpm_f32 as f64);
-        // µs → seconds → Pico via upstream `F64F12`. Non-finite
-        // and out-of-range inputs saturate to `Pico(0)` (matches the
-        // previous bespoke helper's NaN → 0 behaviour).
-        let jitter: Pico = match F64F12.ceil(FloatExt::Finite(f64::from(jitter_us) * 1.0e-6)) {
-            Extended::Finite(p) => p,
-            Extended::NegInf | Extended::PosInf => Pico(0),
+        // µs → seconds → Pico via upstream `F64F12`. NaN / ±∞ are
+        // rejected by the `is_finite` guard and map to `Pico(0)`
+        // (the previous `f32_jitter_us_to_sigma` helper's "safe
+        // default" on non-finite input). For finite jitter values
+        // outside the rung's representable range, `F64F12.ceil`
+        // returns `Extended::PosInf` / `Extended::NegInf`, which
+        // the match arm collapses to `Pico(0)` as well.
+        //
+        // Rounding: the old helper used `.round()` (nearest); this
+        // uses `F64F12.ceil` (round up). For jitter-sigma this is
+        // more conservative — never under-estimates — and agrees
+        // exactly on the values that matter for the CLI (50 µs at
+        // exact integer-pico boundary).
+        let jitter_s = f64::from(jitter_us) * 1.0e-6;
+        let jitter: Pico = if !jitter_s.is_finite() {
+            Pico(0)
+        } else {
+            match F64F12.ceil(FloatExt::Finite(jitter_s)) {
+                Extended::Finite(p) => p,
+                Extended::NegInf | Extended::PosInf => Pico(0),
+            }
         };
 
         let (samples, _truth): (Vec<f32>, Vec<S48>) =

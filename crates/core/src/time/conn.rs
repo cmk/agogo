@@ -325,8 +325,9 @@ impl SampleTickConn {
 /// - `inner(s) ≤ p  ⟺  s ≤ floor(p)`
 ///
 /// Not a real `Conn` because the conversion depends on runtime
-/// `sr` — needs a closure-capturing `Conn` variant upstream,
-/// tracked in `connections` §Deferred of plan-2026-04-24-01.
+/// `sr` — needs a closure-capturing `Conn` variant in the upstream
+/// `connections` crate (tracked there as deferred work). Until that
+/// lands, this stays as a Conn-lookalike in agogo-core.
 ///
 /// `i128` intermediate arithmetic; no floating-point.
 ///
@@ -360,9 +361,20 @@ impl PicoSampleConn {
 
     /// Sample (Q48.16) → Pico, flooring the exact product to integer
     /// picoseconds. Matches upstream `F12SXX`'s `inner` direction.
+    ///
+    /// Saturates to `Pico(i64::MIN)` / `Pico(i64::MAX)` for Q48.16
+    /// values whose pico representation exceeds `i64` range. At a
+    /// realistic 44.1 kHz rate this is 2⁶³ × 10¹² / (44 100 × 2¹⁶) ≈
+    /// 2⁴⁷ Q48.16 bits ≈ 2³¹ whole samples ≈ 13.6 hours of audio, so
+    /// no realistic caller should saturate — but silently wrapping
+    /// on out-of-range Q48.16 inputs would turn a contract violation
+    /// into a quiet data-corruption bug, so we clamp explicitly.
     pub fn inner(&self, s: connections::sample::Q48_16) -> connections::fixed::Pico {
         let n: i128 = i128::from(s.to_bits()) * self.num;
-        connections::fixed::Pico(n.div_euclid(self.den) as i64)
+        let clamped = n
+            .div_euclid(self.den)
+            .clamp(i128::from(i64::MIN), i128::from(i64::MAX));
+        connections::fixed::Pico(clamped as i64)
     }
 
     /// Pico → Sample (Q48.16), rounding up: smallest `s` with
@@ -389,6 +401,8 @@ impl PicoSampleConn {
 }
 
 fn gcd_i128(mut a: i128, mut b: i128) -> i128 {
+    // Inputs are `num = 10¹²` and `den = sr × 2¹⁶` with `sr ≤ 2³²`,
+    // so both fit in ~50 bits — `unsigned_abs() as i128` can't wrap.
     a = a.unsigned_abs() as i128;
     b = b.unsigned_abs() as i128;
     while b != 0 {
@@ -1059,15 +1073,19 @@ mod tests {
 
     /// All standard audio rates. Q48.16 carries sub-sample pico
     /// precision, so the adjoint laws are exact at every rate —
-    /// including the 44.1 kHz family.
+    /// including the 44.1 kHz family, which is the only one where
+    /// `10¹²` is not divisible by `sr` (so NUM / DEN don't reduce
+    /// to trivial powers of 2). Bias the strategy toward the 44.1
+    /// kHz family since that's where an off-by-one bug would
+    /// surface first.
     fn arb_pico_sample_conn() -> impl Strategy<Value = PicoSampleConn> {
         prop_oneof![
-            Just(PicoSampleConn::new(44_100)),
-            Just(PicoSampleConn::new(48_000)),
-            Just(PicoSampleConn::new(88_200)),
-            Just(PicoSampleConn::new(96_000)),
-            Just(PicoSampleConn::new(176_400)),
-            Just(PicoSampleConn::new(192_000)),
+            3 => Just(PicoSampleConn::new(44_100)),
+            3 => Just(PicoSampleConn::new(88_200)),
+            3 => Just(PicoSampleConn::new(176_400)),
+            1 => Just(PicoSampleConn::new(48_000)),
+            1 => Just(PicoSampleConn::new(96_000)),
+            1 => Just(PicoSampleConn::new(192_000)),
         ]
     }
 
@@ -1223,5 +1241,38 @@ mod tests {
         ) {
             prop_assert_eq!(psc.ceil(psc.inner(s)), s);
         }
+    }
+
+    // Triangle property: `tick → sample` via SampleTickConn agrees
+    // with `tick → pico → sample` via PicoSampleConn, at a
+    // compile-time-pinned (bpm, ppq, sr) where the arithmetic is
+    // exact. Demonstrates that the two runtime Conn-lookalikes
+    // describe the same sample-time geometry.
+    //
+    // Stays as a hand-computed spot check rather than a full
+    // proptest because "tick → pico" needs `bpm` and `ppq`, which
+    // `PicoSampleConn` doesn't capture — a full proptest would
+    // require wrapping the two conns in a combined bridge that
+    // agogo doesn't have yet and doesn't need outside this test.
+    #[test]
+    fn sample_tick_and_pico_sample_agree_at_120bpm_48k() {
+        // 120 BPM / ppq=192 / 48 kHz: each quarter note = 0.5 s =
+        // 24 000 samples = 5×10¹¹ pico. At tick 192 (one beat):
+        let stc = SampleTickConn::new(48_000, mbpm(120), 192);
+        let psc = PicoSampleConn::new(48_000);
+
+        let via_stc: u64 = stc.inner(Tick(192));
+        let pico_at_one_beat = Pico(500_000_000_000);
+        let via_psc: i64 = psc.ceil(pico_at_one_beat).to_num::<i64>();
+        assert_eq!(via_stc, 24_000);
+        assert_eq!(via_psc, 24_000);
+        assert_eq!(via_stc as i64, via_psc);
+
+        // And at tick 384 (two beats = 1 s = 48 000 samples = 10¹² pico):
+        assert_eq!(stc.inner(Tick(384)), 48_000);
+        assert_eq!(
+            psc.ceil(Pico(1_000_000_000_000)).to_num::<i64>(),
+            48_000
+        );
     }
 }
