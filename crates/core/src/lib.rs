@@ -3,6 +3,7 @@
 pub mod arb;
 pub mod channel;
 pub mod fxp;
+pub mod host;
 pub mod out;
 pub mod sync;
 pub mod testing;
