@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # check-floats.sh — CI gate for CLAUDE.md's no-stored-float rule.
 #
-# `f32` / `f64` may appear only in the seven documented exception
+# `f32` / `f64` may appear only in the documented exception
 # modules listed below. Each file is allowed because its contents
 # fall into one of the five enumerated exception categories
 # (CLAUDE.md §Repository conventions):
 #
-#   crates/core/src/sync/pll.rs     PI controller state + control law
-#   crates/core/src/sync/detect.rs  parabolic-fit ABI-local locals
-#   crates/core/src/sync/source.rs  PCM audio intake (`&[f32]`) + tests
-#   crates/core/src/fxp.rs          argv-boundary + PI-exempt helpers
-#   crates/core/src/arb.rs          test-fixture PCM generators
-#   crates/host-link/src/link.rs    Link FFI (AblLink C++ ABI)
-#   crates/cli/src/main.rs          argv parsers
+#   crates/core/src/sync/pll.rs        PI controller state + control law
+#   crates/core/src/sync/detect.rs     parabolic-fit ABI-local locals
+#   crates/core/src/sync/source.rs     PCM audio intake (`&[f32]`) + tests
+#   crates/core/src/fxp.rs             argv-boundary + PI-exempt helpers
+#   crates/core/src/arb.rs             test-fixture PCM generators
+#   crates/core/src/host.rs            PCM ABI shape (AudioIo `&[f32]` slices)
+#   crates/host-link/src/link.rs       Link FFI (AblLink C++ ABI)
+#   crates/host-cpal/src/cpal.rs       PCM ABI (cpal stream callback)
+#   crates/cli/src/main.rs             argv parsers
 #
 # Any `f32` / `f64` in a non-allowlisted file is a build failure.
 # To add a new allowlisted file, amend both this script and
@@ -35,7 +37,9 @@ ALLOWED=(
   "crates/core/src/sync/source.rs"
   "crates/core/src/fxp.rs"
   "crates/core/src/arb.rs"
+  "crates/core/src/host.rs"
   "crates/host-link/src/link.rs"
+  "crates/host-cpal/src/cpal.rs"
   "crates/cli/src/main.rs"
 )
 
