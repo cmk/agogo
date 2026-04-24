@@ -23,7 +23,10 @@
 //! [`crate::fxp::f64_bpm_to_tempo`] / [`crate::fxp::f64_phase_to_phase`]
 //! at the `PllOutput` boundary.
 
-use crate::fxp::{Tempo, Phase, SampleTime, f64_bpm_to_tempo, f64_phase_to_phase};
+use crate::fxp::{
+    Tempo, Phase, SampleTime, bits_q48_16_to_seconds, f64_bpm_to_tempo,
+    f64_phase_to_phase, tempo_to_hz,
+};
 
 /// Loop-filter tuning.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -89,8 +92,7 @@ impl<R: SampleTime> Pll<R> {
         assert!(ppq > 0, "ppq must be positive");
         // PI-exempt: convert the argv/µBPM nominal into f64 Hz for the
         // control law.
-        let nominal_bpm_f = nominal_bpm.0 as f64 / 1.0e6;
-        let nominal_freq_hz = nominal_bpm_f * ppq as f64 / 60.0;
+        let nominal_freq_hz = tempo_to_hz(nominal_bpm, ppq);
         Self {
             cfg,
             state: PllState {
@@ -135,10 +137,10 @@ impl<R: SampleTime> Pll<R> {
     /// (e.g. `PhaseSource::External`) so the f64 stays inside the
     /// PI-exempt zone.
     pub fn predicted_phase_at(&self, elapsed: R) -> Phase {
-        // PI-exempt.
-        let elapsed_samples = elapsed.to_bits_q48_16() as f64 / 65_536.0;
-        let cycles_per_sample = self.state.freq_hz / R::HZ as f64;
-        let projected = self.state.phase + elapsed_samples * cycles_per_sample;
+        // PI-exempt. `elapsed_seconds × freq` is cycles; project the
+        // current phase by that amount and wrap.
+        let elapsed_seconds = bits_q48_16_to_seconds(elapsed.to_bits_q48_16(), R::HZ);
+        let projected = self.state.phase + elapsed_seconds * self.state.freq_hz;
         f64_phase_to_phase(projected)
     }
 
@@ -149,10 +151,8 @@ impl<R: SampleTime> Pll<R> {
             // Q48.16-bits sample positions of prev and observed.
             let phase_error = match self.last_pulse_sample {
                 Some(prev) => {
-                    let prev_s = prev.to_bits_q48_16() as f64
-                        / (65_536.0 * R::HZ as f64);
-                    let observed_s = observed.to_bits_q48_16() as f64
-                        / (65_536.0 * R::HZ as f64);
+                    let prev_s = bits_q48_16_to_seconds(prev.to_bits_q48_16(), R::HZ);
+                    let observed_s = bits_q48_16_to_seconds(observed.to_bits_q48_16(), R::HZ);
                     let observed_spacing_s = observed_s - prev_s;
                     let expected_spacing_s = 1.0 / self.state.freq_hz;
                     if expected_spacing_s < f64::EPSILON {
@@ -317,17 +317,13 @@ mod tests {
             let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, ppq);
             // True pulse spacing in seconds (for error computation only;
             // test-local f64).
-            let bpm_f = bpm.0 as f64 / 1.0e6;
-            let true_freq = bpm_f * ppq as f64 / 60.0;
-            let true_spacing_secs = 1.0 / true_freq;
+            let true_spacing_secs = 1.0 / tempo_to_hz(bpm, ppq);
             let mut sum_sq_us = 0.0_f64;
             let mut count = 0;
             for (i, &p) in peaks.iter().enumerate() {
                 let out = pll.step(Some(p));
                 if i >= 32 {
-                    let est_bpm_f = out.bpm.0 as f64 / 1.0e6;
-                    let est_freq = est_bpm_f * ppq as f64 / 60.0;
-                    let est_spacing_secs = 1.0 / est_freq;
+                    let est_spacing_secs = 1.0 / tempo_to_hz(out.bpm, ppq);
                     let err_us = (est_spacing_secs - true_spacing_secs) * 1e6;
                     sum_sq_us += err_us * err_us;
                     count += 1;
