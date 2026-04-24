@@ -97,6 +97,48 @@ pub fn render_clock_block(events: &[ScheduledEvent], sink: &dyn MidiSink) {
     }
 }
 
+// ── Transport bytes ─────────────────────────────────────────────────
+
+/// Single-byte MIDI System Real-Time transport messages.
+///
+/// Plan 12 exposes the byte-level enum only. Plan 14's transport FSM
+/// (`doc/designs/transport.md`) owns the higher-level `TransportEvent`
+/// type (`Play`, `Stop`, `Locate`, `PhaseSource*`) and maps its
+/// transitions down to these bytes per buffer.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum MidiRtByte {
+    Start,
+    Continue,
+    Stop,
+}
+
+impl MidiRtByte {
+    pub fn status_byte(self) -> u8 {
+        match self {
+            Self::Start => MIDI_START,
+            Self::Continue => MIDI_CONTINUE,
+            Self::Stop => MIDI_STOP,
+        }
+    }
+}
+
+/// Per-buffer render: emits the optional transport byte at
+/// `buffer_start_sample` ahead of the clock stream, then the clock
+/// events. Callers that want to place the transport byte mid-buffer
+/// can call [`MidiSink::send_at`] directly with a custom sample
+/// index.
+pub fn render_buffer(
+    events: &[ScheduledEvent],
+    transport: Option<MidiRtByte>,
+    buffer_start_sample: u64,
+    sink: &dyn MidiSink,
+) {
+    if let Some(t) = transport {
+        sink.send_at(&[t.status_byte()], buffer_start_sample);
+    }
+    render_clock_block(events, sink);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +267,76 @@ mod tests {
             render_clock_block(&evs, &sink);
             let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();
             prop_assert_eq!(emitted, samples);
+        }
+    }
+
+    // ── MidiRtByte + render_buffer ────────────────────────────────
+
+    #[test]
+    fn midi_rt_byte_status_values() {
+        assert_eq!(MidiRtByte::Start.status_byte(), MIDI_START);
+        assert_eq!(MidiRtByte::Continue.status_byte(), MIDI_CONTINUE);
+        assert_eq!(MidiRtByte::Stop.status_byte(), MIDI_STOP);
+    }
+
+    #[test]
+    fn render_buffer_transport_only_no_events() {
+        let sink = TestSink::new();
+        render_buffer(&[], Some(MidiRtByte::Start), 1024, &sink);
+        let recs = sink.records();
+        assert_eq!(recs.len(), 1);
+        assert_eq!(recs[0].at_sample, 1024);
+        assert_eq!(recs[0].bytes, vec![MIDI_START]);
+    }
+
+    #[test]
+    fn render_buffer_no_transport_just_clock_events() {
+        let sink = TestSink::new();
+        render_buffer(&[ev(0), ev(24_000)], None, 0, &sink);
+        let recs = sink.records();
+        assert_eq!(recs.len(), 2);
+        for r in &recs {
+            assert_eq!(r.bytes, vec![MIDI_CLOCK]);
+        }
+    }
+
+    proptest! {
+        /// Plan 12 property `midi_rt_byte_in_expected_range`: every
+        /// variant maps to the MIDI 1.0 real-time range
+        /// `{0xFA, 0xFB, 0xFC}`.
+        #[test]
+        fn midi_rt_byte_in_expected_range(
+            variant in prop::sample::select(&[
+                MidiRtByte::Start,
+                MidiRtByte::Continue,
+                MidiRtByte::Stop,
+            ]),
+        ) {
+            let b = variant.status_byte();
+            prop_assert!(b == MIDI_START || b == MIDI_CONTINUE || b == MIDI_STOP);
+        }
+
+        /// Plan 12 property `render_buffer_emits_rt_byte_first`: when
+        /// `transport = Some(t)`, the first `TestSink` record is the
+        /// one-byte `[t.status_byte()]` at `buffer_start_sample`, even
+        /// if a clock event also shares that sample.
+        #[test]
+        fn render_buffer_emits_rt_byte_first(
+            variant in prop::sample::select(&[
+                MidiRtByte::Start,
+                MidiRtByte::Continue,
+                MidiRtByte::Stop,
+            ]),
+            buffer_start in any::<u64>(),
+            samples in prop::collection::vec(any::<u64>(), 0..16),
+        ) {
+            let evs: Vec<ScheduledEvent> = samples.iter().copied().map(ev).collect();
+            let sink = TestSink::new();
+            render_buffer(&evs, Some(variant), buffer_start, &sink);
+            let recs = sink.records();
+            prop_assert_eq!(recs.len(), evs.len() + 1);
+            prop_assert_eq!(recs[0].at_sample, buffer_start);
+            prop_assert_eq!(recs[0].bytes.as_slice(), &[variant.status_byte()]);
         }
     }
 }
