@@ -84,6 +84,28 @@ core = ["dep:project-core"]
   - Define strategies as functions returning `impl Strategy`, not
     `Arbitrary` derive. Use `prop_oneof!` with frequency weights to
     bias toward boundary values and edge cases.
+  - **Generator domain = the input type's full domain.** Default to
+    `any::<i64>()`, `any::<u32>()`, `prop::num::f64::NORMAL`, etc.
+    Named boundaries (`i64::MAX`, `i64::MIN`, `0`, NaN, ±∞) go in
+    explicit `Just(_)` arms with elevated frequency. **Bounding the
+    generator to keep intermediate arithmetic "safe" (i.e. under a
+    wrap or overflow threshold) is an anti-pattern — it fakes
+    coverage by hiding the exact region where wrap / saturation
+    bugs live.** If you genuinely must bound the domain, document
+    *why* immediately above the strategy and add a separate
+    `#[test]` spot-check at the un-sampled boundary.
+  - **Pair adjoint-law and round-trip properties with orthogonal
+    sanity checks.** A Galois-law / round-trip proptest can pass
+    trivially through a silent wrap (the law compares two sides of
+    the same broken function). Monotonicity across the full input
+    range, an "adjacent inputs differ by ≤ bounded step" property,
+    or a saturation spot-check at the type boundary expose wraps
+    the adjoint law is blind to.
+  - **Test the test before pushing.** For any new proptest intended
+    to catch a specific class of bug, revert the relevant fix in a
+    dirty worktree and re-run — if the proptest still passes, the
+    generator isn't reaching the failure region and the test is
+    decorative. Restore the fix from backup once verified.
   - Strategies shared across crates live in `crates/core/src/arb.rs`.
     Strategies local to one module stay colocated in that module's
     `#[cfg(test)]` block.
