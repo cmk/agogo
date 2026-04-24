@@ -31,12 +31,56 @@ enum Command {
         #[bpaf(external(channel_sub))]
         sub: ChannelSub,
     },
+    /// MIDI output utilities.
+    #[bpaf(command("midi"))]
+    Midi {
+        #[bpaf(external(midi_sub))]
+        sub: MidiSub,
+    },
     /// Ableton Link integration utilities.
     #[cfg(feature = "link")]
     #[bpaf(command("link"))]
     Link {
         #[bpaf(external(link_sub))]
         sub: LinkSub,
+    },
+}
+
+#[derive(Debug, Clone, Bpaf)]
+enum MidiSub {
+    /// Run the MIDI-clock renderer over a sequence of audio buffers
+    /// against a synthetic sink and print the emitted bytes as CSV:
+    /// `at_sample,byte`.
+    ///
+    /// MIDI 1.0 pins clock at 24 PPQN — one `0xF8` every `PPQN/24`
+    /// master ticks. At agogo's 192 PPQN master that's every 8
+    /// master ticks, which is `TBase::T32t` (32nd-note triplet).
+    /// Pick `--divider t4` for one byte per beat (human-readable);
+    /// pick `--divider t32t` for a spec-compliant 24 PPQN stream.
+    #[bpaf(command("trace"))]
+    Trace {
+        /// Tempo in beats per minute.
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f64))]
+        bpm: f64,
+        /// Sample rate in Hz.
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
+        sr: u32,
+        /// Per-channel divider (e.g. `t4`, `t16`, `t32t`).
+        #[bpaf(long, argument("TBASE"))]
+        divider: String,
+        /// Audio buffer length in samples.
+        #[bpaf(long, argument("FRAMES"))]
+        frames: usize,
+        /// Number of consecutive buffers to render.
+        #[bpaf(long, argument("BUFFERS"), parse(parse_positive_u32))]
+        buffers: u32,
+        /// Inject `MidiRtByte::Start` (0xFA) at sample 0 of buffer 0.
+        #[bpaf(long)]
+        start: bool,
+        /// Inject `MidiRtByte::Stop` (0xFC) at the first sample of
+        /// the final buffer.
+        #[bpaf(long)]
+        stop_on_exit: bool,
     },
 }
 
@@ -301,6 +345,48 @@ fn main() {
             {
                 let _ = (bpm, sr, divider, shuffle, shift_ms, offset_ms, frames, buffers);
                 eprintln!("error: build with --features core to enable `channel trace`");
+                std::process::exit(2);
+            }
+        }
+        Some(Command::Midi {
+            sub:
+                MidiSub::Trace {
+                    bpm,
+                    sr,
+                    divider,
+                    frames,
+                    buffers,
+                    start,
+                    stop_on_exit,
+                },
+        }) => {
+            #[cfg(feature = "core")]
+            {
+                let args = midi_trace::TraceArgs {
+                    bpm,
+                    sr,
+                    divider,
+                    frames,
+                    buffers,
+                    start,
+                    stop_on_exit,
+                };
+                let rows = match midi_trace::trace(&args) {
+                    Ok(rows) => rows,
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        std::process::exit(2);
+                    }
+                };
+                println!("at_sample,byte");
+                for row in rows {
+                    println!("{},0x{:02X}", row.at_sample, row.byte);
+                }
+            }
+            #[cfg(not(feature = "core"))]
+            {
+                let _ = (bpm, sr, divider, frames, buffers, start, stop_on_exit);
+                eprintln!("error: build with --features core to enable `midi trace`");
                 std::process::exit(2);
             }
         }
@@ -823,6 +909,209 @@ pub mod channel_trace {
             }
         }
         Ok(rows)
+    }
+}
+
+pub mod midi_trace {
+    use agogo_core::channel::{Channel, ChannelMode, scheduler::tick_stream};
+    use agogo_core::fxp::{Micro, Tempo};
+    use agogo_core::out::midi::{MidiRtByte, TestSink, render_channel_block};
+    use agogo_core::time::conn::SampleTickConn;
+    use agogo_core::time::swing::SwingConfig;
+    use agogo_core::time::tbase::TBase;
+    use agogo_core::time::tick::PPQN;
+
+    #[derive(Debug, Clone)]
+    pub struct TraceArgs {
+        pub bpm: f64,
+        pub sr: u32,
+        pub divider: String,
+        pub frames: usize,
+        pub buffers: u32,
+        pub start: bool,
+        pub stop_on_exit: bool,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct TraceRow {
+        pub at_sample: u64,
+        pub byte: u8,
+    }
+
+    /// Pure MIDI-clock trace — runs the scheduler + renderer against
+    /// a `TestSink` for `buffers` buffers of `frames` samples each
+    /// and returns every emitted `(at_sample, byte)` in FIFO order.
+    pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
+        let divider: TBase = args
+            .divider
+            .parse()
+            .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
+        // argv-boundary: f64 BPM → µBPM. f64 dies right here.
+        let bpm = {
+            let scaled = (args.bpm * 1.0e6).round();
+            if !(0.0..u32::MAX as f64).contains(&scaled) {
+                return Err(format!(
+                    "--bpm {} out of range (expected (0, {}] BPM)",
+                    args.bpm,
+                    u32::MAX as f64 / 1.0e6
+                ));
+            }
+            Tempo(scaled as u32)
+        };
+        // Match `channel_trace`'s sr gate: the transform pipeline's
+        // `pico_to_samples` dispatch supports only these six rates and
+        // panics deep inside otherwise. Plan 12 never hits that path
+        // with zero shift/offset, but validating here surfaces bad argv
+        // as a clean error instead of depending on that internal.
+        match args.sr {
+            44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => {}
+            _ => {
+                return Err(format!(
+                    "--sr {} unsupported; expected one of 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000",
+                    args.sr
+                ));
+            }
+        }
+        let stc = SampleTickConn::new(args.sr, bpm, PPQN);
+        let channel = Channel {
+            mode: ChannelMode::MidiClock,
+            divider,
+            shuffle: SwingConfig {
+                amount: 0,
+                multiplier: 1,
+            },
+            shift: Micro::ZERO,
+            offset: Micro::ZERO,
+            snap_to_quantum: None,
+        };
+        // Overflow pre-flight matches channel_trace's shape.
+        let frames_u64 = u64::try_from(args.frames)
+            .map_err(|_| format!("trace range exceeds u64: --frames {}", args.frames))?;
+        let _ = u64::from(args.buffers)
+            .checked_mul(frames_u64)
+            .ok_or_else(|| {
+                format!(
+                    "trace range exceeds u64: --frames {} × --buffers {}",
+                    args.frames, args.buffers
+                )
+            })?;
+
+        let sink = TestSink::new();
+        let last = args.buffers.saturating_sub(1);
+        for b in 0..args.buffers {
+            let start_sample = u64::from(b)
+                .checked_mul(frames_u64)
+                .expect("checked above");
+            let transport = match (args.start && b == 0, args.stop_on_exit && b == last) {
+                (true, _) => Some(MidiRtByte::Start),
+                (_, true) => Some(MidiRtByte::Stop),
+                _ => None,
+            };
+            let evs = tick_stream(&channel, &stc, start_sample, args.frames);
+            render_channel_block(&channel, &evs, transport, start_sample, &sink);
+        }
+        Ok(sink
+            .records()
+            .into_iter()
+            .map(|r| TraceRow {
+                at_sample: r.at_sample,
+                // Plan 12 only emits single-byte System Real-Time
+                // messages (0xF8/0xFA/0xFB/0xFC); longer messages
+                // arrive with Plan 14's MidiCc work and the CSV
+                // schema widens then.
+                byte: r.bytes[0],
+            })
+            .collect())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use agogo_core::out::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP};
+
+        fn base_args() -> TraceArgs {
+            TraceArgs {
+                bpm: 120.0,
+                sr: 48_000,
+                divider: "t4".to_string(),
+                frames: 24_000,
+                buffers: 4,
+                start: false,
+                stop_on_exit: false,
+            }
+        }
+
+        #[test]
+        fn t4_120_48k_emits_quarter_notes() {
+            // At 120 BPM / 48 kHz, one quarter note = 24 000 samples.
+            // 4 buffers of 24 000 frames = 4 quarter notes at
+            // 0, 24 000, 48 000, 72 000.
+            let rows = trace(&base_args()).unwrap();
+            assert_eq!(rows.len(), 4);
+            let samples: Vec<u64> = rows.iter().map(|r| r.at_sample).collect();
+            assert_eq!(samples, vec![0, 24_000, 48_000, 72_000]);
+            for r in &rows {
+                assert_eq!(r.byte, MIDI_CLOCK);
+            }
+        }
+
+        #[test]
+        fn start_flag_prepends_fa_at_sample_zero() {
+            let args = TraceArgs {
+                start: true,
+                ..base_args()
+            };
+            let rows = trace(&args).unwrap();
+            assert_eq!(rows[0].at_sample, 0);
+            assert_eq!(rows[0].byte, MIDI_START);
+            // First clock event follows immediately, also at sample 0.
+            assert_eq!(rows[1].at_sample, 0);
+            assert_eq!(rows[1].byte, MIDI_CLOCK);
+        }
+
+        #[test]
+        fn stop_on_exit_flag_injects_fc_on_last_buffer() {
+            let args = TraceArgs {
+                stop_on_exit: true,
+                ..base_args()
+            };
+            let rows = trace(&args).unwrap();
+            // Final buffer starts at sample 3 × 24 000 = 72 000. The
+            // Stop byte lands there ahead of that buffer's clock event.
+            let stop_row = rows.iter().find(|r| r.byte == MIDI_STOP).expect("Stop byte");
+            assert_eq!(stop_row.at_sample, 72_000);
+        }
+
+        #[test]
+        fn unsupported_sr_errors() {
+            let args = TraceArgs {
+                sr: 45_000,
+                ..base_args()
+            };
+            let err = trace(&args).unwrap_err();
+            assert!(
+                err.contains("unsupported"),
+                "expected sr-range error, got: {err}"
+            );
+        }
+
+        #[test]
+        fn bad_divider_errors() {
+            let args = TraceArgs {
+                divider: "notatbase".to_string(),
+                ..base_args()
+            };
+            assert!(trace(&args).is_err());
+        }
+
+        #[test]
+        fn negative_bpm_errors() {
+            let args = TraceArgs {
+                bpm: -1.0,
+                ..base_args()
+            };
+            assert!(trace(&args).is_err());
+        }
     }
 }
 
