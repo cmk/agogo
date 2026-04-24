@@ -189,3 +189,98 @@ the sign convention through two definitions and shows the contradiction.
 *should* agree but don't. Names the specific parameter space where they
 diverge, and explains the observable consequence. This is the kind of
 cross-system bug that unit tests per-system would never catch.
+
+---
+
+## Pattern 9: Stored `f32`/`f64` outside the allowed exceptions
+
+> **File:** `crates/core/src/channel/transform.rs`
+>
+> **Diff context:**
+> ```
+> +pub const MAX_SHIFT_MS: f32 = 300.0;
+> +
+> +pub struct Channel {
+> +    pub shift_ms: f32,
+> +    pub offset_ms: f32,
+> ...
+> ```
+>
+> **Comment:** `MAX_SHIFT_MS`, `shift_ms`, and `offset_ms` are stored
+> time-valued configuration — they are neither PI-law state nor audio
+> sample data, so the `f32` backing violates the repo's no-stray-float
+> rule (CLAUDE.md §Repository conventions). Replace with
+> `connections::conn::fixed::Micro` (the decimal ladder rung at µs
+> resolution); the ladder already provides the arithmetic via
+> `F12F06` composed with `PicoSampleConn`. Annotating the `f32` as
+> "argv" or "ABI" would also be wrong — this is downstream of the
+> CLI parser, stored in a core type.
+
+**Why this is good:** Cites the no-float rule by section, names
+which exception is claimed and why it doesn't apply, points at the
+ladder-native replacement.
+
+---
+
+## Pattern 10: Hardcoded `A → C` conversion when `A → B → C` Conns exist
+
+> **File:** `crates/core/src/channel/transform.rs`
+>
+> **Diff context:**
+> ```
+> +    let sr_f = stc.sr() as f32;
+> +    let shift_samples = (shift_ms * sr_f / 1000.0).round() as u64;
+> +    let offset_samples = (channel.offset_ms * sr_f / 1000.0).round() as i64;
+> ```
+>
+> **Comment:** This open-codes a Milli/Micro → Sample conversion
+> arithmetically. The ladder already has `Conn<Pico, Micro>`
+> (`connections::conn::fixed::F12F06`) and a `PicoSampleConn`
+> runtime lookalike; compose them at the call site —
+> `psc.ceil(F12F06.inner(micro_value))`. The whole point of the
+> Galois-connection library is that `A → C` composes from
+> `A → B → C` without new code; adding ad-hoc arithmetic here
+> bypasses the rounding contracts that the adjoint laws enforce
+> and drifts from whatever rounding the composed Conns would have
+> delivered.
+
+**Why this is good:** Names the two existing Conns that compose to
+the needed conversion, explains what the composition buys
+(adjoint-law-correct rounding instead of whatever ad-hoc rounding
+the arithmetic happens to produce), and makes the DRY argument
+concrete.
+
+---
+
+## Pattern 11: Bespoke float-conversion helper where a `Conn` would do
+
+> **File:** `crates/core/src/fxp.rs`
+>
+> **Diff context:**
+> ```
+> +pub fn f64_ms_to_micro(ms: f64) -> Micro {
+> +    let us = (ms * 1000.0).round();
+> +    Micro(us as i64)
+> +}
+> ```
+>
+> **Comment:** `fxp.rs` should not grow a collection of
+> `f64_*_to_*` shims for types that already sit on the decimal
+> ladder. CLAUDE.md §Repository conventions: every numerical
+> conversion must come from a `Conn` with proptested adjoint laws,
+> named per the `fXYfZW` convention. Use
+> `F64F06.ceil(ExtendedFloat::Finite(ms × 1e-3))` directly —
+> `F64F06` is `Conn<ExtendedFloat<f64>, Extended<Micro>>`, lawful
+> over the full IEEE domain. The handful of legitimate bespoke
+> helpers (`f64_bpm_to_tempo`, `f64_phase_to_phase`) exist only
+> because `Tempo` is u32-backed and `Phase` is a wrapping quotient
+> onto a torus — neither admits a lawful `Conn` shape. A straight
+> `Micro` conversion isn't in that class.
+
+**Why this is good:** Cites the invariant explicitly (named Conns,
+not shims), names the upstream `F64F06` that already does this
+lawfully, and explains what a Conn provides that a bespoke fn
+doesn't (rounding-direction selection, documented adjoint laws).
+Calls out the two legitimate exceptions so reviewers can
+distinguish "this is a rule violation" from "this is the
+documented escape hatch."
