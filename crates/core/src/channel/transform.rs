@@ -6,20 +6,22 @@
 //! 2. **Shuffle** — apply [`swing::effective_tick`] (off-beats shift
 //!    earlier by `amount × multiplier`; on-beats pass through).
 //! 3. **Tick → Sample** via [`SampleTickConn::inner`].
-//! 4. **Shift** — add `clamp(shift_ms, 0, 300) × sr / 1000` samples.
-//!    Plan 03 does not implement negative shift (needs a forward-look
-//!    ring buffer, deferred to v0.2).
-//! 5. **Offset** — add `offset_ms × sr / 1000` samples (signed; for
-//!    per-channel calibration against downstream latency).
+//! 4. **Shift** — add `clamp(shift, 0, MAX_SHIFT)` → Pico → Sample
+//!    via `F12F06 ∘ PicoSampleConn`. Plan 03 does not implement
+//!    negative shift (needs a forward-look ring buffer, deferred to
+//!    v0.2).
+//! 5. **Offset** — same composition chain for the signed calibration
+//!    offset.
 
 use crate::channel::mode::ChannelMode;
-use crate::time::conn::SampleTickConn;
+use crate::time::conn::{PicoSampleConn, SampleTickConn};
 use crate::time::swing::{self, SwingConfig};
 use crate::time::tbase::TBase;
 use crate::time::tick::Tick;
+use connections::conn::fixed::{F12F06, Micro};
 
-/// Maximum positive shift, in milliseconds, before saturation.
-pub const MAX_SHIFT_MS: f32 = 300.0;
+/// Maximum positive shift before saturation: 300 ms = 300 000 µs.
+pub const MAX_SHIFT: Micro = Micro(300_000);
 
 /// Per-channel configuration.
 #[derive(Copy, Clone, Debug)]
@@ -30,12 +32,12 @@ pub struct Channel {
     /// 16th notes, `TBase::T4` fires quarter notes.
     pub divider: TBase,
     pub shuffle: SwingConfig,
-    /// Positive-only shift in ms, clamped to `[0, MAX_SHIFT_MS]` on
+    /// Positive-only shift, clamped to `[Micro::ZERO, MAX_SHIFT]` on
     /// use. v0.1 does not implement negative shift.
-    pub shift_ms: f32,
-    /// Signed calibration offset in ms. Not clamped here — CLI / UI
-    /// should pick a musical range (agogo.md §6 cites ±5 ms).
-    pub offset_ms: f32,
+    pub shift: Micro,
+    /// Signed calibration offset. Not clamped here — CLI / UI should
+    /// pick a musical range (agogo.md §6 cites ±5 ms = ±5 000 µs).
+    pub offset: Micro,
 }
 
 /// A master-tick-driven event scheduled at a specific sample index.
@@ -48,6 +50,20 @@ pub struct ScheduledEvent {
     pub tick: Tick,
 }
 
+/// Convert a `Micro` offset into a whole-sample count at `sr` via
+/// the adjoint-law composition `F12F06 ∘ PicoSampleConn::ceil`.
+/// Rounds to the nearest whole sample (matching the old
+/// `round() as i64` semantics). Shared by `transform` and `scheduler`.
+pub(crate) fn micro_to_samples(m: Micro, sr: u32) -> i64 {
+    let pico = F12F06.inner(m);
+    let psc = PicoSampleConn::new(sr);
+    // `psc.ceil` returns a Q48.16 whose integer part is the sample
+    // count; round to nearest whole sample to match pre-refactor
+    // behaviour bit-exactly at the CLI spot checks (`10 ms @ 48 kHz
+    // = 480 samples`, etc.).
+    psc.ceil(pico).round().to_num::<i64>()
+}
+
 /// Run the divider → shuffle → sample → shift → offset pipeline over
 /// a master tick stream. Pure: output order matches input order and
 /// no I/O is performed.
@@ -57,10 +73,9 @@ pub fn transform(
     stc: &SampleTickConn,
 ) -> Vec<ScheduledEvent> {
     let divisor = channel.divider.tick_count();
-    let shift_ms = channel.shift_ms.clamp(0.0, MAX_SHIFT_MS);
-    let sr_f = stc.sr() as f32;
-    let shift_samples = (shift_ms * sr_f / 1000.0).round() as u64;
-    let offset_samples = (channel.offset_ms * sr_f / 1000.0).round() as i64;
+    let shift_clamped = Micro(channel.shift.0.clamp(0, MAX_SHIFT.0));
+    let shift_samples = micro_to_samples(shift_clamped, stc.sr()).max(0) as u64;
+    let offset_samples = micro_to_samples(channel.offset, stc.sr());
 
     master_ticks
         .into_iter()
@@ -100,8 +115,8 @@ mod tests {
                 amount: 0,
                 multiplier: 1,
             },
-            shift_ms: 0.0,
-            offset_ms: 0.0,
+            shift: Micro::ZERO,
+            offset: Micro::ZERO,
         }
     }
 
@@ -120,9 +135,9 @@ mod tests {
 
     #[test]
     fn shift_10ms_adds_exactly_480_samples() {
-        // Plan spot check: shift_ms = 10.0 at 48 kHz → +480 samples.
+        // Plan spot check: shift = 10 ms at 48 kHz → +480 samples.
         let mut ch = zero_channel(TBase::T4);
-        ch.shift_ms = 10.0;
+        ch.shift = Micro(10_000); // 10 ms
         let ev = transform([Tick(0), Tick(192)], &ch, &stc_120_48k());
         let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
         assert_eq!(samples, vec![480, 24_480]);
@@ -142,7 +157,7 @@ mod tests {
     #[test]
     fn shift_over_300ms_saturates() {
         let mut ch = zero_channel(TBase::T4);
-        ch.shift_ms = 1_000.0;
+        ch.shift = Micro(1_000_000); // 1 s
         let ev = transform([Tick(0)], &ch, &stc_120_48k());
         // Clamped to 300 ms → 14 400 samples at 48 kHz.
         assert_eq!(ev[0].sample_index, 14_400);
@@ -151,7 +166,7 @@ mod tests {
     #[test]
     fn negative_shift_clamped_to_zero() {
         let mut ch = zero_channel(TBase::T4);
-        ch.shift_ms = -100.0;
+        ch.shift = Micro(-100_000); // -100 ms
         let ev = transform([Tick(0), Tick(192)], &ch, &stc_120_48k());
         assert_eq!(ev[0].sample_index, 0);
         assert_eq!(ev[1].sample_index, 24_000);
@@ -160,7 +175,7 @@ mod tests {
     #[test]
     fn offset_negative_shifts_earlier() {
         let mut ch = zero_channel(TBase::T4);
-        ch.offset_ms = -1.0; // -48 samples at 48 kHz.
+        ch.offset = Micro(-1_000); // -1 ms = -48 samples at 48 kHz.
         let ev = transform([Tick(192)], &ch, &stc_120_48k());
         assert_eq!(ev[0].sample_index, 24_000 - 48);
     }
@@ -194,16 +209,16 @@ mod tests {
         #[test]
         fn tick_monotonicity(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
-            shift_ms in 0.0f32..=MAX_SHIFT_MS,
-            offset_ms in -5.0f32..=5.0f32,
+            shift_us in 0_i64..=MAX_SHIFT.0,
+            offset_us in -5_000_i64..=5_000,
             max_tick in 192u32..=5_000,
         ) {
             let ch = Channel {
                 mode: ChannelMode::MidiClock,
                 divider,
                 shuffle,
-                shift_ms,
-                offset_ms,
+                shift: Micro(shift_us),
+                offset: Micro(offset_us),
             };
             let master: Vec<Tick> = (0..=max_tick).map(Tick).collect();
             let ev = transform(master, &ch, &stc_120_48k());
@@ -241,25 +256,25 @@ mod tests {
             prop_assert_eq!(ev.len() as u32, expected);
         }
 
-        /// Plan property `shift_clamping`, upper bound: shift_ms >
-        /// MAX_SHIFT_MS saturates at MAX_SHIFT_MS; the event sample is
-        /// exactly `stc.inner(tick) + round(MAX_SHIFT_MS * sr / 1000)`.
+        /// Plan property `shift_clamping`, upper bound: shift >
+        /// MAX_SHIFT saturates at MAX_SHIFT; the event sample is
+        /// exactly `stc.inner(tick) + micro_to_samples(MAX_SHIFT, sr)`.
         #[test]
-        fn shift_upper_clamp(shift_ms in MAX_SHIFT_MS..=10_000.0f32) {
+        fn shift_upper_clamp(shift_us in MAX_SHIFT.0..=10_000_000_i64) {
             let mut ch = zero_channel(TBase::T4);
-            ch.shift_ms = shift_ms;
+            ch.shift = Micro(shift_us);
             let stc = stc_120_48k();
             let ev = transform([Tick(192)], &ch, &stc);
-            let cap_samples = (MAX_SHIFT_MS * stc.sr() as f32 / 1000.0).round() as u64;
+            let cap_samples = super::micro_to_samples(MAX_SHIFT, stc.sr()) as u64;
             prop_assert_eq!(ev[0].sample_index, 24_000 + cap_samples);
         }
 
-        /// Plan property `shift_clamping`, lower bound: shift_ms < 0
+        /// Plan property `shift_clamping`, lower bound: shift < 0
         /// saturates at 0; the event sample matches a zero-shift run.
         #[test]
-        fn shift_lower_clamp(shift_ms in -10_000.0f32..0.0) {
+        fn shift_lower_clamp(shift_us in -10_000_000_i64..0) {
             let mut ch = zero_channel(TBase::T4);
-            ch.shift_ms = shift_ms;
+            ch.shift = Micro(shift_us);
             let ev = transform([Tick(192)], &ch, &stc_120_48k());
             prop_assert_eq!(ev[0].sample_index, 24_000);
         }
