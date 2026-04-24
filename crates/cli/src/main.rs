@@ -431,8 +431,8 @@ pub mod link_probe {
 mod sync_trace {
     use agogo_core::arb::pulse_train;
     use agogo_core::fxp::{
-        Tempo, Pico, S48, SampleRate, SampleTime, f32_bpm_to_tempo,
-        f32_jitter_us_to_sigma,
+        Extended, F64F12, FloatExt, Pico, S48, SampleRate, SampleTime, Tempo,
+        f64_bpm_to_tempo,
     };
     use agogo_core::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
 
@@ -463,12 +463,18 @@ mod sync_trace {
         seed: u64,
     ) -> Vec<TraceRow> {
         // argv-boundary conversions.
-        let bpm: Tempo = f32_bpm_to_tempo(bpm_f32);
-        let jitter: Pico = f32_jitter_us_to_sigma(jitter_us);
+        let bpm: Tempo = f64_bpm_to_tempo(bpm_f32 as f64);
+        // µs → seconds → Pico via upstream `F64F12`. Non-finite
+        // and out-of-range inputs saturate to `Pico(0)` (matches the
+        // previous bespoke helper's NaN → 0 behaviour).
+        let jitter: Pico = match F64F12.ceil(FloatExt::Finite(f64::from(jitter_us) * 1.0e-6)) {
+            Extended::Finite(p) => p,
+            Extended::NegInf | Extended::PosInf => Pico(0),
+        };
 
         let (samples, _truth): (Vec<f32>, Vec<S48>) =
             pulse_train::<S48>(bpm, ppq, jitter, pulses, seed);
-        let pulse_rate_hz = (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0;
+        let pulse_rate_hz = agogo_core::fxp::tempo_to_hz(bpm, ppq);
         let spacing_samples = (S48::HZ as f64 / pulse_rate_hz) as u32;
         let mut detector = PeakDetector::<S48>::new(DetectorConfig {
             threshold_q15: 16_384, // 0.5 Q0.15

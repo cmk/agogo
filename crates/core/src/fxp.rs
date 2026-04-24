@@ -20,7 +20,13 @@
 //!   contained, never stored, converted to fxp at the first
 //!   exit boundary.
 
-pub use connections::fixed::{Centi, Deci, HasResolution, Micro, Milli, Nano, Pico, Uni};
+pub use connections::extended::Extended;
+pub use connections::fixed::{
+    Centi, Deci, F64F00, F64F01, F64F02, F64F03, F64F06, F64F09, F64F12,
+    F12F06, F12F03, F12F09, F12F00, HasResolution, Micro, Milli, Nano,
+    Pico, Uni,
+};
+pub use connections::float_ext::FloatExt;
 pub use connections::sample::{S44, S48, S88, S96, S176, S192, SampleRate};
 
 // ────────────────────────────────────────────────────────────────────
@@ -161,31 +167,33 @@ pub fn f64_bpm_to_tempo(b: f64) -> Tempo {
     }
 }
 
-/// f32 BPM → `Tempo`. Same rounding semantics as the f64 version.
-pub fn f32_bpm_to_tempo(b: f32) -> Tempo {
-    // ABI-local: the CLI parser produces f32; this is the first line
-    // of the handler that consumes it.
-    f64_bpm_to_tempo(b as f64)
+// ────────────────────────────────────────────────────────────────────
+// PI-exempt control-law helpers.
+//
+// The PI controller in `sync::pll` consumes a frequency in Hz and a
+// time-in-seconds as f64 — genuine analog-DSP arithmetic. These two
+// helpers convert `Tempo` and Q48.16-bit samples into those f64
+// inputs in a single well-named site, replacing six open-coded
+// copies of the same arithmetic previously scattered across
+// `sync::pll` prod and tests.
+// ────────────────────────────────────────────────────────────────────
+
+/// Pulse frequency in Hz given tempo and pulses-per-quarter.
+///
+/// `hz = (bpm_µ / 10⁶) × ppq / 60`, executed entirely in f64 because
+/// the PI-controller state is f64 by design. The integer-fxp rounding
+/// contracts don't apply here — the PI law is continuous.
+pub fn tempo_to_hz(bpm: Tempo, ppq: u32) -> f64 {
+    // PI-exempt.
+    (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0
 }
 
-/// f32 microseconds of jitter → `Pico`. Rounds to nearest ps.
-pub fn f32_jitter_us_to_sigma(us: f32) -> Pico {
-    // ABI-local.
-    if !us.is_finite() {
-        return Pico(0);
-    }
-    let ps = (f64::from(us) * 1.0e6).round();
-    // Clamp to i64 bounds; 2.9e11 µs is already ~9 years, so this is
-    // purely defensive.
-    let clamped = ps.clamp(i64::MIN as f64, i64::MAX as f64);
-    Pico(clamped as i64)
-}
-
-/// f32 detector threshold in `[0, 1]` → Q0.15 (`0..=32768`).
-pub fn f32_threshold_to_q15(t: f32) -> u16 {
-    // ABI-local.
-    let clamped = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
-    (clamped * 32_768.0).round().min(32_768.0) as u16
+/// Q48.16-bit sample count → seconds at the given rate. Used by the
+/// PLL's phase-error computation (observed pulse sample position −
+/// expected, in seconds, fed to the PI loop).
+pub fn bits_q48_16_to_seconds(bits: i64, sr: u32) -> f64 {
+    // PI-exempt.
+    (bits as f64) / ((sr as f64) * (1u64 << 16) as f64)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -374,36 +382,36 @@ mod tests {
         }
 
         #[test]
-        fn f32_bpm_roundtrip(b in 30.0_f32..=400.0) {
-            let u = f32_bpm_to_tempo(b);
-            let roundtrip = u.0 as f32 * 1.0e-6;
-            // f32 resolution at b≈400 is ~4.8e-5 absolute; add a ULP
-            // of µBPM rounding (5e-7) as headroom.
+        fn f64_bpm_roundtrip(b in 30.0_f64..=400.0) {
+            let u = f64_bpm_to_tempo(b);
+            let roundtrip = u.0 as f64 * 1.0e-6;
+            // µBPM quantisation: ±5e-7 worst case.
             prop_assert!(
-                (roundtrip - b).abs() < 5.0e-5,
+                (roundtrip - b).abs() < 1.0e-6,
                 "roundtrip={} input={} u={}",
                 roundtrip,
                 b,
                 u.0
             );
         }
-    }
 
-    #[test]
-    fn f32_jitter_us_to_sigma_basic() {
-        assert_eq!(f32_jitter_us_to_sigma(0.0), Pico(0));
-        assert_eq!(f32_jitter_us_to_sigma(50.0), Pico(50_000_000));
-        assert_eq!(f32_jitter_us_to_sigma(f32::NAN), Pico(0));
-    }
+        #[test]
+        fn tempo_to_hz_matches_formula(b in 30_u32..=400, ppq in 1_u32..=1_024) {
+            let bpm = Tempo::from_bpm_integer(b);
+            let got = tempo_to_hz(bpm, ppq);
+            let expected = (b as f64) * (ppq as f64) / 60.0;
+            prop_assert!((got - expected).abs() < 1e-9);
+        }
 
-    #[test]
-    fn f32_threshold_to_q15_basic() {
-        assert_eq!(f32_threshold_to_q15(0.0), 0);
-        assert_eq!(f32_threshold_to_q15(0.5), 16_384);
-        assert_eq!(f32_threshold_to_q15(1.0), 32_768);
-        assert_eq!(f32_threshold_to_q15(-0.5), 0);
-        assert_eq!(f32_threshold_to_q15(1.5), 32_768);
-        assert_eq!(f32_threshold_to_q15(f32::NAN), 0);
+        #[test]
+        fn bits_q48_16_to_seconds_matches_formula(
+            bits in -10_000_000_000_i64..=10_000_000_000,
+            sr in 1_u32..=192_000,
+        ) {
+            let got = bits_q48_16_to_seconds(bits, sr);
+            let expected = (bits as f64) / ((sr as f64) * (1u64 << 16) as f64);
+            prop_assert!((got - expected).abs() < 1e-15 * expected.abs().max(1.0));
+        }
     }
 
     #[test]
