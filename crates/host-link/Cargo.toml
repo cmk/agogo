@@ -17,7 +17,7 @@ publish = false
 # feature pulls in the FFI binding and exposes the `link` submodule;
 # `agogo-cli --features link` activates it transitively.
 default = []
-rusty-link = ["dep:rusty_link"]
+rusty-link = ["dep:rusty_link", "dep:rust-fsm"]
 
 [dependencies]
 agogo-core = { path = "../core" }
@@ -27,6 +27,11 @@ agogo-core = { path = "../core" }
 # gitignored `.cargo/config.toml` `[patch.crates-io]` section, see
 # `crates/host-link/README.md`.
 rusty_link = { version = "=0.4.8", optional = true }
+# Declarative transport FSM. The minimal {Stopped, Playing} FSM this
+# sprint ships is the scaffolding v0.5 Sprint 01 extends with forerun
+# states — `rust-fsm`'s macro DSL avoids a later rewrite from a
+# hand-rolled `match`.
+rust-fsm = { version = "0.7", optional = true }
 
 [dev-dependencies]
 proptest = "1"

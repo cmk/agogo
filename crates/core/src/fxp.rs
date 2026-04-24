@@ -131,6 +131,59 @@ impl Tempo {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Quantum — Link's quantum as microbeats.
+//
+// Ableton Link represents quantum internally as `std::int64_t`
+// microbeats (see ext/rusty_link/link/include/ableton/link/Beats.hpp).
+// Its public `double quantum` ABI converts via `std::llround(q * 1e6)`
+// on the first line of every API body. Wrapping a `Micro` (10⁻⁶ rung
+// of the decimal ladder, `i64` backing) gives agogo's `Quantum` the
+// same integer representation Link's C++ side stores — zero
+// disagreement at the FFI boundary.
+// ────────────────────────────────────────────────────────────────────
+
+/// Link quantum in microbeats. `Quantum::from_bars(4)` = one bar in
+/// 4/4 = 4 000 000 microbeats.
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default)]
+pub struct Quantum(pub Micro);
+
+impl Quantum {
+    pub const ZERO: Self = Self(Micro::ZERO);
+
+    /// Exact integer-bar constructor. Panics if `n × 10⁶` overflows
+    /// `i64` (`n > 9.2 × 10¹²`); realistic callers use `n` ≤ 64 or so.
+    pub const fn from_bars(n: u32) -> Self {
+        match (n as i64).checked_mul(1_000_000) {
+            Some(v) => Self(Micro(v)),
+            None => panic!("Quantum::from_bars: n × 10⁶ overflows i64"),
+        }
+    }
+}
+
+/// f64 beats → `Quantum`. Rounds identically to Link's own
+/// `Beats(double)` constructor (`std::llround(q * 1e6)`) so the two
+/// sides agree bit-for-bit at the Link FFI boundary. Non-finite input
+/// and overflow saturate to `Quantum::ZERO` / `i64::MAX` — a noisy
+/// return would force the caller to handle an error at every argv
+/// boundary without gain, since non-finite quantum is already a user
+/// mistake.
+pub fn f64_beats_to_quantum(q: f64) -> Quantum {
+    // argv boundary — called from the CLI handler's first lines.
+    if !q.is_finite() {
+        return Quantum::ZERO;
+    }
+    let scaled = (q * 1_000_000.0).round();
+    if scaled > i64::MAX as f64 {
+        return Quantum(Micro(i64::MAX));
+    }
+    if scaled < i64::MIN as f64 {
+        return Quantum(Micro(i64::MIN));
+    }
+    Quantum(Micro(scaled as i64))
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Boundary conversions.
 //
 // `f64_*` functions sit at the PI-controller boundary: the PI law
@@ -515,5 +568,68 @@ mod tests {
         assert_eq!(pico_to_samples(Pico(1_000_000_000_000), 22_050), None);
         assert_eq!(pico_to_samples(Pico(1_000_000_000_000), 44_099), None);
         assert_eq!(pico_to_samples(Pico(0), 0), None);
+    }
+
+    // ────────────────────────────────────────
+    // Quantum
+    // ────────────────────────────────────────
+
+    #[test]
+    fn quantum_from_bars_integer_hand_computed() {
+        assert_eq!(Quantum::from_bars(4).0.0, 4_000_000);
+        assert_eq!(Quantum::from_bars(1).0.0, 1_000_000);
+        assert_eq!(Quantum::from_bars(0), Quantum::ZERO);
+    }
+
+    #[test]
+    fn f64_beats_edge_cases() {
+        assert_eq!(f64_beats_to_quantum(4.0), Quantum::from_bars(4));
+        assert_eq!(f64_beats_to_quantum(3.5), Quantum(Micro(3_500_000)));
+        assert_eq!(f64_beats_to_quantum(0.0), Quantum::ZERO);
+        assert_eq!(f64_beats_to_quantum(f64::NAN), Quantum::ZERO);
+        assert_eq!(
+            f64_beats_to_quantum(f64::INFINITY),
+            Quantum::ZERO,
+            "infinity treated as non-finite"
+        );
+    }
+
+    // `f64_beats_to_quantum` must produce the same microbeats integer
+    // as Link's own `Beats(double)` constructor — `std::llround(q × 1e6)`.
+    // Rust's `f64::round` is round-half-away-from-zero, matching C++'s
+    // `std::llround`. This property pins that agreement across the
+    // realistic ABI range.
+    proptest! {
+        #[test]
+        fn f64qnt_matches_link_beats(q in -1_000_000.0_f64..=1_000_000.0) {
+            let got = f64_beats_to_quantum(q).0.0;
+            // Reference: round-half-away-from-zero, saturating cast.
+            let scaled = (q * 1_000_000.0).round();
+            let expected = if scaled > i64::MAX as f64 {
+                i64::MAX
+            } else if scaled < i64::MIN as f64 {
+                i64::MIN
+            } else {
+                scaled as i64
+            };
+            prop_assert_eq!(got, expected, "disagreement at q={}", q);
+        }
+
+        /// Monotonicity: `q1 <= q2 ⟹ f64_beats_to_quantum(q1).0 <=
+        /// f64_beats_to_quantum(q2).0` across finite inputs. This is
+        /// the Conn monotone-map surrogate — the full adjoint law
+        /// becomes expressible when `F64QNT: Conn<f64, Quantum>`
+        /// proper lands (upstream needs a `float_conn!` variant for
+        /// i64-backed newtypes; tracked in enforcement's §Deferred).
+        #[test]
+        fn f64qnt_monotone(
+            a in -1_000_000.0_f64..=1_000_000.0,
+            b in -1_000_000.0_f64..=1_000_000.0,
+        ) {
+            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+            let qlo = f64_beats_to_quantum(lo).0.0;
+            let qhi = f64_beats_to_quantum(hi).0.0;
+            prop_assert!(qlo <= qhi, "qlo={} > qhi={} for lo={} hi={}", qlo, qhi, lo, hi);
+        }
     }
 }
