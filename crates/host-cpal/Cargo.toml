@@ -21,6 +21,11 @@ agogo-core = { path = "../core" }
 # cpal 0.15 is the current stable; no newer version has changed the
 # `build_input_stream` ABI we rely on.
 cpal = "0.15"
+# rtrb 0.3 — single-producer single-consumer ring buffer used by
+# `cpal::control` to ferry MIDI messages from the audio callback
+# (RT producer) to a drain thread that forwards to a `MidiSink`
+# (typically `host-midi`'s `MidirSink`, which itself is not RT-safe).
+rtrb = "0.3"
 thiserror = "2"
 tracing = "0.1"
 
