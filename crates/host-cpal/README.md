@@ -7,16 +7,25 @@ lands in v0.4 via `out/audio`).
 Not a workspace member by design — `cargo test --workspace` skips it
 so the default CI path doesn't pull cpal + its platform system
 libraries (`libasound` on Linux, CoreAudio on macOS, WASAPI on
-Windows). CI runs `cargo test -p agogo-host-cpal` in a dedicated
-job that installs `libasound2-dev` up front.
+Windows). CI runs `cargo test` from this crate's directory in a
+dedicated `host-cpal` job that installs `libasound2-dev` up front.
 
 ## Dev workflow
 
 ### Build + test
 
+`agogo-host-cpal` is intentionally not a `[workspace].members`
+entry, so `-p agogo-host-cpal` from the repo root will not resolve
+it. Use `--manifest-path` (or `cd` into the crate):
+
 ```
-cargo build -p agogo-host-cpal
-cargo test -p agogo-host-cpal
+cargo build --manifest-path crates/host-cpal/Cargo.toml
+cargo test  --manifest-path crates/host-cpal/Cargo.toml
+
+# or, equivalently:
+cd crates/host-cpal
+cargo build
+cargo test
 ```
 
 On Linux, install ALSA dev headers first:
@@ -30,20 +39,13 @@ setup needed.
 
 ### Hardware smoke test
 
-The `cpal_default_input_smoke` test opens the default input device,
-captures 100 ms, and asserts at least one non-zero sample. Fixture-
-gated as `cpal_default_input` — skips cleanly on a CI runner that
-has no audio device.
-
-To exercise it locally, connect a microphone (or any input source
-that produces signal) and run:
-
-```
-cargo test -p agogo-host-cpal -- cpal_default_input_smoke
-```
+Plan 13 T6 (the `cpal_default_input_smoke` fixture-gated hardware
+test) is deferred — see Plan 13's Review section. Plan 14 will land
+this alongside `agogo run`'s acceptance scenario, where a real
+audio device is in scope.
 
 ## Where the logic lives
 
 - `src/cpal.rs` — `CpalHost` (impl `AudioHost`) + device enumeration.
-- `src/cpal/callback.rs` — (Plan 13 T4) `CallbackState` + `on_buffer`.
-- `src/cpal/control.rs` — (Plan 13 T3) rtrb SPSC + RT→drain plumbing.
+- `src/cpal/callback.rs` — `CallbackState` + `on_buffer` (T4).
+- `src/cpal/control.rs` — rtrb SPSC + RT→drain plumbing (T3).

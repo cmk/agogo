@@ -16,9 +16,18 @@ job that installs `libasound2-dev` up front.
 
 ### Build + test
 
+`agogo-host-midi` is intentionally not a `[workspace].members`
+entry, so `-p agogo-host-midi` from the repo root will not resolve
+it. Use `--manifest-path` (or `cd` into the crate):
+
 ```
-cargo build -p agogo-host-midi
-cargo test -p agogo-host-midi
+cargo build --manifest-path crates/host-midi/Cargo.toml
+cargo test  --manifest-path crates/host-midi/Cargo.toml
+
+# or, equivalently:
+cd crates/host-midi
+cargo build
+cargo test
 ```
 
 On Linux, install ALSA dev headers first:
@@ -29,22 +38,14 @@ sudo apt-get install libasound2-dev
 
 ### Hardware loopback test
 
-The `midir_loopback_roundtrip` test (Plan 13 T6) opens a paired
-loopback port and asserts MIDI bytes round-trip. Fixture-gated as
-`midir_loopback`; skips cleanly when no loopback environment is
-present.
-
-To exercise it locally:
+Plan 13 T6 (the `midir_loopback_roundtrip` fixture-gated hardware
+test) is deferred — see Plan 13's Review section. Plan 14 will land
+this alongside `agogo run`'s acceptance scenario. The local set-up
+will be:
 
 - **macOS**: enable IAC bus in Audio MIDI Setup.
 - **Linux**: load `snd-virmidi` and connect the two virtual ports.
 - **Windows**: install `loopMIDI` and create a port pair.
-
-Then:
-
-```
-cargo test -p agogo-host-midi -- midir_loopback_roundtrip
-```
 
 ## Where the logic lives
 

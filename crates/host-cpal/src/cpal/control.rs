@@ -51,8 +51,15 @@ impl MidiMessage {
     }
 
     /// Slice view of the valid prefix.
+    ///
+    /// Defensive `min(3)` clamp: even if a caller sets
+    /// `bytes_len > 3` directly via the public field (programmer
+    /// error — `from_slice` debug-asserts and clamps), this
+    /// accessor returns the full 3-byte view rather than panicking
+    /// on out-of-bounds indexing.
     pub fn as_slice(&self) -> &[u8] {
-        &self.bytes[..self.bytes_len as usize]
+        let n = (self.bytes_len as usize).min(3);
+        &self.bytes[..n]
     }
 }
 
@@ -168,6 +175,16 @@ impl ControlConsumer {
     /// pushed to message sent is bounded by the sleep period
     /// (default 1 ms, well under midir's own ~1 ms USB-bus jitter
     /// so no perceptible additional latency).
+    ///
+    /// **Drop ordering matters.** Drop the audio stream (the
+    /// `Handle` returned by `AudioHost::run`) *before* the
+    /// `DrainHandle`. If the order is reversed, the audio
+    /// callback keeps producing messages into the ring after the
+    /// drain thread has already exited, and those final-buffer
+    /// messages get counted as overruns by `dropped_count` rather
+    /// than reaching the sink. `agogo demo run` does this
+    /// correctly (`crates/cli/src/main.rs` drops `stream_handle`
+    /// then `drain`).
     ///
     /// `sink` is `Arc<dyn MidiSink + Send + Sync>` — the explicit
     /// `Send + Sync` bounds let the `Arc` move into the drain

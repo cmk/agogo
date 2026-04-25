@@ -59,10 +59,30 @@ impl AudioHost for CpalHost {
         cfg: Config,
         mut cb: Box<dyn FnMut(&mut AudioIo) + Send>,
     ) -> Result<Handle, AudioHostError> {
-        // Verify the device supports f32 input at the requested rate.
-        // cpal's default_input_config often returns f32 already on
-        // macOS/Windows, but ALSA can default to i16 on some cards;
-        // scanning the supported configs surfaces the mismatch as
+        // Plan 13 enforces mono input. The `AudioIo::input` slice is
+        // passed straight through to `PhaseSource::feed_samples`,
+        // which treats it as mono PCM — interleaving it would
+        // corrupt the PLL's pulse detection. Multi-channel input
+        // with explicit deinterleave / down-mix lands in v0.4
+        // alongside the CV output side; until then, fail fast at
+        // configuration time rather than silently produce garbage.
+        if cfg.input_channels != 1 {
+            return Err(AudioHostError::Backend(
+                format!(
+                    "Plan 13 supports only mono input (input_channels=1); \
+                     got input_channels={}. Multi-channel input lands in v0.4.",
+                    cfg.input_channels
+                )
+                .into(),
+            ));
+        }
+
+        // Verify the device supports f32 mono input at the requested
+        // rate. cpal's `SupportedStreamConfigRange::channels()` is a
+        // *fixed* channel count for that config (not a range), so
+        // `==` is the right test against `cfg.input_channels = 1`.
+        // ALSA can default to i16 on some cards; scanning the
+        // supported configs surfaces the mismatch as
         // `UnsupportedSampleRate` rather than a cryptic cpal error
         // later.
         let supports_rate = self
@@ -70,16 +90,10 @@ impl AudioHost for CpalHost {
             .supported_input_configs()
             .map_err(|e| AudioHostError::Backend(Box::new(e)))?
             .any(|c| {
-                // Match a config that offers AT LEAST the requested
-                // channel count (we slice the leading channels in
-                // the callback). The earlier `>=` had the
-                // comparison inverted — a 2-channel device rejected
-                // a 1-channel request, while a 1-channel device
-                // wrongly accepted a 64-channel request.
                 c.sample_format() == SampleFormat::F32
                     && c.min_sample_rate().0 <= cfg.sample_rate
                     && c.max_sample_rate().0 >= cfg.sample_rate
-                    && c.channels() >= cfg.input_channels
+                    && c.channels() == cfg.input_channels
             });
         if !supports_rate {
             return Err(AudioHostError::UnsupportedSampleRate(cfg.sample_rate));
@@ -92,7 +106,6 @@ impl AudioHost for CpalHost {
         };
 
         let sample_rate = cfg.sample_rate;
-        let channels = cfg.input_channels as usize;
 
         // `cpal::Stream` is `!Send` on macOS (CoreAudio) and Windows
         // (WASAPI) — the native handles are thread-bound. Run the
@@ -118,7 +131,8 @@ impl AudioHost for CpalHost {
                 let mut output_stub: [f32; 0] = [];
 
                 let data_cb = move |samples: &[f32], _info: &InputCallbackInfo| {
-                    let frames = samples.len() / channels.max(1);
+                    // Mono enforced at run() entry, so frames == len.
+                    let frames = samples.len();
                     let mut io = AudioIo::new(
                         samples,
                         &mut output_stub,

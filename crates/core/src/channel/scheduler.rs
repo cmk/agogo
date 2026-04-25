@@ -42,9 +42,11 @@ pub fn tick_stream(
 
 /// Allocation-free variant of [`tick_stream`]: pushes every accepted
 /// `ScheduledEvent` into `buf` rather than returning a fresh `Vec`.
-/// When `buf.capacity() >= max_events_for_buffer(channel, frames)`,
-/// this call allocates zero bytes on the heap — the contract Plan 13's
-/// audio callback relies on.
+/// When `buf.capacity()` is sized to the worst-case event count for
+/// the buffer window, this call allocates zero bytes on the heap —
+/// the contract Plan 13's audio callback relies on. The
+/// caller-side helper that returns a safe upper bound lives in the
+/// host crate as `agogo_host_cpal::cpal::callback::max_events_for_buffer(frames)`.
 ///
 /// `buf` is not cleared on entry; callers who want a fresh window
 /// should `buf.clear()` before the call.
@@ -99,7 +101,8 @@ pub fn tick_stream_into(
     // straight into `buf` — no intermediate Vec, no heap allocation
     // when `buf` is pre-sized. Change either path's arithmetic and
     // the `scheduler_block_equivalence` /
-    // `tick_stream_into_matches_tick_stream` proptests both trip.
+    // `tick_stream_into_matches_transform_filtered` proptests both
+    // trip.
     let divisor = channel.divider.tick_count();
     let shift_fwd = shift_samples.max(0) as u64;
     for t in (lo_tick..=hi_tick).map(Tick) {
