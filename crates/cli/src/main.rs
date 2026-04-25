@@ -125,10 +125,10 @@ enum MidiSub {
     /// `at_sample,byte`.
     ///
     /// MIDI 1.0 pins clock at 24 PPQN — one `0xF8` every `PPQN/24`
-    /// master ticks. At agogo's 192 PPQN master that's every 8
-    /// master ticks, which is `TBase::T32t` (32nd-note triplet).
+    /// master ticks. At agogo's 960 PPQN master that's every 40
+    /// master ticks, which is `Grid::T64T` (64th-note triplet).
     /// Pick `--divider t4` for one byte per beat (human-readable);
-    /// pick `--divider t32t` for a spec-compliant 24 PPQN stream.
+    /// pick `--divider t64t` for a spec-compliant 24 PPQN stream.
     #[bpaf(command("trace"))]
     Trace {
         /// Tempo in beats per minute.

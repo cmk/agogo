@@ -37,7 +37,7 @@ use std::num::NonZeroU32;
 
 /// PLL pulse rate. `agogo run` external source feeds the detector +
 /// PLL at MIDI clock cadence (24 PPQ); the master tick stream
-/// scheduler uses [`PPQN`] (192).
+/// scheduler uses [`PPQN`] (960).
 const PULSE_PPQ: u32 = 24;
 
 use crate::{parse_positive_f64, parse_positive_u32};
@@ -69,7 +69,8 @@ pub struct RunArgs {
     pub audio_in: String,
     /// Per-channel spec, repeatable. One `--ch` per channel.
     /// Format: `key=val[,key=val]*`. Required keys: `div`, `dev`.
-    /// Optional: `id`, `out`, `swing`, `swing-mult`, `shift-ms`,
+    /// Optional: `id`, `out`, `swing` (i8 tick offset),
+    /// `swing-res` (binary resolution, default `t16`), `shift-ms`,
     /// `offset-ms`, `snap-quantum-us`. Quote values containing
     /// spaces or commas: `--ch "out=IAC Bus 1,div=t32t,dev=midi"`.
     #[bpaf(long, argument("SPEC"), many)]
