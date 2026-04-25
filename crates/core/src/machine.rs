@@ -104,14 +104,24 @@ impl std::fmt::Debug for TransportPolicy {
     }
 }
 
-/// Wraps [`TransportPolicy`] with the `running` flag the policy
-/// machinery uses to gate emissions after a Stop has fired.
+/// Wraps [`TransportPolicy`] with the local stop/teardown latch
+/// (`running`) that gates **both** transport-byte emission and
+/// clock emission once the host signals teardown.
 #[derive(Debug)]
 pub struct TransportState {
     pub policy: TransportPolicy,
-    /// `true` until the first `Stop` is emitted; `false` thereafter.
-    /// While `false`, no transport bytes are emitted regardless of
-    /// policy — the stream stays clock-only.
+    /// Local stop/teardown latch. Set to `true` at construction;
+    /// flips to `false` *only* when a [`MachineStopHandle::request_stop`]
+    /// signal is observed (the `stop_pending` arm of `next_byte`).
+    /// Policy-driven `Stop` bytes (`LinkDriven` transitions,
+    /// `Scripted` schedules) do **not** clear this flag — they pass
+    /// through as one-shot bytes, preserving the option to resume
+    /// clock + transport later.
+    ///
+    /// While `false`, [`Machine::on_buffer`] emits no transport
+    /// bytes **and** no clock events — the stream stays silent
+    /// until the host audio stream is dropped. This is the
+    /// "stop clocking immediately on Ctrl-C" contract.
     running: bool,
 }
 
@@ -165,8 +175,10 @@ impl TransportState {
 /// Control-thread handle for signalling the audio callback to wind
 /// down. Flips an `AtomicBool` the next [`Machine::on_buffer`] reads
 /// with `Acquire` ordering. The audio callback emits a final
-/// [`MidiRtByte::Stop`] and falls silent — clock and transport bytes
-/// alike — until the stream is torn down.
+/// [`MidiRtByte::Stop`] at the buffer-start sample, then falls
+/// silent — both clock events and transport bytes are suppressed
+/// for that buffer and every subsequent buffer until the host
+/// audio stream is dropped.
 ///
 /// Cheaply cloneable; multiple threads (e.g. the Ctrl-C handler and
 /// the main loop) can hold one each.
@@ -176,8 +188,17 @@ pub struct MachineStopHandle {
 }
 
 impl MachineStopHandle {
-    /// Idempotent: every call sets the flag to `true`. Subsequent
-    /// `on_buffer` calls see it once and emit `Stop` exactly once.
+    /// Idempotent: every call sets the flag to `true`. Effects on
+    /// the next `on_buffer`:
+    ///
+    /// 1. Emit `MidiRtByte::Stop` once at the buffer-start sample.
+    /// 2. Skip the per-channel clock pass for that buffer and
+    ///    every subsequent buffer — the stream falls silent.
+    ///
+    /// The `Machine` itself keeps spinning (no panic, no
+    /// allocation, no state corruption); silence is achieved by
+    /// short-circuiting the clock-render path. Drop the host audio
+    /// stream to actually tear down the cpal callback.
     pub fn request_stop(&self) {
         self.flag.store(true, Ordering::Release);
     }
@@ -256,7 +277,16 @@ impl<R: SampleTime> Machine<R> {
             sink.send_at(&[t.status_byte()], io.buffer_start_sample);
         }
 
-        // 4. Per-channel scheduling + rendering. Channels are
+        // 4. If the host has requested teardown, skip clock for this
+        //    buffer and all future buffers. The Stop byte (if any)
+        //    has already been emitted above; the stream now stays
+        //    silent until the cpal stream is dropped. See
+        //    `TransportState::running` for the full latch contract.
+        if !self.transport.running {
+            return;
+        }
+
+        // 5. Per-channel scheduling + rendering. Channels are
         //    independent so we can iterate them without cross-talk;
         //    `events_pool` is reused (cleared) between channels.
         for ch in &self.channels {
@@ -361,6 +391,14 @@ mod tests {
     /// sample 0 of buffer 0, then exactly one `0xFC` at sample 0 of
     /// the buffer following the `request_stop()` call. No other
     /// transport bytes.
+    ///
+    /// Also verifies the **stop-clock-immediately** contract: once
+    /// `request_stop()` has been observed, no `0xF8` clock events
+    /// fire on the stop-buffer or any subsequent buffer. At T4
+    /// divider / 120 BPM / 48 kHz, clock events would naturally
+    /// land at samples 0, 24_000, 48_000, … — under the latch
+    /// only the first survives because 24_000 lands inside the
+    /// stop-buffer (samples 20_480..24_576).
     #[test]
     fn transport_internal_emits_start_then_stop() {
         let bpm = Tempo::from_bpm_integer(120);
@@ -416,6 +454,23 @@ mod tests {
             vec![(0, MIDI_START), (5 * frames as u64, MIDI_STOP)],
         );
         assert!(!machine.is_running());
+
+        // Clock-suppression assertion: only the clock at sample 0
+        // survives; the next natural clock at sample 24_000 lands
+        // in buffer 5 (samples 20_480..24_576), which is exactly
+        // the buffer where the stop latch flipped — so the clock
+        // is suppressed alongside the Stop byte.
+        let clock_samples: Vec<u64> = sink
+            .records()
+            .into_iter()
+            .filter(|r| r.bytes == vec![MIDI_CLOCK])
+            .map(|r| r.at_sample)
+            .collect();
+        assert_eq!(
+            clock_samples,
+            vec![0],
+            "clock should fall silent immediately after request_stop"
+        );
     }
 
     proptest! {
@@ -509,13 +564,17 @@ mod tests {
             .map(|r| (r.at_sample, r.bytes[0]))
             .collect();
 
-        // After buffer 3, Stop has been emitted and `running` is
-        // false. The Scripted schedule had drained anyway, so it
-        // doesn't matter if more buffers came.
+        // The Scripted policy emits exactly the bytes the schedule
+        // dictates: Start at buffer 1, Stop at buffer 3. Unlike the
+        // `stop_pending` path, a Scripted Stop does NOT flip
+        // `running` to false — it's a fixture byte, not a stop-and-
+        // silence command. Subsequent buffers would keep draining
+        // the (now-empty) schedule with `next_byte` returning None.
         assert_eq!(
             transport,
             vec![(4_096, MIDI_START), (3 * 4_096, MIDI_STOP)],
         );
+        assert!(machine.is_running(), "Scripted Stop should not flip running");
     }
 
     proptest! {

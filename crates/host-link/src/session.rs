@@ -6,6 +6,10 @@
 
 use agogo_core::channel::Channel;
 use agogo_core::fxp::{Micro, Phase, Quantum, Tempo};
+// Required for `LinkClock::phase_at_sample` (trait-provided method
+// called by the `phase_at_sample` shim below). Copilot flagged this
+// as unused on PR #16 round 1 — false positive: removing it breaks
+// `cargo build --features rusty-link`.
 use agogo_core::sync::PhaseSourceImpl;
 
 use crate::link::{HostTimeAnchor, LinkClock};

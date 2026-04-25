@@ -14,9 +14,10 @@ is proven.
 
 ## Status as of 2026-04-24
 
-All v0.1 sprints have shipped. Plan 14 (Machine + `agogo run` +
-`bin/agogo`) is the final piece; the v0.1 acceptance scenario
-below is reachable end-to-end.
+All v0.1 foundation + output-chain sprints have shipped. Plan 14
+(Machine + `agogo run` + `bin/agogo`) is the **final in-flight
+piece**; once it lands the v0.1 acceptance scenario below is
+reachable end-to-end.
 
 ### Merged on main
 
@@ -65,13 +66,14 @@ output chain that weren't in the original plan:
    numerical conversion routes through a named `Conn`; CI grep gate
    + CLAUDE.md rules lock it in.
 
-After the detour, the three output-chain sprints (Plans 12, 13,
-14) shipped in sequence; v0.1 is now ready to tag.
+After the detour, the three output-chain sprints (Plans 12, 13)
+shipped in sequence; Plan 14 closes the chain and brings v0.1 to
+tag-readiness.
 
 ## v0.1 acceptance
 
-- `cargo run --bin agogo -- run --audio-in <device> --bpm 120
-  --source external --sr 48000 --ch dev=midi,div=t32t,out=<port>`
+- `cargo run --features run --bin agogo -- run --audio-in <device>
+  --bpm 120 --source external --sr 48000 --ch dev=midi,div=t32t,out=<port>`
   emits a steady MIDI clock that follows the input click within
   the PLL's jitter spec (`plan-2026-04-22-02` baseline: ±0.05 BPM
   steady-state at ≤ 200 µs input jitter). The docker-style

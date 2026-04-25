@@ -284,7 +284,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     let stream_handle = host.run(cfg, cb).map_err(|e| format!("cpal run: {e}"))?;
 
     eprintln!(
-        "agogo run: --bpm {} --sr {} --source {} --audio-in {} --midi-out {} ({} channel{}{})",
+        "agogo run: --bpm {} --sr {} --source {} --audio-in {} (midi port: {}) ({} channel{}{})",
         args.bpm,
         args.sr,
         args.source,

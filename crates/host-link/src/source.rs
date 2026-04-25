@@ -56,7 +56,7 @@ impl LinkPhaseSource {
 
 impl PhaseSourceImpl for LinkPhaseSource {
     fn phase_at_sample(&mut self, n: u64) -> Phase {
-        // Lock contention is uncontested on the audio thread because
+        // Lock acquisition is uncontended on the audio thread because
         // the control thread writes at human pace. v0.5 Sprint 02
         // swaps this for a seqlock-packed anchor when the per-buffer
         // re-anchoring lands.
