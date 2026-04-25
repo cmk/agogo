@@ -124,15 +124,15 @@ core = ["dep:project-core"]
      within 1–2 lines. Mark `// Link FFI`.
 
   `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
-  lives outside the file-level allowlist (the script encodes the
-  ten exception modules — the seven from Plan 11 plus
-  `crates/core/src/host.rs`, `crates/host-cpal/src/cpal.rs`, and
-  `crates/host-cpal/src/cpal/callback.rs`, all PCM-ABI sites added
-  in Plan 13). The annotation comments above are
-  reviewer-oriented markers inside allowlisted files — they're not
-  enforced by the grep gate itself, which would need a full Rust
-  parser to classify each use. Pattern 9 in
-  `doc/reviews/review-calibration.md` is the complementary review
+  lives outside the file-level allowlist (the script encodes
+  twelve exception modules — the ten from Plan 13 plus
+  `crates/core/src/machine.rs` (PCM ABI for `AudioIo` test
+  construction) and `crates/core/src/machine/spec.rs` (argv-boundary
+  for `--ch shift-ms` / `offset-ms`), both added in Plan 14). The
+  annotation comments above are reviewer-oriented markers inside
+  allowlisted files — they're not enforced by the grep gate itself,
+  which would need a full Rust parser to classify each use. Pattern 9
+  in `doc/reviews/review-calibration.md` is the complementary review
   check that catches stored-state violations the gate misses.
 
 - **Every numerical conversion comes from a named `Conn` (or a

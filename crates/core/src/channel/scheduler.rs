@@ -17,6 +17,22 @@ use crate::time::swing;
 use crate::time::tick::Tick;
 use connections::conn::fixed::Micro;
 
+/// Conservative upper bound on the number of [`ScheduledEvent`]s
+/// that can land in one buffer of `frames` samples.
+///
+/// Every event corresponds to at most one sample, so `frames` is
+/// the absolute ceiling regardless of `(bpm, divider, sr)`. The
+/// `+16` slack absorbs swing-boundary overrun where the scheduler
+/// expands its tick window by `swing_d` ticks.
+///
+/// Used by Plan 14's [`Machine`](crate::machine::Machine) and
+/// Plan 13's `host-cpal` callback to size their pre-allocated
+/// `Vec<ScheduledEvent>` so [`tick_stream_into`] never reallocates
+/// inside the audio callback.
+pub fn max_events_for_buffer(frames: usize) -> usize {
+    frames + 16
+}
+
 /// Compute all `ScheduledEvent`s whose `sample_index` falls in
 /// `[buffer_start_sample, buffer_start_sample + frames)`.
 ///
@@ -44,9 +60,8 @@ pub fn tick_stream(
 /// `ScheduledEvent` into `buf` rather than returning a fresh `Vec`.
 /// When `buf.capacity()` is sized to the worst-case event count for
 /// the buffer window, this call allocates zero bytes on the heap —
-/// the contract Plan 13's audio callback relies on. The
-/// caller-side helper that returns a safe upper bound lives in the
-/// host crate as `agogo_host_cpal::cpal::callback::max_events_for_buffer(frames)`.
+/// the contract Plan 13's audio callback relies on. Use
+/// [`max_events_for_buffer`] to compute that upper bound.
 ///
 /// `buf` is not cleared on entry; callers who want a fresh window
 /// should `buf.clear()` before the call.
