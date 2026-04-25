@@ -12,6 +12,8 @@
 #   crates/core/src/fxp.rs             argv-boundary + PI-exempt helpers
 #   crates/core/src/arb.rs             test-fixture PCM generators
 #   crates/core/src/host.rs                       PCM ABI shape (AudioIo `&[f32]` slices)
+#   crates/core/src/machine.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction in tests)
+#   crates/core/src/machine/spec.rs               argv-boundary (--ch shift-ms / offset-ms via F64F06)
 #   crates/host-link/src/link.rs                  Link FFI (AblLink C++ ABI)
 #   crates/host-cpal/src/cpal.rs                  PCM ABI (cpal stream callback)
 #   crates/host-cpal/src/cpal/callback.rs         PCM ABI (AudioIo input/output slices)
@@ -39,6 +41,8 @@ ALLOWED=(
   "crates/core/src/fxp.rs"
   "crates/core/src/arb.rs"
   "crates/core/src/host.rs"
+  "crates/core/src/machine.rs"
+  "crates/core/src/machine/spec.rs"
   "crates/host-link/src/link.rs"
   "crates/host-cpal/src/cpal.rs"
   "crates/host-cpal/src/cpal/callback.rs"

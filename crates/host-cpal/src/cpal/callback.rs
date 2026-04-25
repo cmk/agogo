@@ -81,22 +81,12 @@ impl<R: SampleTime> CallbackState<R> {
     }
 }
 
-/// Conservative upper bound on the number of [`ScheduledEvent`]s
-/// that can land in one buffer of `frames` samples.
-///
-/// Every event corresponds to at most one sample, so `frames` is
-/// the absolute ceiling regardless of `(bpm, divider, sr)`. The
-/// `+16` slack absorbs swing-boundary overrun where the scheduler
-/// expands its tick window by `swing_d` ticks (capped at 192 ticks
-/// per `arb_divider_with_bounded_swing`'s contract; 16 covers any
-/// realistic configuration).
-///
-/// Pass the result into `Vec::with_capacity` when constructing
-/// [`CallbackState::events`] so `tick_stream_into` never has to
-/// grow the Vec inside the audio callback.
-pub fn max_events_for_buffer(frames: usize) -> usize {
-    frames + 16
-}
+/// Re-export of the canonical helper. The implementation moved to
+/// [`agogo_core::channel::scheduler::max_events_for_buffer`] in
+/// Plan 14 so [`agogo_core::machine::Machine`] can size its pool
+/// without depending on `host-cpal`. Kept here so existing call
+/// sites (the demo CLI handler, internal tests) compile unchanged.
+pub use agogo_core::channel::scheduler::max_events_for_buffer;
 
 #[cfg(test)]
 mod tests {
