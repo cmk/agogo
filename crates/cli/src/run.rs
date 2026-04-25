@@ -358,3 +358,71 @@ fn install_ctrlc_handler(
     })
     .map_err(|e| format!("ctrlc handler: {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args_with(ch: Vec<&str>, sr: u32) -> RunArgs {
+        RunArgs {
+            bpm: 120.0,
+            sr,
+            buffer_frames: 1024,
+            source: "internal".into(),
+            audio_in: "default".into(),
+            ch: ch.into_iter().map(|s| s.to_string()).collect(),
+            link_quantum: None,
+            link_enable_start_stop: false,
+            max_duration_ms: Some(50),
+        }
+    }
+
+    /// Plan 14 spot-check: empty `--ch` list errors before any
+    /// device opens.
+    #[test]
+    fn run_rejects_empty_ch_list() {
+        let args = args_with(vec![], 48_000);
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("at least one --ch"),
+            "expected --ch hint, got: {err}"
+        );
+    }
+
+    /// Plan 14 spot-check: `dev=audio` is reserved for v0.4 and
+    /// rejected at parse time.
+    #[test]
+    fn run_rejects_dev_audio() {
+        let args = args_with(vec!["dev=audio,div=t32t"], 48_000);
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("dev=audio") && err.contains("v0.4"),
+            "expected dev=audio v0.4 message, got: {err}"
+        );
+    }
+
+    /// Plan 14 spot-check: rates outside the SampleTime allowlist
+    /// error before any device opens, with the allowlist enumerated.
+    #[test]
+    fn run_rejects_unsupported_rate() {
+        let args = args_with(vec!["dev=midi,div=t32t,out=default"], 22_050);
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("22050") && err.contains("44100"),
+            "expected rate-allowlist message, got: {err}"
+        );
+    }
+
+    /// Plan 14 spot-check: a malformed `--ch` spec errors at parse
+    /// time with the offending key.
+    #[test]
+    fn run_surfaces_channel_spec_parse_errors() {
+        let args = args_with(vec!["dev=midi,div=t32t,unknown=x"], 48_000);
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("unknown") && err.contains("--ch"),
+            "expected --ch parse error with key name, got: {err}"
+        );
+    }
+}
+
