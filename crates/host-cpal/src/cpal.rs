@@ -1,5 +1,7 @@
 //! `CpalHost` — cpal-backed [`AudioHost`] implementation.
 
+pub mod control;
+
 use ::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ::cpal::{BufferSize, InputCallbackInfo, SampleFormat, SampleRate, StreamConfig, StreamError};
 use agogo_core::host::{AudioHost, AudioHostError, AudioIo, Config, Handle};
