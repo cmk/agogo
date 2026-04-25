@@ -5,7 +5,8 @@
 //! (T2) + quantum snap (T3) are in place.
 
 use agogo_core::channel::Channel;
-use agogo_core::fxp::{Micro, Quantum, Tempo};
+use agogo_core::fxp::{Micro, Phase, Quantum, Tempo};
+use agogo_core::sync::PhaseSourceImpl;
 
 use crate::link::{HostTimeAnchor, LinkClock};
 use crate::transport::{TransportEvent, TransportFsm, TransportOutput, TransportState};
@@ -93,6 +94,15 @@ impl LinkSession {
     /// Current tempo. RT-safe (delegates to `LinkClock::tempo`).
     pub fn tempo(&mut self) -> Tempo {
         self.clock.tempo()
+    }
+
+    /// Beat-phase ([0, 1) cycles) at the given absolute sample
+    /// index. RT-safe — delegates to [`LinkClock::phase_at_sample`].
+    /// Plan 14's `LinkPhaseSource` adapter routes through this so
+    /// the audio thread can read phase via the same `Arc<Mutex<_>>`
+    /// the control thread holds.
+    pub fn phase_at_sample(&mut self, n: u64) -> Phase {
+        self.clock.phase_at_sample(n)
     }
 
     /// Snapshot of the current transport state.
