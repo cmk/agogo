@@ -7,3 +7,5 @@
 cc c4c04e640d376f563322975ec66b8fa6ee2541df6ddcbd0832dd99f53661adc5 # shrinks to a = T1, b = T128t
 cc 9ea3c1f21e639c4e487d5b54033f55c3ad783c0ad14438ec9db25310ddc7d895 # shrinks to tb = T1, t = Time { beats: 1, base: T128t }
 cc b76f6142dd476868aad8e585649ec2a177b66a6c572850c6de665f5361e7b2dc # shrinks to a = T1, b = T128t, z = T128t
+cc ce5a78277c41ae0d284792b184a8d27db13af0c77a1fd4b58067901e6be3e8d9 # shrinks to a = Grid { n: T256, t: true, q: true }, b = Grid { n: T1, t: false, q: false }, z = Grid { n: T256, t: true, q: true }
+cc efaaec9538c7d5f85ce2917a8efac3ae5347b1ebb11ab0dc44364d33a40d8721 # shrinks to a = Time { beats: 21, base: Grid { n: T2, t: true, q: false } }, b = Time { beats: 1, base: Grid { n: T1, t: false, q: false } }, z = Time { beats: 2, base: Grid { n: T4, t: false, q: false } }

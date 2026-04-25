@@ -471,8 +471,8 @@ fn main() {
                 // itself). Emits the parsed inputs so the reader can
                 // correlate against the tick stream.
                 eprintln!(
-                    "# schedule: {} bars, tbase={}, swing={:.3}",
-                    args.bars, args.tbase, args.swing
+                    "# schedule: {} bars, grid={}, swing={:.3}",
+                    args.bars, args.grid, args.swing
                 );
                 for t in time_sched::schedule_ticks(&args) {
                     println!("{}", t.0);
@@ -926,6 +926,7 @@ pub mod channel_trace {
     use agogo_core::channel::{Channel, ChannelMode, tick_stream};
     use agogo_core::fxp::{Extended, ExtendedFloat, F64F06, Micro, Tempo};
     use agogo_core::time::conn::SampleTickConn;
+    use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
     use agogo_core::time::tick::PPQN;
@@ -951,9 +952,9 @@ pub mod channel_trace {
     }
 
     /// Pure CPU scheduling trace — useful for testing without capturing
-    /// stdout. Returns an error if `divider` isn't a valid `TBase`.
+    /// stdout. Returns an error if `divider` isn't a valid `Grid` name.
     pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
-        let divider: TBase = args
+        let divider: Grid = args
             .divider
             .parse()
             .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
@@ -1000,12 +1001,16 @@ pub mod channel_trace {
         };
         let shift = ms_to_micro("--shift-ms", args.shift_ms)?;
         let offset = ms_to_micro("--offset-ms", args.offset_ms)?;
+        let amount: i8 = args
+            .shuffle
+            .try_into()
+            .map_err(|_| format!("--shuffle {} out of range (i8 [-128, 127])", args.shuffle))?;
         let channel = Channel {
             mode: ChannelMode::MidiClock,
             divider,
             shuffle: SwingConfig {
-                amount: args.shuffle,
-                multiplier: 1,
+                resolution: TBase::T16,
+                amount,
             },
             shift,
             offset,
@@ -1047,6 +1052,7 @@ pub mod midi_trace {
     use agogo_core::fxp::{Micro, Tempo};
     use agogo_core::out::midi::{MidiRtByte, TestSink, render_channel_block};
     use agogo_core::time::conn::SampleTickConn;
+    use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
     use agogo_core::time::tick::PPQN;
@@ -1072,7 +1078,7 @@ pub mod midi_trace {
     /// a `TestSink` for `buffers` buffers of `frames` samples each
     /// and returns every emitted `(at_sample, byte)` in FIFO order.
     pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
-        let divider: TBase = args
+        let divider: Grid = args
             .divider
             .parse()
             .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
@@ -1107,8 +1113,8 @@ pub mod midi_trace {
             mode: ChannelMode::MidiClock,
             divider,
             shuffle: SwingConfig {
+                resolution: TBase::T16,
                 amount: 0,
-                multiplier: 1,
             },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
@@ -1253,6 +1259,7 @@ pub mod midi_trace {
 }
 
 pub mod time_sched {
+    use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::{self, SwingConfig};
     use agogo_core::time::tbase::TBase;
     use agogo_core::time::tick::Tick;
@@ -1260,9 +1267,10 @@ pub mod time_sched {
 
     #[derive(Bpaf, Debug, Clone)]
     pub struct ScheduleArgs {
-        /// Grid resolution (e.g. `t16`, `t8t`, `t128t`).
-        #[bpaf(long, argument::<String>("TBASE"), parse(parse_tbase))]
-        pub tbase: TBase,
+        /// Grid resolution (e.g. `t16`, `t8t`, `t8q`, `t512p`).
+        /// Renamed from `--tbase` after the v0.2 lattice extension.
+        #[bpaf(long, argument::<String>("GRID"), parse(parse_grid))]
+        pub grid: Grid,
 
         /// Swing ratio in `[0.5, 0.75]`: 0.5 = straight, 0.75 = full
         /// triplet swing. f64 per the CLI argv-boundary rule
@@ -1271,30 +1279,31 @@ pub mod time_sched {
         pub swing: f64,
 
         /// Number of 4/4 bars to schedule. Bounded to `u16` (≤ 65535)
-        /// so memory and stdout stay reasonable — 65535 × 192 ≈ 12.6M
-        /// tick positions ≈ 50 MB Vec at the finest grid. The plan
-        /// specified `u32`; narrowing the type is the simplest honest
-        /// bound (see plan's Review section).
+        /// so memory and stdout stay reasonable.
         #[bpaf(long, argument("BARS"))]
         pub bars: u16,
     }
 
-    fn parse_tbase(s: String) -> Result<TBase, String> {
+    fn parse_grid(s: String) -> Result<Grid, String> {
         s.parse()
     }
 
-    /// Convert a `0.5..=0.75` swing ratio into a `SwingConfig`. The
-    /// displacement is `(swing - 0.5) * 96` ticks (so 0.5 → 0,
-    /// 0.75 → 48 = full triplet on a T16 grid), with `multiplier = 1`
-    /// so `amount` directly expresses the tick displacement.
+    /// Convert a `0.5..=0.75` swing ratio into a `SwingConfig` on a
+    /// T16 resolution grid. At 960 PPQN the T16 step is 240 ticks, so
+    /// a 0.75 ratio (full triplet feel) corresponds to a 0.25 × 240 =
+    /// 60-tick displacement — but the legacy mapping rounds at
+    /// ~125-tick granularity (96 ticks * (swing-0.5)*4 ≈ legacy 24
+    /// scale). We preserve the legacy `(swing - 0.5) * 96` mapping for
+    /// CLI back-compat but clamp into i8.
     ///
     /// Values outside `[0.5, 0.75]` are clamped.
     pub fn swing_to_config(swing: f64) -> SwingConfig {
         let clamped = swing.clamp(0.5, 0.75);
-        let amount = ((clamped - 0.5) * 96.0).round() as i32;
+        let amount_i32 = ((clamped - 0.5) * 96.0).round() as i32;
+        let amount = amount_i32.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         SwingConfig {
+            resolution: TBase::T16,
             amount,
-            multiplier: 1,
         }
     }
 
@@ -1303,12 +1312,12 @@ pub mod time_sched {
     /// — useful for testing without capturing stdout.
     pub fn schedule_ticks(args: &ScheduleArgs) -> Vec<Tick> {
         let cfg = swing_to_config(args.swing);
-        // 4/4 assumption: one bar = 4 * PPQN = 768 ticks.
+        // 4/4 assumption: one bar = 4 * PPQN ticks.
         let ticks_per_bar = 4 * agogo_core::time::tick::PPQN;
-        let step_tc = args.tbase.tick_count();
+        let step_tc = args.grid.tick_count();
         let steps_per_bar = ticks_per_bar / step_tc;
-        // `bars` is `u16` so `u32::from(bars) * steps_per_bar` cannot
-        // overflow: max = 65535 * 192 = 12_582_720, well inside `u32`.
+        // `bars` is `u16`; `u32::from(bars) * steps_per_bar` is bounded
+        // by 65535 * BAR/T512P = 65535 * 3840 ≈ 251M, inside u32.
         let total_steps = u32::from(args.bars) * steps_per_bar;
 
         (0..total_steps)
@@ -1336,6 +1345,7 @@ pub mod demo {
     use agogo_core::host::{AudioHost, Config};
     use agogo_core::machine::{Machine, TransportPolicy};
     use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+    use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
     use agogo_core::time::tick::PPQN;
@@ -1369,7 +1379,7 @@ pub mod demo {
     /// observed at shutdown via `eprintln!` and an exit-2 path if
     /// non-zero.
     pub fn run(args: &DemoArgs) -> Result<(), String> {
-        let divider: TBase = args
+        let divider: Grid = args
             .divider
             .parse()
             .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
@@ -1464,8 +1474,8 @@ pub mod demo {
             mode: ChannelMode::MidiClock,
             divider,
             shuffle: SwingConfig {
+                resolution: TBase::T16,
                 amount: 0,
-                multiplier: 1,
             },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
@@ -1559,6 +1569,7 @@ mod tests {
     use super::channel_trace::{self, TraceArgs};
     use super::sync_trace::trace;
     use super::time_sched::{ScheduleArgs, schedule_ticks, swing_to_config};
+    use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
 
@@ -1584,8 +1595,8 @@ mod tests {
         assert_eq!(
             swing_to_config(0.5),
             SwingConfig {
+                resolution: TBase::T16,
                 amount: 0,
-                multiplier: 1,
             }
         );
     }
@@ -1596,21 +1607,20 @@ mod tests {
         assert_eq!(
             swing_to_config(0.54),
             SwingConfig {
+                resolution: TBase::T16,
                 amount: 4,
-                multiplier: 1,
             }
         );
     }
 
     #[test]
     fn swing_to_config_075_is_full_triplet() {
-        // (0.75 - 0.5) * 96 = 24 — half of a T16 step, which is the
-        // triplet-feel displacement.
+        // (0.75 - 0.5) * 96 = 24.
         assert_eq!(
             swing_to_config(0.75),
             SwingConfig {
+                resolution: TBase::T16,
                 amount: 24,
-                multiplier: 1,
             }
         );
     }
@@ -1624,40 +1634,42 @@ mod tests {
     #[test]
     fn schedule_ticks_two_bars_t16_yields_32_positions() {
         let ticks = schedule_ticks(&ScheduleArgs {
-            tbase: TBase::T16,
+            grid: Grid::T16,
             swing: 0.5,
             bars: 2,
         });
         assert_eq!(ticks.len(), 32);
-        // Straight T16 schedule: 0, 48, 96, ..., 1488.
+        // Straight T16 schedule at 960 PPQN: 0, 240, 480, ..., 7440.
         for (i, t) in ticks.iter().enumerate() {
-            assert_eq!(t.0, (i as u32) * 48);
+            assert_eq!(t.0, (i as u32) * 240);
         }
     }
 
     #[test]
     fn schedule_ticks_swing_054_shifts_off_beats() {
         let ticks = schedule_ticks(&ScheduleArgs {
-            tbase: TBase::T16,
+            grid: Grid::T16,
             swing: 0.54,
             bars: 1,
         });
-        // 16 steps. Off-beats (indices 1, 3, 5, …, 15) shifted by -4.
+        // 16 steps. Off-beats (indices 1, 3, 5, …, 15) shifted by +4
+        // (drum-machine sign convention: positive amount delays).
         let expected: Vec<u32> = (0..16u32)
-            .map(|i| if i % 2 == 1 { i * 48 - 4 } else { i * 48 })
+            .map(|i| if i % 2 == 1 { i * 240 + 4 } else { i * 240 })
             .collect();
         let got: Vec<u32> = ticks.iter().map(|t| t.0).collect();
         assert_eq!(got, expected);
     }
 
     #[test]
-    fn schedule_ticks_t128t_has_192_steps_per_bar() {
+    fn schedule_ticks_t512p_has_3840_steps_per_bar() {
+        // T512P = 1 tick at 960 PPQN — bar = 3840 ticks → 3840 steps.
         let ticks = schedule_ticks(&ScheduleArgs {
-            tbase: TBase::T128t,
+            grid: Grid::T512P,
             swing: 0.5,
             bars: 1,
         });
-        assert_eq!(ticks.len(), 192);
+        assert_eq!(ticks.len(), 3840);
     }
 
     /// Plan build gate: the trace command at 120 BPM / 48 kHz / T4
@@ -1701,14 +1713,15 @@ mod tests {
     #[test]
     fn schedule_ticks_t1_has_one_step_per_bar() {
         let ticks = schedule_ticks(&ScheduleArgs {
-            tbase: TBase::T1,
+            grid: Grid::T1,
             swing: 0.5,
             bars: 4,
         });
         assert_eq!(ticks.len(), 4);
+        // BAR = 3840 ticks at 960 PPQN.
         assert_eq!(
             ticks.iter().map(|t| t.0).collect::<Vec<_>>(),
-            vec![0, 768, 1536, 2304]
+            vec![0, 3840, 7680, 11520]
         );
     }
 }

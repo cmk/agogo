@@ -97,9 +97,11 @@ pub fn tick_stream_into(
     let swung_hi = swung_hi_signed.clamp(0, i128::from(u64::MAX)) as u64;
 
     // Convert swung-tick sample bounds to tick bounds, then expand by
-    // swing displacement so off-beats (which are shifted by -d in tick
-    // space) are included.
-    let swing_d = channel.shuffle.displacement();
+    // swing displacement so off-beats (which are shifted by +amount in
+    // tick space; we store the negation here so the existing
+    // `min(0)/max(0)` window-expansion math stays untouched) are
+    // included.
+    let swing_d: i64 = -(channel.shuffle.amount as i64);
     let lo_from_sample = stc.floor(swung_lo).0 as i64;
     let hi_from_sample = stc.ceil(swung_hi).0 as i64;
     let lo_tick = lo_from_sample.saturating_add(swing_d.min(0)).max(0) as u32;
@@ -144,23 +146,24 @@ pub fn tick_stream_into(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arb::arb_tbase;
+    use crate::arb::arb_grid;
     use crate::channel::mode::ChannelMode;
+    use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
     use proptest::prelude::*;
 
     fn stc_120_48k() -> SampleTickConn {
-        SampleTickConn::new(48_000, crate::fxp::Tempo::from_bpm_integer(120), 192)
+        SampleTickConn::new(48_000, crate::fxp::Tempo::from_bpm_integer(120), 960)
     }
 
-    fn zero_channel(divider: TBase) -> Channel {
+    fn zero_channel(divider: Grid) -> Channel {
         Channel {
             mode: ChannelMode::MidiClock,
             divider,
             shuffle: SwingConfig {
+                resolution: TBase::T16,
                 amount: 0,
-                multiplier: 1,
             },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
@@ -174,18 +177,18 @@ mod tests {
     fn t4_120bpm_48k_fires_at_buffer_6_offset_24000() {
         // One quarter note at 120 BPM = 24 000 samples. A 4 096-frame
         // buffer starting at 20 480 covers samples 20 480..24 576 —
-        // exactly containing 24 000. The scheduler should emit one
-        // event.
-        let ch = zero_channel(TBase::T4);
+        // exactly containing 24 000. At 960 PPQN the corresponding
+        // tick is 960. The scheduler should emit one event.
+        let ch = zero_channel(Grid::T4);
         let ev = tick_stream(&ch, &stc_120_48k(), 20_480, 4_096);
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].sample_index, 24_000);
-        assert_eq!(ev[0].tick.0, 192);
+        assert_eq!(ev[0].tick.0, 960);
     }
 
     #[test]
     fn empty_buffer_returns_empty() {
-        let ch = zero_channel(TBase::T4);
+        let ch = zero_channel(Grid::T4);
         assert!(tick_stream(&ch, &stc_120_48k(), 0, 0).is_empty());
     }
 
@@ -193,7 +196,7 @@ mod tests {
     fn buffer_with_no_events_returns_empty() {
         // Between two quarter notes: buffer [1000, 5000) contains no
         // multiple of 24 000.
-        let ch = zero_channel(TBase::T4);
+        let ch = zero_channel(Grid::T4);
         assert!(tick_stream(&ch, &stc_120_48k(), 1_000, 4_000).is_empty());
     }
 
@@ -202,7 +205,7 @@ mod tests {
         // 16th notes at 120 BPM 48 kHz: 6 000 samples apart. A buffer
         // 24 000 samples wide at sample 0 covers 4 events at
         // 0, 6 000, 12 000, 18 000.
-        let ch = zero_channel(TBase::T16);
+        let ch = zero_channel(Grid::T16);
         let ev = tick_stream(&ch, &stc_120_48k(), 0, 24_000);
         let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
         assert_eq!(samples, vec![0, 6_000, 12_000, 18_000]);
@@ -211,17 +214,21 @@ mod tests {
     // ── Property tests ───────────────────────────────────────────
 
     /// Same `(divider, bounded-swing)` generator as `transform`'s
-    /// monotonicity test: swings whose displacement is smaller than the
-    /// divider's step are well-behaved.
-    fn arb_divider_with_bounded_swing() -> impl Strategy<Value = (TBase, SwingConfig)> {
-        arb_tbase().prop_flat_map(|d| {
-            let cap = (d.tick_count() as i32 - 1).max(0);
+    /// monotonicity test: swings whose displacement is smaller than
+    /// the divider's step are well-behaved. Resolution pinned to the
+    /// divider's binary axis.
+    fn arb_divider_with_bounded_swing() -> impl Strategy<Value = (Grid, SwingConfig)> {
+        arb_grid().prop_flat_map(|d| {
+            let cap_i32 = ((d.tick_count() as i32 - 1).max(0)).min(i8::MAX as i32);
+            let cap = cap_i32 as i8;
+            let resolution = d.n;
             (
                 Just(d),
-                (-cap..=cap).prop_map(|amount| SwingConfig {
-                    amount,
-                    multiplier: 1,
-                }),
+                (-(cap as i32)..=(cap as i32))
+                    .prop_map(move |amount| SwingConfig {
+                        resolution,
+                        amount: amount as i8,
+                    }),
             )
         })
     }
@@ -270,10 +277,10 @@ mod tests {
         /// pipelines trips this test immediately.
         ///
         /// The reference applies `transform` over a generous fixed
-        /// tick range (`0..=65_536`); at PPQN 192 / 48 kHz / 120
-        /// BPM that covers samples up to ~13 s, well past the
-        /// `buffer_start ≤ 1_000_000` + `frames ≤ 8_192` bound the
-        /// proptest itself uses (~21 s of stream time max).
+        /// tick range (`0..=65_536`); at PPQN 960 / 48 kHz / 120 BPM
+        /// (= 25 samples/tick) that covers samples up to ~1.6 M, past
+        /// the `buffer_start ≤ 1_000_000` + `frames ≤ 8_192` bound the
+        /// proptest itself uses (~1.01 M samples max).
         #[test]
         fn tick_stream_into_matches_transform_filtered(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
@@ -337,8 +344,8 @@ mod tests {
             let stc = stc_120_48k();
             // Upper bound: every master tick in the window could
             // produce an event. `frames` is the sample count; at PPQN
-            // 192 / 48 kHz / 120 BPM the densest divider (T128t = 1
-            // tick / step) is ~125 master ticks per 1000 samples.
+            // 960 / 48 kHz / 120 BPM the densest divider (Grid::T512P
+            // = 1 tick / step) is ~40 master ticks per 1000 samples.
             // 4× `frames` is a generous ceiling for the shrink domain.
             let cap = frames * 4 + 32;
             let mut buf = Vec::with_capacity(cap);

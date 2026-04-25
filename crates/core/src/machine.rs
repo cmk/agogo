@@ -315,18 +315,19 @@ mod tests {
     use crate::channel::ChannelMode;
     use crate::fxp::{Micro, S48};
     use crate::out::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
+    use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
     use crate::time::tick::PPQN;
     use proptest::prelude::*;
 
-    fn zero_channel(divider: TBase) -> Channel {
+    fn zero_channel(divider: Grid) -> Channel {
         Channel {
             mode: ChannelMode::MidiClock,
             divider,
             shuffle: SwingConfig {
+                resolution: TBase::T16,
                 amount: 0,
-                multiplier: 1,
             },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
@@ -365,7 +366,7 @@ mod tests {
     fn machine_buffer_matches_plan13_demo() {
         let bpm = Tempo::from_bpm_integer(120);
         let mut machine = Machine::<S48>::new(
-            vec![zero_channel(TBase::T4)],
+            vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
@@ -403,7 +404,7 @@ mod tests {
     fn transport_internal_emits_start_then_stop() {
         let bpm = Tempo::from_bpm_integer(120);
         let mut machine = Machine::<S48>::new(
-            vec![zero_channel(TBase::T4)],
+            vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
@@ -487,7 +488,7 @@ mod tests {
                 Arc::new(std::sync::Mutex::new(states.iter().copied().collect()));
             let q_for_query = Arc::clone(&queue);
             let mut machine = Machine::<S48>::new(
-                vec![zero_channel(TBase::T4)],
+                vec![zero_channel(Grid::T4)],
                 PhaseSource::Internal { bpm },
                 48_000,
                 bpm,
@@ -542,7 +543,7 @@ mod tests {
             Some(MidiRtByte::Stop),
         ]);
         let mut machine = Machine::<S48>::new(
-            vec![zero_channel(TBase::T4)],
+            vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
@@ -586,7 +587,7 @@ mod tests {
         fn multi_channel_independent_dispatch(
             dividers in prop::collection::vec(
                 prop::sample::select(&[
-                    TBase::T4, TBase::T8, TBase::T16, TBase::T32,
+                    Grid::T4, Grid::T8, Grid::T16, Grid::T32,
                 ]),
                 1usize..=4,
             ),

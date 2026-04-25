@@ -62,6 +62,7 @@ mod tests {
     use agogo_core::fxp::{Micro, S48, Tempo};
     use agogo_core::machine::TransportPolicy;
     use agogo_core::sync::PhaseSource;
+    use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
     use agogo_core::time::tick::PPQN;
@@ -69,7 +70,7 @@ mod tests {
 
     fn build_state(
         bpm: Tempo,
-        divider: TBase,
+        divider: Grid,
         frames: usize,
     ) -> (
         CallbackState<S48>,
@@ -80,8 +81,8 @@ mod tests {
             mode: ChannelMode::MidiClock,
             divider,
             shuffle: SwingConfig {
+                resolution: TBase::T16,
                 amount: 0,
-                multiplier: 1,
             },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
@@ -115,7 +116,7 @@ mod tests {
     fn callback_emits_expected_clock_schedule() {
         let (mut state, mut cons) = build_state(
             Tempo::from_bpm_integer(120),
-            TBase::T4,
+            Grid::T4,
             24_000,
         );
         let input = vec![0.0_f32; 24_000];
@@ -156,7 +157,7 @@ mod tests {
     fn callback_does_not_realloc_events() {
         let (mut state, _cons) = build_state(
             Tempo::from_bpm_integer(120),
-            TBase::T4,
+            Grid::T4,
             24_000,
         );
         let cap_before = state.machine.max_events_per_buffer();

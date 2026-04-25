@@ -1,262 +1,412 @@
 //! Integer-valued swing and alignment.
 //!
-//! Port of `SwingConfig`, `isSwungStep`, `effectiveTick`, and
-//! `isAligned` from the Haskell Cirklon source. Integer-valued
-//! (not float) to avoid FP drift in property tests.
+//! `SwingConfig` is a direct tick offset on a binary subdivision grid.
+//! Drum-machine convention: positive `amount` *delays* the off-beat
+//! (e.g. `+80` at 960 PPQN with `T16` resolution = 66.6% MPC shuffle —
+//! the 1st off-16th lands two-thirds of the way to the next on-beat at
+//! 320 of 480 ticks); negative pushes the off-beat early.
 //!
-//! **Plan deviation: `is_swung_step` takes only a `Tick`.** The plan
-//! specified `fn is_swung_step(cfg: &SwingConfig, t: Tick) -> bool`,
-//! but the Haskell function doesn't consume the config — off-beat
-//! status is determined purely by the T16 step-index parity. We match
-//! Haskell. Recorded in the plan's Review section.
+//! Detection is one unified rule: a tick is "swung" when it lies on
+//! the resolution grid AND its step index in that grid is odd. `T16`
+//! resolution covers MPC / hip-hop 16th-note swing; `T8` covers jazz /
+//! blues 8th-note swing; coarser binary levels are type-allowed but
+//! musically rare.
 //!
-//! **Haskell swing is one-sided (always subtracts).** Off-beat ticks
-//! are shifted by `-amount * multiplier`; on-beat ticks pass through.
-//! The plan's `swing_zero_mean_over_beat` property assumed bidirectional
-//! swing (sum-to-zero across one beat) and does *not* hold for this
-//! semantics. The property is `#[ignore]`d below with a Review note.
+//! Square-free (triplet, quintuplet, p-track) grids cannot be swing
+//! resolutions by construction — `SwingConfig.resolution` is `TBase`,
+//! not `Grid`.
 
+use crate::time::grid::Grid;
 use crate::time::tbase::TBase;
 use crate::time::tick::Tick;
 
-/// Swing configuration.
+/// Swing configuration: signed `i8` tick offset on a binary
+/// subdivision grid.
 ///
-/// `amount` is typically in `0..=16`; `multiplier` is the number of
-/// master ticks per swing unit. Total displacement in ticks is
-/// `amount * multiplier`. Negative values flip the sign of the
-/// displacement.
+/// The musically-sensible bound is `|amount| ≤ resolution.tick_count() / 2`;
+/// at `T16` (240 ticks) that's ±120, well inside `i8`'s range. The
+/// type allows a wider numerical range (full `i8`) but `effective_tick`
+/// saturates at the `Tick` bounds, so out-of-range values are clamped
+/// rather than wrapping.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SwingConfig {
-    pub amount: i32,
-    pub multiplier: i32,
+    /// Binary subdivision the swing grid lives on.
+    pub resolution: TBase,
+    /// Signed tick offset for swung steps. Positive = delay (off-beat
+    /// plays later, drum-machine convention); negative = push.
+    pub amount: i8,
 }
 
-impl SwingConfig {
-    /// Total displacement in ticks. `i64` so `amount * multiplier`
-    /// cannot overflow for any `i32` inputs.
-    pub const fn displacement(&self) -> i64 {
-        self.amount as i64 * self.multiplier as i64
-    }
+/// True when `t` lies on a swung position under `cfg.resolution`. One
+/// unified rule for every binary level: `t` must be aligned to the
+/// resolution grid AND its step index must be odd.
+pub fn is_swung_step(t: Tick, cfg: &SwingConfig) -> bool {
+    let tc = cfg.resolution.tick_count();
+    t.0 % tc == 0 && (t.0 / tc) & 1 == 1
 }
 
-/// Is the tick in an off-beat 16th-note subdivision? Off-beats are
-/// the odd T16 step-index positions (1, 3, 5, …).
-///
-/// Operates on the floor T16 step index: for any tick `t`,
-/// `is_swung_step(t) = (t / 48) % 2 == 1`, so unaligned ticks pick up
-/// the parity of the T16 region they fall in.
-pub fn is_swung_step(t: Tick) -> bool {
-    (t.0 / TBase::T16.tick_count()) % 2 == 1
-}
-
-/// Tick after applying the swing offset. Off-beats shift by
-/// `-amount * multiplier` ticks; other ticks pass through.
+/// Tick after applying the swing offset. Off-beats (per
+/// [`is_swung_step`]) shift by `+amount` ticks; other ticks pass
+/// through.
 ///
 /// Saturates at 0 if the shift would underflow, and at `u32::MAX` if
 /// it would overflow — both are out-of-range for any musical context,
 /// so property tests that bound inputs never exercise the saturation.
 pub fn effective_tick(cfg: &SwingConfig, t: Tick) -> Tick {
-    if !is_swung_step(t) {
+    if !is_swung_step(t, cfg) {
         return t;
     }
-    let d = cfg.displacement();
-    let shifted = i64::from(t.0) - d;
+    let shifted = i64::from(t.0) + i64::from(cfg.amount);
     Tick(shifted.clamp(0, i64::from(u32::MAX)) as u32)
 }
 
-/// Is the tick aligned to the `base` grid?
-pub fn is_aligned(t: Tick, base: TBase) -> bool {
-    t.0 % base.tick_count() == 0
+/// Is the tick aligned to the `g` grid? Works for any `Grid` element
+/// (binary, triplet, quintuplet, p-track) — not just binary.
+pub fn is_aligned(t: Tick, g: Grid) -> bool {
+    t.0 % g.tick_count() == 0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arb::{arb_swing, arb_tbase, arb_tick};
+    use crate::arb::{arb_grid, arb_swing, arb_tbase, arb_tick};
+    use crate::time::conn::quantize_at;
+    use crate::time::tbase::BAR;
     use proptest::prelude::*;
+
+    fn cfg(resolution: TBase, amount: i8) -> SwingConfig {
+        SwingConfig {
+            resolution,
+            amount,
+        }
+    }
+
+    /// Next-coarser binary resolution. `T16 → T8`, `T8 → T4`, …,
+    /// `T2 → T1`. Returns `None` for `T1` (already the coarsest).
+    fn next_coarser(r: TBase) -> Option<TBase> {
+        if r.exp() == 0 {
+            None
+        } else {
+            TBase::from_exp(r.exp() - 1)
+        }
+    }
 
     // ── Spot checks on is_swung_step ──────────────────────────────
 
     #[test]
     fn is_swung_step_zero_is_even() {
-        assert!(!is_swung_step(Tick(0)));
+        assert!(!is_swung_step(Tick(0), &cfg(TBase::T16, 0)));
     }
 
     #[test]
-    fn is_swung_step_t16_boundaries() {
-        // Steps 0..4 across one beat (192 ticks): even → not swung,
-        // odd → swung.
-        assert!(!is_swung_step(Tick(0))); // step 0
-        assert!(is_swung_step(Tick(48))); // step 1
-        assert!(!is_swung_step(Tick(96))); // step 2
-        assert!(is_swung_step(Tick(144))); // step 3
+    fn is_swung_step_t16_boundaries_at_960() {
+        // T16 at 960 PPQN = 240 ticks per step.
+        // Step 0 = 0 (on), step 1 = 240 (off), step 2 = 480 (on),
+        // step 3 = 720 (off).
+        let c = cfg(TBase::T16, 0);
+        assert!(!is_swung_step(Tick(0), &c));
+        assert!(is_swung_step(Tick(240), &c));
+        assert!(!is_swung_step(Tick(480), &c));
+        assert!(is_swung_step(Tick(720), &c));
     }
 
     #[test]
-    fn is_swung_step_picks_up_floor_region() {
-        // 50 ticks falls in step 1 (50/48 = 1) → swung.
-        assert!(is_swung_step(Tick(50)));
-        // 47 ticks falls in step 0 → not swung.
-        assert!(!is_swung_step(Tick(47)));
+    fn is_swung_step_t8_resolution_swings_off_eighths() {
+        // T8 at 960 PPQN = 480 ticks per step. Off-8ths land at
+        // 480, 1440, 2400, 3360.
+        let c = cfg(TBase::T8, 0);
+        assert!(!is_swung_step(Tick(0), &c));
+        assert!(is_swung_step(Tick(480), &c));
+        assert!(!is_swung_step(Tick(720), &c));
+        assert!(is_swung_step(Tick(1440), &c));
+    }
+
+    #[test]
+    fn is_swung_step_unaligned_ticks_are_not_swung() {
+        // Unlike v0.1's "step-region" parity, the unified rule
+        // requires alignment. 50 falls inside step 0 of T16 (240
+        // ticks/step) but is not on the resolution grid, so not
+        // swung.
+        assert!(!is_swung_step(Tick(50), &cfg(TBase::T16, 0)));
+        assert!(!is_swung_step(Tick(241), &cfg(TBase::T16, 0)));
     }
 
     // ── Spot checks on is_aligned ─────────────────────────────────
 
     #[test]
-    fn is_aligned_t16_48_true() {
-        assert!(is_aligned(Tick(48), TBase::T16));
+    fn is_aligned_t16_240_true() {
+        assert!(is_aligned(Tick(240), Grid::T16));
     }
 
     #[test]
-    fn is_aligned_t16_50_false() {
-        assert!(!is_aligned(Tick(50), TBase::T16));
+    fn is_aligned_t16_241_false() {
+        assert!(!is_aligned(Tick(241), Grid::T16));
     }
 
     #[test]
-    fn is_aligned_t1_only_multiples_of_768() {
-        assert!(is_aligned(Tick(0), TBase::T1));
-        assert!(is_aligned(Tick(768), TBase::T1));
-        assert!(!is_aligned(Tick(384), TBase::T1));
+    fn is_aligned_t1_only_multiples_of_bar() {
+        assert!(is_aligned(Tick(0), Grid::T1));
+        assert!(is_aligned(Tick(BAR), Grid::T1));
+        assert!(!is_aligned(Tick(BAR / 2), Grid::T1));
+    }
+
+    #[test]
+    fn is_aligned_t8q_quintuplet() {
+        // T8Q = 192 ticks. Reaches non-binary positions.
+        assert!(is_aligned(Tick(0), Grid::T8Q));
+        assert!(is_aligned(Tick(192), Grid::T8Q));
+        assert!(!is_aligned(Tick(240), Grid::T8Q));
     }
 
     // ── Spot checks on effective_tick ────────────────────────────
 
     #[test]
     fn effective_tick_on_beat_is_identity() {
-        let cfg = SwingConfig {
-            amount: 8,
-            multiplier: 2,
-        };
-        assert_eq!(effective_tick(&cfg, Tick(0)), Tick(0));
-        assert_eq!(effective_tick(&cfg, Tick(96)), Tick(96));
+        let c = cfg(TBase::T16, 80);
+        assert_eq!(effective_tick(&c, Tick(0)), Tick(0));
+        assert_eq!(effective_tick(&c, Tick(480)), Tick(480));
     }
 
     #[test]
-    fn effective_tick_off_beat_shifts() {
-        let cfg = SwingConfig {
-            amount: 3,
-            multiplier: 4,
-        };
-        // displacement = 12 ticks. Off-beat at 48 → 48 - 12 = 36.
-        assert_eq!(effective_tick(&cfg, Tick(48)), Tick(36));
+    fn effective_tick_t16_amount_80_is_mpc_full_shuffle() {
+        // 66.6% shuffle at 960 PPQN: off-16th at 240 → 320 (two
+        // thirds toward the next on-beat at 480).
+        assert_eq!(effective_tick(&cfg(TBase::T16, 80), Tick(240)), Tick(320));
     }
 
     #[test]
-    fn effective_tick_saturates_on_underflow() {
-        let cfg = SwingConfig {
-            amount: 100,
-            multiplier: 100,
-        };
-        // displacement = 10_000 > 48, saturates at 0.
-        assert_eq!(effective_tick(&cfg, Tick(48)), Tick(0));
+    fn effective_tick_t16_amount_40_is_linn_shuffle() {
+        // ~58% Linn shuffle: off-16th at 240 → 280.
+        assert_eq!(effective_tick(&cfg(TBase::T16, 40), Tick(240)), Tick(280));
     }
 
     #[test]
-    fn effective_tick_negative_amount_shifts_forward() {
-        let cfg = SwingConfig {
-            amount: -3,
-            multiplier: 4,
-        };
-        // displacement = -12, off-beat at 48 → 48 - (-12) = 60.
-        assert_eq!(effective_tick(&cfg, Tick(48)), Tick(60));
+    fn effective_tick_negative_amount_pushes_early() {
+        assert_eq!(effective_tick(&cfg(TBase::T16, -40), Tick(240)), Tick(200));
+    }
+
+    #[test]
+    fn effective_tick_amount_zero_is_identity() {
+        let c = cfg(TBase::T16, 0);
+        for t in [0u32, 1, 240, 480, 1000, 100_000] {
+            assert_eq!(effective_tick(&c, Tick(t)), Tick(t));
+        }
+    }
+
+    #[test]
+    fn effective_tick_unaligned_passes_through() {
+        // Detection requires alignment to resolution; off-grid ticks
+        // pass through even with non-zero amount.
+        let c = cfg(TBase::T16, 80);
+        assert_eq!(effective_tick(&c, Tick(241)), Tick(241));
     }
 
     // ── Property tests ───────────────────────────────────────────
 
     proptest! {
-        /// `amount = 0` (any multiplier) is the identity.
+        /// Plan property `swing_amount_zero_is_identity`: `amount = 0`
+        /// (any `resolution: TBase`) is the identity for all ticks.
         #[test]
-        fn swing_identity_when_amount_zero(
-            mult in -16i32..=16, t in arb_tick(),
+        fn swing_amount_zero_is_identity(
+            resolution in arb_tbase(),
+            t in arb_tick(),
         ) {
-            let cfg = SwingConfig { amount: 0, multiplier: mult };
-            prop_assert_eq!(effective_tick(&cfg, t), t);
+            let c = cfg(resolution, 0);
+            prop_assert_eq!(effective_tick(&c, t), t);
         }
 
-        /// `effective_tick` is the identity on non-off-beat ticks for
-        /// any config.
+        /// Plan property `swing_only_affects_swung_steps`.
         #[test]
-        fn swing_only_affects_off_beats(cfg in arb_swing(), t in arb_tick()) {
-            if !is_swung_step(t) {
-                prop_assert_eq!(effective_tick(&cfg, t), t);
+        fn swing_only_affects_swung_steps(c in arb_swing(), t in arb_tick()) {
+            if !is_swung_step(t, &c) {
+                prop_assert_eq!(effective_tick(&c, t), t);
             }
         }
 
-        /// On off-beats, the displacement is exactly `-amount * multiplier`
-        /// (when the shift stays within `u32` bounds — the property
-        /// constrains inputs so it always does).
+        /// Plan property `swing_offset_is_exact_i8`. On a swung step,
+        /// the displacement is exactly `cfg.amount` (no scaling, no
+        /// rounding) when the result stays within `u32` bounds.
         #[test]
-        fn swing_displacement_on_off_beats(
-            cfg in arb_swing(),
-            t in (1u32..=1_000_000).prop_map(Tick),
+        fn swing_offset_is_exact_i8(
+            c in arb_swing(),
+            // bound t away from the saturation edges so the shift
+            // never clamps; |amount| ≤ 127 leaves plenty of headroom.
+            t in (200u32..=10_000_000).prop_map(Tick),
         ) {
-            if is_swung_step(t) {
-                let d = cfg.displacement();
-                // Skip edges where saturation would kick in: keep |d|
-                // well inside u32 range from t.0.
-                let shifted = i64::from(t.0) - d;
-                if (0..=i64::from(u32::MAX)).contains(&shifted) {
-                    prop_assert_eq!(effective_tick(&cfg, t), Tick(shifted as u32));
-                }
+            if is_swung_step(t, &c) {
+                let expected = (i64::from(t.0) + i64::from(c.amount)) as u32;
+                prop_assert_eq!(effective_tick(&c, t).0, expected);
             }
         }
 
-        /// `is_aligned` matches direct tick-count divisibility.
+        /// Plan property `swing_unified_detection_rule`. T16 reproduces
+        /// v0.1's hardcoded detector exactly.
+        #[test]
+        fn swing_unified_detection_rule(
+            t in arb_tick(),
+            r in arb_tbase(),
+        ) {
+            let c = cfg(r, 0);
+            let tc = r.tick_count();
+            let expected = t.0 % tc == 0 && (t.0 / tc) & 1 == 1;
+            prop_assert_eq!(is_swung_step(t, &c), expected);
+        }
+
+        /// Plan property `swing_amount_bound_no_step_collision`: at
+        /// `|amount| ≤ resolution.tick_count() / 2`, a swung tick stays
+        /// strictly inside the neighbouring resolution-window
+        /// `(t - tc, t + tc)` — i.e. it never reaches the adjacent
+        /// step at `t ± tc`.
+        #[test]
+        fn swing_amount_bound_no_step_collision(
+            r in arb_tbase(),
+            step in 1u32..=10_000,
+            amt_frac in -100i32..=100,
+        ) {
+            let tc = r.tick_count();
+            let cap = (tc / 2) as i32;
+            let amount_i = (amt_frac * cap / 100).clamp(i8::MIN as i32, i8::MAX as i32);
+            let amount = amount_i as i8;
+            let c = cfg(r, amount);
+            let t = Tick(step.saturating_mul(tc));
+            if is_swung_step(t, &c) {
+                let s = effective_tick(&c, t).0 as i64;
+                let lo = i64::from(t.0) - i64::from(tc);
+                let hi = i64::from(t.0) + i64::from(tc);
+                prop_assert!(s > lo && s < hi,
+                    "swung tick {s} not strictly in ({lo}, {hi}) for amount {amount}, tc {tc}");
+            }
+        }
+
+        /// Plan property `swing_coarse_binary_aligned_unswung`: ticks
+        /// aligned to a coarser binary grid `r'` (with `r'.exp() < r.exp()`)
+        /// are never swung at resolution `r`. The bar (`T1`) is therefore
+        /// always an on-beat at every resolution.
+        #[test]
+        fn swing_coarse_binary_aligned_unswung(
+            r in arb_tbase(),
+            k in 0u32..=10_000,
+            amount in any::<i8>(),
+        ) {
+            // Pick a coarser resolution r' with r'.exp() < r.exp().
+            // If r is already the coarsest, the implication is vacuous.
+            if r.exp() == 0 {
+                return Ok(());
+            }
+            let r_prime_exp = r.exp() - 1;
+            let r_prime = TBase::from_exp(r_prime_exp).unwrap();
+            let t = Tick(k.saturating_mul(r_prime.tick_count()));
+            let c = cfg(r, amount);
+            if is_aligned(t, Grid::from_tbase(r_prime)) {
+                prop_assert!(!is_swung_step(t, &c),
+                    "tick {} aligned to {:?} should not swing at {:?}",
+                    t.0, r_prime, r);
+            }
+        }
+
+        /// Plan property `swing_is_set_difference_of_binary_grids`:
+        /// for any binary `r` with `r ≠ T1`, swung-step membership
+        /// equals "aligned to r AND not aligned to next-coarser binary".
+        #[test]
+        fn swing_is_set_difference_of_binary_grids(
+            r in arb_tbase(),
+            t in arb_tick(),
+        ) {
+            let Some(r_prev) = next_coarser(r) else {
+                // T1: vacuous (no coarser).
+                return Ok(());
+            };
+            let c = cfg(r, 0);
+            let lhs = is_swung_step(t, &c);
+            let rhs = is_aligned(t, Grid::from_tbase(r))
+                && !is_aligned(t, Grid::from_tbase(r_prev));
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        /// Plan property `swing_is_bar_periodic`: shifting both `t` and
+        /// `effective_tick(t)` by `k · BAR` is equivalent.
+        #[test]
+        fn swing_is_bar_periodic(
+            c in arb_swing(),
+            t in (0u32..=100_000).prop_map(Tick),
+            k in 0u32..=10,
+        ) {
+            let k_bar = u64::from(k) * u64::from(BAR);
+            let t_shifted = u64::from(t.0) + k_bar;
+            let eff_shifted = u64::from(effective_tick(&c, t).0) + k_bar;
+            // Both must fit in u32 for the test to be applicable.
+            if t_shifted > u64::from(u32::MAX) || eff_shifted > u64::from(u32::MAX) {
+                return Ok(());
+            }
+            let lhs = effective_tick(&c, Tick(t_shifted as u32));
+            let rhs = Tick(eff_shifted as u32);
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        /// Plan property `swing_density_per_bar`: the count of swung
+        /// positions in one bar = `BAR / (2 · r.tick_count())`.
+        #[test]
+        fn swing_density_per_bar(r in arb_tbase()) {
+            let c = cfg(r, 0);
+            let tc = r.tick_count();
+            let count = (0..BAR).filter(|&t| is_swung_step(Tick(t), &c)).count() as u32;
+            let expected = BAR / (2 * tc);
+            prop_assert_eq!(count, expected);
+        }
+
+        /// Plan property `swing_is_order_preserving`: at `|amount| ≤
+        /// r.tick_count() / 2`, `effective_tick` is monotonic on `Tick`.
+        #[test]
+        fn swing_is_order_preserving(
+            r in arb_tbase(),
+            // bound amount inside the safety window
+            amount_frac in -50i32..=50,
+            t1 in (0u32..=10_000_000).prop_map(Tick),
+            delta in 0u32..=100_000,
+        ) {
+            let tc = r.tick_count();
+            let cap = (tc / 2) as i32;
+            let amount_i = (amount_frac * cap / 50).clamp(i8::MIN as i32, i8::MAX as i32);
+            let amount = amount_i as i8;
+            let c = cfg(r, amount);
+            let t2 = Tick(t1.0.saturating_add(delta));
+            let e1 = effective_tick(&c, t1);
+            let e2 = effective_tick(&c, t2);
+            prop_assert!(e1 <= e2,
+                "non-monotone: t1={:?} t2={:?} → e1={:?} e2={:?} (r={:?}, amount={})",
+                t1, t2, e1, e2, r, amount);
+        }
+
+        /// Plan property `is_swung_step_factors_through_quantize_at_resolution`:
+        /// detection depends only on the resolution-step `Time`
+        /// representation. Two ticks that floor to the same step have
+        /// the same swing decision *when both are on the resolution
+        /// grid* (off-grid ticks aren't swung anyway, so this is the
+        /// non-trivial direction).
+        #[test]
+        fn is_swung_step_factors_through_quantize_at_resolution(
+            r in arb_tbase(),
+            k1 in 0u32..=10_000,
+            k2 in 0u32..=10_000,
+        ) {
+            let g = Grid::from_tbase(r);
+            let t1 = Tick(k1.saturating_mul(r.tick_count()));
+            let t2 = Tick(k2.saturating_mul(r.tick_count()));
+            let c = cfg(r, 0);
+            let q = quantize_at(g);
+            if q.floor(t1) == q.floor(t2) {
+                prop_assert_eq!(is_swung_step(t1, &c), is_swung_step(t2, &c));
+            }
+        }
+
+        /// `is_aligned` matches direct tick-count divisibility for any
+        /// `Grid` element.
         #[test]
         fn is_aligned_matches_tick_count_mod(
-            t in arb_tick(), base in arb_tbase(),
+            t in arb_tick(),
+            g in arb_grid(),
         ) {
-            prop_assert_eq!(is_aligned(t, base), t.0 % base.tick_count() == 0);
-        }
-
-        /// Guarded alignment invariant: when a tick is aligned to `base`
-        /// *and* the swing displacement is a multiple of `base`'s tick
-        /// count, the swung tick is still aligned to `base`. This is
-        /// the restricted form of the plan's
-        /// `swing_is_aligned_invariant` that holds under the Haskell
-        /// one-sided swing semantics.
-        #[test]
-        fn swing_preserves_alignment_when_displacement_divides_base(
-            cfg in arb_swing(),
-            base in arb_tbase(),
-            k in 0u32..=10_000,
-        ) {
-            let t = Tick(k * base.tick_count());
-            let d = cfg.displacement();
-            let tc = i64::from(base.tick_count());
-            if d.rem_euclid(tc) == 0 {
-                let shifted_in_range = {
-                    let s = i64::from(t.0) - d;
-                    (0..=i64::from(u32::MAX)).contains(&s)
-                };
-                if shifted_in_range {
-                    prop_assert!(is_aligned(effective_tick(&cfg, t), base));
-                }
-            }
-        }
-
-        /// Unguarded alignment invariant (the plan's original
-        /// formulation): `is_aligned(effective_tick(t), base) =
-        /// is_aligned(t, base)` for grid-aligned `t`. This only holds
-        /// when displacement happens to be aligned to `base`, and the
-        /// test confirms the contrapositive by construction — it's a
-        /// sanity test showing the guarded version above is necessary.
-        #[test]
-        fn swing_alignment_can_break_without_displacement_guard(
-            cfg in arb_swing(),
-            base in arb_tbase(),
-            k in 0u32..=1_000,
-        ) {
-            let t = Tick(k * base.tick_count());
-            let tc = i64::from(base.tick_count());
-            let d = cfg.displacement();
-            let s = i64::from(t.0) - d;
-            if is_swung_step(t) && d.rem_euclid(tc) != 0
-                && (0..=i64::from(u32::MAX)).contains(&s)
-            {
-                // displacement doesn't divide base → alignment breaks
-                prop_assert!(!is_aligned(effective_tick(&cfg, t), base));
-            }
+            prop_assert_eq!(is_aligned(t, g), t.0 % g.tick_count() == 0);
         }
     }
 
@@ -264,27 +414,21 @@ mod tests {
 
     /// Plan property `swing_zero_mean_over_beat`. **Deferred.**
     ///
-    /// The plan specifies: `sum of (effective_tick(t) - t) across one
-    /// beat = 0 for every SwingConfig`. Under Haskell's one-sided
-    /// swing (always subtract on off-beats), the sum across one beat
-    /// at T16 grid = `-2 * amount * multiplier`, which is non-zero in
-    /// general.
-    ///
-    /// To re-enable, swing would need to become bidirectional
-    /// (alternating ± on consecutive off-beats, so they cancel
-    /// pairwise). That is an API/semantics change and is out of scope
-    /// for this sprint.
+    /// Under one-sided swing (always offset by the same sign on
+    /// off-beats), the sum across one beat is `2·amount` at T16 — non-
+    /// zero in general. To re-enable, swing would need to alternate
+    /// signs across consecutive off-beats. That's an API/semantics
+    /// change, out of scope for this sprint (carried forward from
+    /// v0.1).
     #[test]
-    #[ignore = "plan property assumes bidirectional swing; Haskell swing is one-sided"]
+    #[ignore = "plan property assumes bidirectional swing; current swing is one-sided"]
     fn swing_zero_mean_over_beat() {
-        let cfg = SwingConfig {
-            amount: 5,
-            multiplier: 3,
-        };
-        let beat_steps = [Tick(0), Tick(48), Tick(96), Tick(144)];
+        let c = cfg(TBase::T16, 80);
+        // One beat at 960 PPQN = 4 T16 steps: 0, 240, 480, 720.
+        let beat_steps = [Tick(0), Tick(240), Tick(480), Tick(720)];
         let total: i64 = beat_steps
             .iter()
-            .map(|&t| i64::from(effective_tick(&cfg, t).0) - i64::from(t.0))
+            .map(|&t| i64::from(effective_tick(&c, t).0) - i64::from(t.0))
             .sum();
         assert_eq!(total, 0);
     }

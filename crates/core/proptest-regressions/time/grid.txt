@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5930f94cc0716d5ea279e83f4e67faa7bf11bf861d244ce86f20aeb162cbd7f6 # shrinks to a = Grid { n: T1, t: false, q: false }, b = Grid { n: T1, t: true, q: false }

@@ -188,6 +188,7 @@ fn quantum_snap_produces_positive_offset() {
     link_multicast_or_skip!();
     use agogo_core::channel::{Channel, ChannelMode, MAX_SHIFT};
     use agogo_core::fxp::Micro;
+    use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
 
@@ -199,8 +200,11 @@ fn quantum_snap_produces_positive_offset() {
 
     let mut ch = Channel {
         mode: ChannelMode::MidiClock,
-        divider: TBase::T4,
-        shuffle: SwingConfig { amount: 0, multiplier: 1 },
+        divider: Grid::T4,
+        shuffle: SwingConfig {
+            resolution: TBase::T16,
+            amount: 0,
+        },
         shift: Micro::ZERO,
         offset: Micro::ZERO,
         snap_to_quantum: Some(Quantum::from_bars(4)),
