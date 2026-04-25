@@ -33,6 +33,15 @@ pub trait AudioHost {
 
 /// Per-buffer callback payload.
 ///
+/// **Channel layout (Plan 13).** `input` and `output` are mono in
+/// v0.1 — back-ends enforce `Config::input_channels == 1` (and the
+/// CV output side is empty until v0.4). Multi-channel support
+/// arrives with v0.4's `out/audio` work, at which point this
+/// struct gains explicit `input_channels` / `output_channels`
+/// fields and the buffers carry interleaved frames. Pattern
+/// matches against `AudioIo` should use `..` to ride the
+/// `#[non_exhaustive]` forward-compat.
+///
 /// Marked `#[non_exhaustive]` so v0.5's Link work can add a cpal
 /// `timestamp().playback` field without breaking downstream pattern
 /// matches — `doc/designs/link.md:23-29` requires the

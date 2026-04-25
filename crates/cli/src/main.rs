@@ -60,7 +60,9 @@ enum DemoSub {
     /// Run the demo pipeline. Connects cpal input + midir output,
     /// constructs a single MidiClock channel, and pumps the
     /// scheduler/renderer through the SPSC drain thread for
-    /// `--duration-ms` ms (or until Ctrl-C).
+    /// `--duration-ms` ms. (Plan 13 has no Ctrl-C handler; that lands
+    /// with `agogo run` in Plan 14. Use `kill -9 $(pgrep agogo-cli)`
+    /// for a hard exit before the duration elapses.)
     #[bpaf(command("run"))]
     Run {
         /// cpal input device name; pass `default` for the host's

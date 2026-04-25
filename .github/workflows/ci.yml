@@ -54,8 +54,15 @@ jobs:
   # in the `test` job above skips them by design (keeps the default
   # CI path off platform system deps). These dedicated jobs exercise
   # them with the runner's `libasound2-dev` preinstalled for ALSA.
+  #
+  # `-p <crate>` does not resolve detached crates from the workspace
+  # root, so each job sets `working-directory` to the crate's path
+  # and runs cargo from there.
   host-cpal:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/host-cpal
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
@@ -63,12 +70,16 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: install ALSA dev headers
+        working-directory: .
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - run: cargo test -p agogo-host-cpal
-      - run: cargo clippy -p agogo-host-cpal --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
 
   host-midi:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/host-midi
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
@@ -76,6 +87,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: install ALSA dev headers
+        working-directory: .
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - run: cargo test -p agogo-host-midi
-      - run: cargo clippy -p agogo-host-midi --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
