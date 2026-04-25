@@ -113,3 +113,153 @@ needs the CLI shape. Splitting fragments review.
   if RT-allocation regressions surface; existing
   `callback_does_not_realloc_events` covers the contract for v0.1.
 - Hardware-fixture loopback tests → v0.5 acceptance suite.
+
+## Local review (2026-04-24)
+
+**Branch:** `plan/2026-04-24-03`
+**Commits:** 7 (origin/main..HEAD)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+
+All 7 commits use correct prefixes (`plan:`, `feat:`, `test:`, `doc:`).
+Commit messages are concise and under 72 characters. The commit
+sequence is logically ordered (plan → core → host-link → host-cpal →
+CLI → tests → docs). Each commit is atomic for its stated scope.
+
+One concern: the `feat(cli): T4+T5+T6` commit (e33e466) bundles
+Ctrl-C handler, the full `agogo run` handler, and the binary entry
+point — three separable concerns — but all three are tightly coupled
+in `run.rs` and `Cargo.toml`, so bundling is reasonable.
+
+No merge commits; history is linear.
+
+### Code Quality
+
+**Module layout:** `machine.rs` + `machine/spec.rs` follows the modern
+layout correctly. No `mod.rs`.
+
+**`unsafe`:** All crate roots have `#![forbid(unsafe_code)]`. No
+`unsafe` in the diff.
+
+**Float discipline:** Four files added to the allowlist: `machine.rs`
+(empty `[f32; 0]` in tests — PCM ABI), `machine/spec.rs`
+(argv-boundary `f64` fields), `host-link/source.rs`
+(`PhaseSourceImpl::feed_samples` signature), `cli/run.rs` (argv
+parsers). Compliant with CLAUDE.md.
+
+**`micro_from_ms` in `spec.rs`:** Uses `F64F06.ceil(ExtendedFloat::Finite(seconds))`
+correctly — `F64F06` is the lawful Conn, not a bespoke helper.
+
+**Re-parse in `run_with_rate`:** Lines 444–462 re-parse `args.ch`
+strings to find the MIDI port name because `Channel` doesn't carry
+`dev`/`out`. Documented waste (the parse already happened in `run`),
+but the correct approach given that `Channel` is a pure musical type
+and v0.1 defers multi-port routing.
+
+**Double-binary warning:** The `[[bin]]` entries for both `agogo` and
+`agogo-cli` with the same `path = "src/main.rs"` produce a Cargo
+warning at every build. Documented in plan deviation §5. Acceptable
+for one release.
+
+**Error messages:** Diagnosable. `--ch` parse errors include the
+offending spec string. MIDI enumeration errors include the port name.
+Unsupported rate error lists all six allowed values.
+
+**`TransportState::next_byte` and Scripted Stop:** When the `Scripted`
+policy yields `Some(MidiRtByte::Stop)`, the `running` flag is NOT set
+to false (only the `stop_pending` branch does so). The comment in
+`transport_scripted_replays_schedule` at line 1295 states "Stop has
+been emitted and `running` is false" — this is factually incorrect.
+The Scripted policy is a test fixture, so the behavioral difference
+(Scripted Stop doesn't silence the machine) is intentional, but the
+comment is misleading.
+
+### Test Coverage
+
+**Verification-table walkthrough:**
+
+| Property | Present? | Notes |
+|---|---|---|
+| `spec_round_trip` | Yes | proptest in `spec::tests` |
+| `machine_buffer_matches_plan13_demo` | Yes | spot-check |
+| `multi_channel_independent_dispatch` | Yes | proptest |
+| `transport_internal_emits_start_then_stop` | Yes | |
+| `transport_link_driven_emits_on_transitions` | Yes | proptest |
+| `machine_alloc_free_per_buffer` | Deferred | documented |
+| `link_phase_source_no_deadlock` | Yes | |
+| `run_help_lists_all_six_rates` | **Missing — not documented as deferred** | |
+
+`run_help_lists_all_six_rates` is in the Verification table, absent
+from the code, and the plan's Review → Deferred section does not
+mention it. The `#[ignore]`d section says "None." Required property
+unaccounted for.
+
+**`spec_round_trip` generator bounds violate CLAUDE.md proptest rules:**
+The `swing` (`±191`) and `swing_mult` (`1..=4`) bounds in
+`arb_spec_no_quotes` have no documentation. CLAUDE.md §Property-based
+testing requires comments on any narrowed domain. The `shift_ms`
+bound is correctly documented; `offset_ms` and `swing*` are not.
+
+**`ChannelSpec::Display` produces parser-unstable output for values
+with spaces/commas/equals.** The module-level doc says "Serialise
+back into a parseable spec," but `Display` doesn't emit quotes. A
+spec like `out="IAC Bus 1"` parses successfully but `to_string()`
+produces `out=IAC Bus 1` which tokenizes incorrectly. The
+`spec_round_trip` proptest hides this by generating only ASCII
+identifiers.
+
+### Plan Conformance — T0 through T7
+
+- **T0 (core::machine):** Implemented. `Machine<R>`,
+  `TransportPolicy`, `TransportState`, `MachineStopHandle`. Plan's
+  `stop_requested: AtomicBool` factored to `Machine::stop_flag`
+  (clean deviation per Review §2).
+- **T1 (ChannelSpec parser):** Implemented. `micro_from_ms` uses
+  `F64F06` correctly.
+- **T2 (LinkPhaseSource):** Implemented.
+- **T3 (host-cpal generalisation):** Implemented.
+  `max_events_for_buffer` moved to core with re-export from host-cpal.
+- **T4+T5+T6:** All implemented. `ctrlc = "3"` wired. Six-rate static
+  dispatch. `run` composite feature.
+- **T7:** All required properties present except
+  `run_help_lists_all_six_rates`.
+
+### Risks
+
+**Dead `dev=midi` check in `run_with_rate`:** Lines 459–463 return
+`Err("no \`dev=midi\` channels among --ch specs...")`. But
+`dev=audio` is rejected by `ChannelSpec::into_channel` with
+`AudioDeferred` before `run_with_rate` is even called. The
+`ok_or_else` is dead code under current validation flow. Not a bug.
+
+**No `#[non_exhaustive]` on `TransportPolicy`:** Three variants. If
+downstream crates match on it, adding a variant in v0.2 breaks them.
+v0.1 is internal — worth annotating before exposure.
+
+**`ctrlc` dependency tree:** All MIT-licensed. Cargo.lock shows all
+transitive deps locked. `deny.toml` should not flag.
+
+### Recommendations
+
+**Must fix before push:**
+
+1. **`run_help_lists_all_six_rates` is in the Verification table,
+   absent from the code, and not documented as deferred.** Either
+   add a test or document in plan's Deferred section.
+
+2. **`ChannelSpec::Display` doc claim is false for values with
+   spaces/commas/equals.** Fix: emit quoted values when value contains
+   `,`, `=`, or whitespace, matching what `tokenize` already handles.
+
+**Follow-up (OK now, track for v0.2):**
+
+3. **`arb_spec_no_quotes` bounds for `swing`, `swing_mult`,
+   `offset_ms` undocumented.** Per CLAUDE.md §Property-based testing,
+   any narrowed domain needs a comment.
+
+4. **`transport_scripted_replays_schedule` comment line 1295 is
+   factually wrong.** "Stop has been emitted and `running` is false"
+   — Scripted Stop doesn't set `running = false`. Fix the comment.

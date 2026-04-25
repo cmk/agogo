@@ -509,13 +509,17 @@ mod tests {
             .map(|r| (r.at_sample, r.bytes[0]))
             .collect();
 
-        // After buffer 3, Stop has been emitted and `running` is
-        // false. The Scripted schedule had drained anyway, so it
-        // doesn't matter if more buffers came.
+        // The Scripted policy emits exactly the bytes the schedule
+        // dictates: Start at buffer 1, Stop at buffer 3. Unlike the
+        // `stop_pending` path, a Scripted Stop does NOT flip
+        // `running` to false — it's a fixture byte, not a stop-and-
+        // silence command. Subsequent buffers would keep draining
+        // the (now-empty) schedule with `next_byte` returning None.
         assert_eq!(
             transport,
             vec![(4_096, MIDI_START), (3 * 4_096, MIDI_STOP)],
         );
+        assert!(machine.is_running(), "Scripted Stop should not flip running");
     }
 
     proptest! {

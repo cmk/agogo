@@ -231,17 +231,18 @@ fn micro_from_ms(ms: f64) -> Micro {
 }
 
 impl Display for ChannelSpec {
-    /// Serialise back into a parseable spec. Used by the
-    /// `spec_round_trip` proptest. Always emits required keys (`dev`,
-    /// `div`); skips optional keys that are at their default to keep
-    /// the output tidy.
+    /// Serialise back into a parseable spec. `parse(spec.to_string())`
+    /// recovers the same spec for any valid `ChannelSpec`. Values
+    /// containing `,`, `=`, or whitespace are quoted so the
+    /// docker-style port name `out=IAC Bus 1` round-trips through
+    /// `Display` → `parse` correctly.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "dev={},div={}", self.dev, self.div)?;
         if let Some(id) = &self.id {
-            write!(f, ",id={}", id)?;
+            write!(f, ",id={}", quote_if_needed(id))?;
         }
         if let Some(out) = &self.out {
-            write!(f, ",out={}", out)?;
+            write!(f, ",out={}", quote_if_needed(out))?;
         }
         if self.swing != 0 {
             write!(f, ",swing={}", self.swing)?;
@@ -259,6 +260,26 @@ impl Display for ChannelSpec {
             write!(f, ",snap-quantum-us={}", q)?;
         }
         Ok(())
+    }
+}
+
+/// Wrap `v` in `"..."` if it contains any of the tokenizer's
+/// separators (`,`, `=`, whitespace) so the round-trip survives.
+/// Values without those characters are emitted verbatim. The parser
+/// has no escape sequence inside quoted values, so a value
+/// containing a literal `"` cannot round-trip — `Display` returns it
+/// verbatim and `parse` will still succeed if no separators are
+/// present, but a value like `name with " quote` will silently
+/// produce a `Malformed` error from `parse` later. v0.1 doesn't
+/// expose any code paths that produce such values; v0.2's preset
+/// I/O will need a real escaping convention.
+fn quote_if_needed(v: &str) -> String {
+    if v.chars()
+        .any(|c| c == ',' || c == '=' || c.is_whitespace())
+    {
+        format!("\"{}\"", v)
+    } else {
+        v.to_string()
     }
 }
 
@@ -419,6 +440,31 @@ mod tests {
         assert_eq!(spec, reparsed);
     }
 
+    /// `out=` values containing whitespace round-trip through
+    /// `Display` → `parse` thanks to the auto-quote in
+    /// `quote_if_needed`. The original "IAC Bus 1" macOS port name
+    /// is the canonical regression case.
+    #[test]
+    fn display_quotes_values_with_spaces() {
+        let spec = ChannelSpec::parse(r#"dev=midi,div=t32t,out="IAC Bus 1""#).unwrap();
+        let s = spec.to_string();
+        // Display emits `out="IAC Bus 1"`; parse strips the quotes.
+        assert!(s.contains(r#"out="IAC Bus 1""#), "got: {s}");
+        let reparsed = ChannelSpec::parse(&s).unwrap();
+        assert_eq!(spec, reparsed);
+    }
+
+    /// Same for embedded commas in the value.
+    #[test]
+    fn display_quotes_values_with_commas() {
+        let spec =
+            ChannelSpec::parse(r#"dev=midi,div=t32t,out="port,with,commas""#).unwrap();
+        let s = spec.to_string();
+        assert!(s.contains(r#"out="port,with,commas""#), "got: {s}");
+        let reparsed = ChannelSpec::parse(&s).unwrap();
+        assert_eq!(spec, reparsed);
+    }
+
     fn arb_dev() -> impl Strategy<Value = ChannelDev> {
         // `Audio` is reserved (parser rejects); generate `Midi` only.
         Just(ChannelDev::Midi)
@@ -443,23 +489,48 @@ mod tests {
         ])
     }
 
-    fn arb_spec_no_quotes() -> impl Strategy<Value = ChannelSpec> {
-        // Identifiers and ports drawn from a tame ASCII alphabet so
-        // round-trip is unambiguous (no embedded commas / equals /
-        // whitespace; those would round-trip too if quoted, but
-        // `Display` doesn't emit quotes).
-        let ident = "[a-zA-Z][a-zA-Z0-9_]{0,15}";
+    fn arb_spec() -> impl Strategy<Value = ChannelSpec> {
+        // Identifiers and ports include spaces, commas, and equals
+        // so the generator exercises `quote_if_needed` in the
+        // `Display` → `parse` round-trip. Values containing a
+        // literal `"` are excluded — the parser has no escape
+        // sequence and the spec doesn't expose a code path that
+        // produces such values in v0.1 (documented in
+        // `quote_if_needed`).
+        let ident = r#"[a-zA-Z0-9 ,=_]{1,15}"#;
         (
             arb_dev(),
             arb_tbase(),
             prop::option::of(ident),
             prop::option::of(ident),
-            -191_i32..=191,
-            1i32..=4,
+            // `swing` and `swing_mult` use the full SwingConfig
+            // contract: `amount` is signed (negative = early
+            // off-beat), `multiplier` is positive (proptest hits
+            // up to a generous integer range; `Display`/`parse`
+            // round-trip is identity for any i32, so the bound
+            // is about shrink speed, not coverage).
+            any::<i32>(),
+            (1i32..=i32::MAX),
             // shift-ms in [0, 300] (MAX_SHIFT) and rounded to ms
             // increments so the f64 → Micro round-trip is exact at
-            // the µs precision F64F06 gives us.
+            // the µs precision F64F06 gives us. Float values
+            // outside this range either clamp (>=300) or saturate
+            // (negative → 0) inside `into_channel`, breaking the
+            // ChannelSpec → Channel round-trip — but `ChannelSpec`
+            // → `Display` → `ChannelSpec::parse` does round-trip
+            // for any finite f64. The narrowing here is about
+            // round-trip exactness, not domain coverage; the
+            // saturation paths are spot-checked by
+            // `into_channel_clamps_shift_ms` /
+            // `into_channel_negative_shift_clamps_to_zero`.
             (0u32..=300).prop_map(|n| n as f64),
+            // offset-ms: same rationale as shift-ms — narrowed to
+            // ms increments so `Display` (`{}` formatter on f64)
+            // emits a string `parse::<f64>()` recovers exactly.
+            // `Channel::offset` is signed, so the range straddles
+            // zero. Saturation outside this range is exercised by
+            // `into_channel`-level spot checks, not this
+            // round-trip property.
             (-100i32..=100).prop_map(|n| n as f64),
             prop::option::of(any::<i32>().prop_map(|n| n as i64)),
         )
@@ -494,7 +565,7 @@ mod tests {
         /// recovers the same spec for every value the strategy
         /// generates.
         #[test]
-        fn spec_round_trip(spec in arb_spec_no_quotes()) {
+        fn spec_round_trip(spec in arb_spec()) {
             let s = spec.to_string();
             let parsed = ChannelSpec::parse(&s)
                 .map_err(|e| TestCaseError::fail(format!("parse `{}`: {}", s, e)))?;
