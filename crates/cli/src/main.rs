@@ -1272,9 +1272,10 @@ pub mod time_sched {
         #[bpaf(long, argument::<String>("GRID"), parse(parse_grid))]
         pub grid: Grid,
 
-        /// Swing ratio in `[0.5, 0.75]`: 0.5 = straight, 0.75 = full
-        /// triplet swing. f64 per the CLI argv-boundary rule
-        /// (CLAUDE.md §Repository conventions).
+        /// Swing ratio in `[0.5, 0.75]`: 0.5 = straight, 0.667 =
+        /// triplet feel (off-beat at 2/3 of the next on-beat), 0.75
+        /// = max useful swing (off-beat at 3/4). f64 per the CLI
+        /// argv-boundary rule (CLAUDE.md §Repository conventions).
         #[bpaf(long, argument("SWING"), fallback(0.5))]
         pub swing: f64,
 
@@ -1289,17 +1290,30 @@ pub mod time_sched {
     }
 
     /// Convert a `0.5..=0.75` swing ratio into a `SwingConfig` on a
-    /// T16 resolution grid. At 960 PPQN the T16 step is 240 ticks, so
-    /// a 0.75 ratio (full triplet feel) corresponds to a 0.25 × 240 =
-    /// 60-tick displacement — but the legacy mapping rounds at
-    /// ~125-tick granularity (96 ticks * (swing-0.5)*4 ≈ legacy 24
-    /// scale). We preserve the legacy `(swing - 0.5) * 96` mapping for
-    /// CLI back-compat but clamp into i8.
+    /// T16 resolution grid.
     ///
-    /// Values outside `[0.5, 0.75]` are clamped.
+    /// Two consecutive on-beats at the T16 resolution are
+    /// `2 × T16.tick_count() = 480` ticks apart at 960 PPQN. A swing
+    /// ratio `r` places the off-beat `r × 480` ticks past the on-beat;
+    /// the displacement from straight (`r = 0.5`, off-beat at 240) is
+    /// therefore `(r − 0.5) × 480` ticks. Spot values:
+    ///
+    /// - `r = 0.5  → amount = 0`   (straight)
+    /// - `r = 0.667 → amount = 80` (triplet feel: off-beat at 320 / 480)
+    /// - `r = 0.75 → amount = 120` (max useful: off-beat at 360 / 480)
+    ///
+    /// Values outside `[0.5, 0.75]` are clamped. The amount is
+    /// further clamped to `i8` (max 127) but the clamp is unreachable
+    /// inside the `[0.5, 0.75]` range since `120 < 127`.
+    ///
+    /// Note: the multiplier is derived from `T16.tick_count()` so the
+    /// musical meaning of `r` stays accurate at any PPQN — Plan 15's
+    /// 192 → 960 PPQN bump scaled the multiplier from 96 to 480
+    /// automatically rather than baking the old 192-PPQN constant.
     pub fn swing_to_config(swing: f64) -> SwingConfig {
         let clamped = swing.clamp(0.5, 0.75);
-        let amount_i32 = ((clamped - 0.5) * 96.0).round() as i32;
+        let half_step = (TBase::T16.tick_count() as f64) * 2.0;
+        let amount_i32 = ((clamped - 0.5) * half_step).round() as i32;
         let amount = amount_i32.clamp(i8::MIN as i32, i8::MAX as i32) as i8;
         SwingConfig {
             resolution: TBase::T16,
@@ -1603,24 +1617,36 @@ mod tests {
 
     #[test]
     fn swing_to_config_054() {
-        // (0.54 - 0.5) * 96 = 3.84 → round to 4
+        // (0.54 - 0.5) * 480 = 19.2 → round to 19.
         assert_eq!(
             swing_to_config(0.54),
             SwingConfig {
                 resolution: TBase::T16,
-                amount: 4,
+                amount: 19,
             }
         );
     }
 
     #[test]
-    fn swing_to_config_075_is_full_triplet() {
-        // (0.75 - 0.5) * 96 = 24.
+    fn swing_to_config_0667_is_triplet_feel() {
+        // (0.6666… - 0.5) * 480 = 80 (off-beat at 320/480 = 2/3).
+        assert_eq!(
+            swing_to_config(2.0 / 3.0),
+            SwingConfig {
+                resolution: TBase::T16,
+                amount: 80,
+            }
+        );
+    }
+
+    #[test]
+    fn swing_to_config_075_is_max_swing() {
+        // (0.75 - 0.5) * 480 = 120 (off-beat at 360/480 = 3/4).
         assert_eq!(
             swing_to_config(0.75),
             SwingConfig {
                 resolution: TBase::T16,
-                amount: 24,
+                amount: 120,
             }
         );
     }
@@ -1628,7 +1654,7 @@ mod tests {
     #[test]
     fn swing_to_config_clamps() {
         assert_eq!(swing_to_config(0.0).amount, 0);
-        assert_eq!(swing_to_config(1.0).amount, 24);
+        assert_eq!(swing_to_config(1.0).amount, 120);
     }
 
     #[test]
@@ -1652,10 +1678,11 @@ mod tests {
             swing: 0.54,
             bars: 1,
         });
-        // 16 steps. Off-beats (indices 1, 3, 5, …, 15) shifted by +4
-        // (drum-machine sign convention: positive amount delays).
+        // 16 steps. Off-beats (indices 1, 3, 5, …, 15) shifted by +19
+        // ticks: (0.54 - 0.5) × 480 = 19.2 → 19. Drum-machine sign
+        // convention: positive amount delays the off-beat.
         let expected: Vec<u32> = (0..16u32)
-            .map(|i| if i % 2 == 1 { i * 240 + 4 } else { i * 240 })
+            .map(|i| if i % 2 == 1 { i * 240 + 19 } else { i * 240 })
             .collect();
         let got: Vec<u32> = ticks.iter().map(|t| t.0).collect();
         assert_eq!(got, expected);

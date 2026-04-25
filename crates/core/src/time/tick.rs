@@ -1,7 +1,7 @@
 //! `Tick` (960 PPQN master counter) and canonical `Time { beats, base }`.
 //!
 //! `Time` equality is by tick count, *not* structural — two
-//! representations of the same duration (`Time { 16, T512P }` and
+//! representations of the same duration (`Time { 240, T512P }` and
 //! `Time { 1, T16 }` are both 240 ticks at 960 PPQN) compare equal.
 //!
 //! `from_ticks` is the ceiling side of the `ticks` Galois connection:

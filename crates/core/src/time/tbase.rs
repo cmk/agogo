@@ -6,7 +6,8 @@
 //! lattice lives in [`crate::time::grid`].
 //!
 //! `TBase` is totally ordered by divisibility of tick counts (a chain):
-//! `T1 < T2 < T4 < … < T256` in the lattice's divisibility order,
+//! `T256 ≤ … ≤ T4 ≤ T2 ≤ T1` in the lattice's divisibility order
+//! (finer grids — smaller tick counts — are lower under `Ple`),
 //! with `T1` (= bar) at the top and `T256` (= bar/256) at the bottom.
 
 use connections::lattice::Ple;
