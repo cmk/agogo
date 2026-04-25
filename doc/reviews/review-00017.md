@@ -149,3 +149,140 @@ caught it once they could run; fixed inline.
   shifts at the PPQN bump — at 192 PPQN the same role was
   played by `t32t`. Updated in the plan's build-gate line and
   Review section.)
+
+## Local review (2026-04-25)
+
+**Branch:** `plan/2026-04-24-04`
+**Commits:** 4 (origin/main..plan/2026-04-24-04)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+
+All four commits use accepted prefixes (`plan:`, `feat(core):`,
+`test(core):`, `doc:`) with imperative subjects under 72 chars. No
+merge commits. Atomicity is clean: plan opener, mechanically-uniform
+migration in one commit (per the plan's MR-split recommendation),
+T6 as a follow-on, doc finalization. Acceptable.
+
+### Code Quality
+
+The migration follows repo conventions cleanly:
+
+- `#![forbid(unsafe_code)]` preserved across all crate roots.
+- `scripts/check-floats.sh` clean — no new stored floats outside the
+  existing allowlist; the Plan 14 exception files keep their `// argv
+  boundary` / `// PCM ABI` markers.
+- All numerical conversions go through named `Conn`s (`F64F06`,
+  `F12F06`, `pico_to_samples`, `SampleTickConn`) — no bespoke
+  hardcoded helpers introduced.
+- The `quantize_at` 36-arm `if`-chain instead of `match` is documented
+  in the plan's Review section as a structural deviation forced by
+  Rust's lack of struct-const pattern matching. Acceptable; the
+  `unreachable!` final arm guards against future Grid additions.
+
+Three stale doc comments need fixing before push (see Must Fix below).
+The `swing-mult` → `swing-res` CLI rename is a breaking change at the
+spec mini-language; documented in the plan's Review section and in
+`machine::spec`'s module header, but `run.rs`'s `--ch` flag help text
+still advertises the old `swing-mult` key — users following `--help`
+will get a hard `UnknownKey` error.
+
+### Test Coverage
+
+All 22 plan-listed properties are present:
+
+- 11 swing properties in `time::swing::tests` ✅
+- 7 grid lattice / Heyting properties in `time::grid::tests` ✅
+- `channel_subdiv_preserves_phase_960` covered structurally by
+  `scheduler_events_in_window` and `scheduler_block_equivalence` over
+  `arb_grid()` (the full 36-element set) ✅
+- 3 exact-rates properties in `time::exact_rates::tests` ✅
+
+`non_divisor_bpm_is_not_exact` confirms `assert_exact` is
+discriminating (137 BPM at 48k yields a non-zero residual), so the
+exact-rates proptests aren't passing trivially.
+
+**Test-coverage gap (must fix):** `arb_tick` caps at `1_000_000` with
+no `Just(Tick(u32::MAX))` arm. CLAUDE.md is explicit: "Named
+boundaries (`i64::MAX`, `i64::MIN`, `0`, NaN, ±∞) go in explicit
+`Just(_)` arms with elevated frequency." `swing_offset_is_exact_i8`
+documents bounding `t in (200u32..=10_000_000)` to "leave plenty of
+headroom" but doesn't add the required spot-check at the un-sampled
+boundary. The saturation path is reachable: at `T256` resolution
+(tick_count=15), `Tick(u32::MAX)` is on-grid (`u32::MAX % 15 == 0`),
+its step index `u32::MAX / 15 = 286_331_153` is odd so it's a swung
+step, and `effective_tick` clamps to `Tick(u32::MAX)`. No test
+verifies the clamp produces the right value.
+
+### Plan Conformance
+
+T1–T7 all implemented. The four design deviations listed in the plan's
+Review section are accurate (swing-mult→swing-res rename, if-chain
+dispatch, --tbase→--grid only on time-schedule, demo divider value
+shift). No undocumented scope creep. The single-PR recommendation is
+appropriate for the mechanically-uniform `s/TBase/Grid/` migration.
+
+### Risks
+
+- **Stale doc comments** (3 sites): `run.rs:41` says PPQN is 192,
+  `main.rs:128–130` says T32t is 24-PPQN MIDI clock, `main.rs:288`
+  references the removed `multiplier` field. Issues #3 and #4 are in
+  `--help` output and will mislead users.
+- **`swing-mult` → `swing-res` breaking change** documented in the
+  plan Review and module header but not in any user-facing CHANGELOG.
+  Project doesn't ship a CHANGELOG yet, so acceptable for now; flag
+  for v0.2 release prep.
+- **Inverted `Grid::tick_count` formula bug fixed in the migration.**
+  No regression concern — the current test suite (spot checks +
+  `meet_is_gcd` / `join_is_lcm` proptests) verifies the formula
+  exhaustively across all 36 elements. The bug only escaped initial
+  review because the worktree didn't compile end-to-end so no tests
+  could run.
+- **`quantize_at` exhaustion** is unchecked at the type level (Grid is
+  a struct); future Grid additions will only signal at runtime via
+  `unreachable!`. Acceptable for now; consider a compile-time check
+  if Grid grows.
+- No unsafe code, no security-sensitive surface in this diff.
+
+### Recommendations
+
+**Must fix before push:**
+
+1. **`crates/cli/src/run.rs:72-73`** — `--ch` flag doc comment
+   advertises `swing-mult` (removed) instead of `swing-res`.
+   `ChannelSpec::parse` returns `UnknownKey("swing-mult")` for any
+   user copying from `--help` output. Replace `swing-mult` with
+   `swing-res` (default `t16`).
+
+2. **`crates/core/src/arb.rs` (`arb_tick`)** — add
+   `Just(Tick(u32::MAX))` as a frequency-weighted arm. **And** in
+   `crates/core/src/time/swing.rs`, add a `#[test]` spot-check for
+   `effective_tick` saturation at the upper boundary (e.g. `T256`
+   resolution, `amount: 127`, `t = u32::MAX` → assert clamp to
+   `Tick(u32::MAX)`). Required by CLAUDE.md's explicit rule on
+   bounded-domain proptests.
+
+3. **`crates/cli/src/run.rs:41`** — `PULSE_PPQ` comment ends with
+   "(192)"; PPQN is 960. Off-by-five-times misdirection for anyone
+   working on the PLL.
+
+4. **`crates/cli/src/main.rs:127-131`** — `midi trace`'s help text
+   says 192 PPQN / 8 ticks / `T32t` for 24-PPQN MIDI clock cadence.
+   At 960 PPQN it's 40 ticks / `Grid::T64T`. Currently tells users
+   the wrong divider name.
+
+**Follow-up (future work):**
+
+- `crates/cli/src/main.rs:288` — comment references removed
+  `multiplier` field. Low impact (source-level only, not in
+  `--help`); fold into next plan's doc pass.
+- Consider a compile-time exhaustiveness check for `quantize_at`
+  before Grid is extended in a future plan.
+- The "non-binary divider × binary swing-res" combination is
+  silently allowed — currently swing fires only when the divider
+  tick happens to land on the resolution grid, which for `T8Q × T8`
+  is once per bar. Worth either tightening the type to forbid
+  mismatches or surfacing a CLI warning. Listed in the plan's v0.3+
+  recommendations; tracking.

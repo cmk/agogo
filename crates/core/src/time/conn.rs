@@ -683,12 +683,23 @@ mod tests {
         }
 
         // ── quantize_at ──────────────────────────────────────────
+        //
+        // `c.ceil(n)` returns `Time { beats: n.0.div_ceil(tc), base: g }`
+        // where `tc = g.tick_count()`. For `n` near `u32::MAX`, the
+        // *Time*'s `beats × tc` can exceed `u32::MAX` (`time_to_tick`
+        // panics on `checked_mul` overflow). The `arb_tick()`
+        // distribution includes `u32::MAX` per CLAUDE.md's full-domain
+        // rule, so any property that subsequently calls
+        // `time_to_tick(c.ceil(n))` (directly or via `.ple`) must
+        // `prop_assume!` away the overflow corner. Spot checks at the
+        // saturation boundary live in `time::swing::tests`.
 
         #[test]
         fn quantize_at_brackets_input(
             g in arb_grid(), n in arb_tick(),
         ) {
             let c = quantize_at(g);
+            prop_assume!(ceil_fits(n, g));
             let lo = time_to_tick(c.floor(n));
             let hi = time_to_tick(c.ceil(n));
             prop_assert!(lo.ple(&n));
@@ -710,6 +721,7 @@ mod tests {
             g in arb_grid(), n in arb_tick(), k in 0u32..=10_000,
         ) {
             let c = quantize_at(g);
+            prop_assume!(ceil_fits(n, g));
             let t = Time { beats: k, base: g };
             let lhs = c.ceil(n).ple(&t);
             let rhs = n.ple(&c.inner(t));
@@ -719,6 +731,7 @@ mod tests {
         #[test]
         fn quantize_at_closed(g in arb_grid(), n in arb_tick()) {
             let c = quantize_at(g);
+            prop_assume!(ceil_fits(n, g));
             prop_assert!(n.ple(&c.inner(c.ceil(n))));
         }
 
@@ -735,6 +748,7 @@ mod tests {
             a1 in arb_tick(), a2 in arb_tick(),
         ) {
             let c = quantize_at(g);
+            prop_assume!(ceil_fits(a1, g) && ceil_fits(a2, g));
             if a1.ple(&a2) {
                 prop_assert!(c.ceil(a1).ple(&c.ceil(a2)));
                 prop_assert!(c.floor(a1).ple(&c.floor(a2)));
@@ -744,6 +758,7 @@ mod tests {
         #[test]
         fn quantize_at_idempotent(g in arb_grid(), n in arb_tick()) {
             let c = quantize_at(g);
+            prop_assume!(ceil_fits(n, g));
             let once = c.inner(c.ceil(n));
             let twice = c.inner(c.ceil(once));
             prop_assert_eq!(once, twice);
@@ -766,6 +781,15 @@ mod tests {
         let ta = time_to_tick(a).0;
         let tb = time_to_tick(b).0;
         if tb == 0 { ta == 0 } else { ta % tb == 0 }
+    }
+
+    /// True when `quantize_at(g).ceil(n)` fits back through
+    /// `time_to_tick` without `checked_mul` overflow. Used to skip
+    /// `arb_tick()`'s `u32::MAX` boundary in proptests that compose
+    /// `time_to_tick` on the ceil result.
+    fn ceil_fits(n: Tick, g: Grid) -> bool {
+        let tc = g.tick_count();
+        n.0.div_ceil(tc).checked_mul(tc).is_some()
     }
 
     proptest! {

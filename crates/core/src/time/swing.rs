@@ -201,6 +201,47 @@ mod tests {
         assert_eq!(effective_tick(&c, Tick(241)), Tick(241));
     }
 
+    // ── Saturation boundary spot-checks ──────────────────────────
+    //
+    // `arb_tick()` includes `Tick(u32::MAX)` per CLAUDE.md's full-
+    // domain rule, but the swing proptests bound `t` away from the
+    // upper edge so saturation arithmetic is delicate (the
+    // `clamp(0, u32::MAX)` in `effective_tick` is otherwise
+    // unexercised by sampled inputs). These #[test]s pin the
+    // saturation behavior at both ends so the bounded proptest
+    // domain has a complementary coverage point.
+
+    #[test]
+    fn effective_tick_saturates_at_u32_max() {
+        // T256 tick_count = 15; u32::MAX = 4_294_967_295 = 15 × 286_331_153.
+        // 286_331_153 is odd, so u32::MAX is a swung step under T256.
+        // amount = 127 (max positive i8): shifted = u32::MAX + 127 →
+        // clamps to u32::MAX, not wrap.
+        let c = cfg(TBase::T256, 127);
+        assert!(is_swung_step(Tick(u32::MAX), &c));
+        assert_eq!(effective_tick(&c, Tick(u32::MAX)), Tick(u32::MAX));
+    }
+
+    #[test]
+    fn effective_tick_saturates_at_zero() {
+        // T256 tick_count = 15; tick 15 is step 1 (odd) → swung.
+        // amount = -127 (most negative i8 the bound allows): shifted =
+        // 15 - 127 = -112 → clamps to 0, not underflow-wrap.
+        let c = cfg(TBase::T256, -127);
+        assert!(is_swung_step(Tick(15), &c));
+        assert_eq!(effective_tick(&c, Tick(15)), Tick(0));
+    }
+
+    #[test]
+    fn effective_tick_zero_tick_is_on_beat_at_every_resolution() {
+        // Tick(0) is step 0 (even) at every resolution → never swung;
+        // saturates trivially because effective_tick is identity.
+        for r in TBase::ALL {
+            let c = cfg(r, i8::MAX);
+            assert_eq!(effective_tick(&c, Tick(0)), Tick(0));
+        }
+    }
+
     // ── Property tests ───────────────────────────────────────────
 
     proptest! {

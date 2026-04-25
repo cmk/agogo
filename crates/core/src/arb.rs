@@ -164,11 +164,20 @@ mod strategies {
         ]
     }
 
+    /// Per CLAUDE.md's full-domain rule, named boundaries (0,
+    /// `Grid::T512P` = 1, `Grid::T1` = 3840 ticks per bar, `u32::MAX`)
+    /// get explicit `Just` arms with elevated frequency. The 4-weighted
+    /// uniform arm covers the 0..=1M range where most musically-
+    /// meaningful tick values live; downstream proptests that compose
+    /// `time_to_tick` on a coarse-Grid `ceil(n)` (where `beats *
+    /// tick_count` can exceed `u32::MAX` for `n` near the upper
+    /// boundary) guard with `prop_assume!` rather than re-bounding here.
     pub fn arb_tick() -> impl Strategy<Value = Tick> {
         prop_oneof![
             1 => Just(Tick(0)),
             1 => Just(Tick(Grid::T512P.tick_count())),
             1 => Just(Tick(Grid::T1.tick_count())),
+            1 => Just(Tick(u32::MAX)),
             4 => (0u32..=1_000_000).prop_map(Tick),
         ]
     }
