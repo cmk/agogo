@@ -141,14 +141,30 @@ impl std::fmt::Debug for Handle {
 }
 
 /// Errors a back-end can surface from [`AudioHost::run`].
+///
+/// Marked `#[non_exhaustive]` so additional variants (per-back-end
+/// specifics, v0.4's CV-output side, etc.) can land without
+/// breaking downstream `match` statements — pattern-match callers
+/// should always use a `_` fallback arm.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AudioHostError {
     #[error("no default input device")]
     NoInputDevice,
     #[error("device not found: {0}")]
     DeviceNotFound(String),
+    /// The requested `Config::sample_rate` isn't in any of the
+    /// device's supported-config ranges. Distinct from
+    /// [`Self::UnsupportedConfig`] which covers format / channel
+    /// mismatches when the rate itself IS supported.
     #[error("unsupported sample rate: {0}")]
     UnsupportedSampleRate(u32),
+    /// The device's supported configs cover the requested sample
+    /// rate but not the full `Config` combination — typically a
+    /// sample-format or channel-count mismatch. The string details
+    /// what was actually available vs. requested.
+    #[error("unsupported config: {0}")]
+    UnsupportedConfig(String),
     /// Back-end-specific failure (cpal build error, JACK client
     /// error, etc.). Wrapped so `agogo-core` can surface the message
     /// without linking the back-end's error type.
@@ -196,15 +212,19 @@ mod tests {
         fn _accepts_dyn_audio_host(_h: Box<dyn AudioHost>) {}
     }
 
-    /// Exhaustive match on `AudioHostError` — adding a new variant
-    /// trips this test, forcing a decision on how back-ends should
-    /// surface it.
+    /// Sanity match over every known `AudioHostError` variant.
+    /// Uses a wildcard arm because `AudioHostError` is
+    /// `#[non_exhaustive]` — adding a variant mustn't break
+    /// downstream match statements. The `_` arm catches new
+    /// variants at runtime; if a future variant needs explicit
+    /// handling here, add it above the `_`.
     #[test]
-    fn audio_host_error_exhaustive() {
+    fn audio_host_error_variants_constructible() {
         let errs = [
             AudioHostError::NoInputDevice,
             AudioHostError::DeviceNotFound("x".into()),
             AudioHostError::UnsupportedSampleRate(12_345),
+            AudioHostError::UnsupportedConfig("no f32 at 48 kHz".into()),
             AudioHostError::Backend("stub".into()),
         ];
         for e in errs {
@@ -212,7 +232,9 @@ mod tests {
                 AudioHostError::NoInputDevice
                 | AudioHostError::DeviceNotFound(_)
                 | AudioHostError::UnsupportedSampleRate(_)
+                | AudioHostError::UnsupportedConfig(_)
                 | AudioHostError::Backend(_) => {}
+                _ => unreachable!("new AudioHostError variant not handled here"),
             }
         }
     }
