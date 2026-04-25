@@ -11,10 +11,11 @@
 #   crates/core/src/sync/source.rs     PCM audio intake (`&[f32]`) + tests
 #   crates/core/src/fxp.rs             argv-boundary + PI-exempt helpers
 #   crates/core/src/arb.rs             test-fixture PCM generators
-#   crates/core/src/host.rs            PCM ABI shape (AudioIo `&[f32]` slices)
-#   crates/host-link/src/link.rs       Link FFI (AblLink C++ ABI)
-#   crates/host-cpal/src/cpal.rs       PCM ABI (cpal stream callback)
-#   crates/cli/src/main.rs             argv parsers
+#   crates/core/src/host.rs                       PCM ABI shape (AudioIo `&[f32]` slices)
+#   crates/host-link/src/link.rs                  Link FFI (AblLink C++ ABI)
+#   crates/host-cpal/src/cpal.rs                  PCM ABI (cpal stream callback)
+#   crates/host-cpal/src/cpal/callback.rs         PCM ABI (AudioIo input/output slices)
+#   crates/cli/src/main.rs                        argv parsers
 #
 # Any `f32` / `f64` in a non-allowlisted file is a build failure.
 # To add a new allowlisted file, amend both this script and
@@ -40,6 +41,7 @@ ALLOWED=(
   "crates/core/src/host.rs"
   "crates/host-link/src/link.rs"
   "crates/host-cpal/src/cpal.rs"
+  "crates/host-cpal/src/cpal/callback.rs"
   "crates/cli/src/main.rs"
 )
 

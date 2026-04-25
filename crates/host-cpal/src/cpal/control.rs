@@ -119,6 +119,16 @@ impl RtProducer {
     pub fn dropped_count(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
     }
+
+    /// Shareable handle to the dropped-counter atomic. Callers
+    /// clone this before moving the producer into the audio
+    /// callback (where the producer becomes inaccessible from the
+    /// control thread) so they can keep polling the gauge — the
+    /// `agogo demo` CLI does this to print the final tally at
+    /// shutdown.
+    pub fn dropped_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.dropped)
+    }
 }
 
 impl MidiSink for RtProducer {

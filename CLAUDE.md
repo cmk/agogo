@@ -125,9 +125,10 @@ core = ["dep:project-core"]
 
   `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
   lives outside the file-level allowlist (the script encodes the
-  nine exception modules — the seven from Plan 11 plus
-  `crates/core/src/host.rs` and `crates/host-cpal/src/cpal.rs`,
-  both PCM-ABI sites added in Plan 13). The annotation comments above are
+  ten exception modules — the seven from Plan 11 plus
+  `crates/core/src/host.rs`, `crates/host-cpal/src/cpal.rs`, and
+  `crates/host-cpal/src/cpal/callback.rs`, all PCM-ABI sites added
+  in Plan 13). The annotation comments above are
   reviewer-oriented markers inside allowlisted files — they're not
   enforced by the grep gate itself, which would need a full Rust
   parser to classify each use. Pattern 9 in

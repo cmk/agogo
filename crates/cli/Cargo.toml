@@ -10,11 +10,21 @@ publish = false
 default = ["core"]
 core = ["dep:agogo-core"]
 link = ["dep:agogo-host-link", "agogo-host-link/rusty-link"]
+cpal = ["dep:agogo-host-cpal"]
+midi = ["dep:agogo-host-midi"]
+# `demo` activates the `agogo demo` subcommand: cpal audio in +
+# midir MIDI out + the SPSC drain thread + CallbackState pipeline.
+# Plan 13 T5.
+demo = ["cpal", "midi"]
 
 [dependencies]
 agogo-core = { workspace = true, optional = true }
-# Direct path dep (not a workspace dep) — `crates/host-link` lives
-# outside `[workspace].members` so CI never resolves `ext/rusty_link`
-# unless `--features link` is explicitly requested.
+# Direct path deps (not workspace deps) — `crates/host-link`,
+# `crates/host-cpal`, and `crates/host-midi` live outside
+# `[workspace].members` so CI doesn't resolve their platform
+# system deps (libasound, CoreAudio, WASAPI) unless their feature
+# is explicitly requested.
+agogo-host-cpal = { path = "../host-cpal", optional = true }
 agogo-host-link = { path = "../host-link", optional = true }
+agogo-host-midi = { path = "../host-midi", optional = true }
 bpaf = { workspace = true }
