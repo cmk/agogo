@@ -14,11 +14,9 @@ is proven.
 
 ## Status as of 2026-04-24
 
-Three foundation sprints shipped as originally scoped, then work
-pivoted into a four-plan detour (CLI infra, fxp refactor, Link
-read-only slice, post-fxp numerical-cast hardening). Two worktrees
-are now wrapping up the tail of the detour. Output chain (MIDI out →
-hosts → binary) still to go.
+All v0.1 sprints have shipped. Plan 14 (Machine + `agogo run` +
+`bin/agogo`) is the final piece; the v0.1 acceptance scenario
+below is reachable end-to-end.
 
 ### Merged on main
 
@@ -32,30 +30,24 @@ hosts → binary) still to go.
 | `plan-2026-04-23-04` | #6 | Link read-only structural slice — `agogo-host-link` crate scaffold, `PhaseSourceImpl` trait, `PhaseSource::Custom(...)` variant. |
 | *(hotfix)* | #7 | `fix/host-link-phase-type` — align `phase_at_sample` return type with fxp `Phase`. Pre-rule standalone fix. |
 | `plan-2026-04-23-05` | #8 | Link phase bridge — `LinkClock::phase_at_sample` over a static `HostTimeAnchor`; `agogo link probe` CLI. |
+| `plan-2026-04-23-06` | #12 | Plan 09: Link bidirectional foundation — tempo push, `{Stopped, Playing}` transport FSM via `rust-fsm 0.7`, per-channel `snap_to_quantum: Option<Quantum>`. Closes the Link detour for v0.1; PID sync + forerun transport are v0.5 territory. |
 | `plan-2026-04-23-07` | #9 | Post-fxp enforcement MR #1: scaffolding + PLL migration. `PicoSampleConn`, `tempo_to_hz` / `bits_q48_16_to_seconds` helpers, PLL consumes the new helpers. |
-| `plan-2026-04-23-08` | #10 | Rev bump to `connections` ccc4d85 + rename migration (sprint opener for the plan below). |
+| `plan-2026-04-23-08` | #10, #11 | Plans 10–11: connections rev bump + rename migration; post-fxp boundary sweep — Channel state → `Micro`, CLI argv f64 via Conns, `ProbeRow` drops stored floats, `LinkClock` surface exposes `Tempo`, `scripts/check-floats.sh` grep gate + CI wire, CLAUDE.md rules. |
+| `plan-2026-04-24-01` | #14 | Plan 12: `out/midi` — `MidiSink` trait, `0xF8` clock + `0xFA/0xFB/0xFC` transport bytes, `TestSink`, `render_channel_block` per-channel dispatch, `agogo midi trace` CLI. |
+| `plan-2026-04-24-02` | #15 | Plan 13: `host-cpal` + `host-midi` + RT callback — `CpalHost` + `MidirSink` + rtrb SPSC drain, single-channel `CallbackState` + `agogo demo run` CLI. |
 
 ### In flight
 
 | Worktree / branch | Scope |
 |-------------------|-------|
-| `plan/2026-04-23-06` (Plan 09) | Link bidirectional foundation: tempo push, `{Stopped, Playing}` transport FSM via `rust-fsm 0.7`, per-channel `snap_to_quantum: Option<Quantum>`. Closes the Link detour for v0.1; PID sync + forerun transport are v0.5 territory. |
-| `plan/2026-04-23-08` (Plan 11 MR #2) | Post-fxp boundary sweep: Channel state → `Micro`, CLI argv f64 via Conns, `ProbeRow` drops stored floats, `LinkClock` surface exposes `Tempo`, `scripts/check-floats.sh` grep gate + CI wire, CLAUDE.md + review-calibration rules. Closes the numerical-cast / Conn-usage hardening. |
-
-### Still to ship for v0.1
-
-| Slug | Scope |
-|------|-------|
-| TBD | `out/midi` — MIDI clock byte emission (0xF8 ticks at PPQN/24, 0xFA/0xFC start/stop), `MidiSink` trait, sample-indexed timestamping. Pure trait + a synthetic test sink; no real backend yet. |
-| TBD | `host/cpal` + `host/midir` + `rt/` — cross-platform audio input via cpal, MIDI output via midir. The audio callback hot loop and `rtrb`-based control plane. |
-| TBD | `machine.rs` + `bin/agogo` — N-channel `Machine`, top-level binary, end-to-end CLI run. |
+| `plan/2026-04-24-03` (Plan 14) | `Machine` + `agogo run` + `bin/agogo` — N-channel orchestrator, docker-style repeatable `--ch` specs, six-rate static dispatch, `LinkSession` plugged in via `PhaseSource::Custom`, Ctrl-C teardown. Final v0.1 sprint. |
 
 ## Detour context
 
 v0.1's original plan had three output-chain sprints (`out/midi`,
 `host/cpal`+`midir`+`rt`, `machine`+binary) directly after the
 `channel/` foundation. Four items landed between slot 03 and the
-current state that weren't in the original plan:
+output chain that weren't in the original plan:
 
 1. **CLI parser migration** (`plan-2026-04-23-02`). Pure infra, no
    scope impact.
@@ -64,26 +56,28 @@ current state that weren't in the original plan:
    `connections` crate's Galois-connection API. Foundational — every
    subsequent plan is downstream of this.
 3. **Link read-only slice** (`plan-2026-04-23-04`, `plan-2026-04-23-05`,
-   `plan/2026-04-23-06` in flight). Structural skeleton for Ableton
-   Link as a `PhaseSource`. The in-flight Plan 09 is the last Link
-   work v0.1 carries; full Link (PID sync, per-buffer anchor, forerun
-   transport) is scoped to v0.5.
-4. **Post-fxp enforcement** (`plan-2026-04-23-07`, `plan-2026-04-23-08`
-   landed; `plan/2026-04-23-08` MR #2 in flight). No stored `f32`/`f64`
-   outside five documented exceptions; every numerical conversion
-   routes through a named `Conn`; CI grep gate + CLAUDE.md rules lock
-   it in.
+   `plan-2026-04-23-06`). Structural skeleton for Ableton Link as a
+   `PhaseSource`, plus Plan 09's bidirectional foundation. Full
+   Link (PID sync, per-buffer anchor, forerun transport) is scoped
+   to v0.5.
+4. **Post-fxp enforcement** (`plan-2026-04-23-07`, `plan-2026-04-23-08`).
+   No stored `f32`/`f64` outside the documented exceptions; every
+   numerical conversion routes through a named `Conn`; CI grep gate
+   + CLAUDE.md rules lock it in.
 
-Once the two in-flight branches merge, the detour is done and work
-returns to the output-chain sprints listed above.
+After the detour, the three output-chain sprints (Plans 12, 13,
+14) shipped in sequence; v0.1 is now ready to tag.
 
 ## v0.1 acceptance
 
-- `cargo run -p agogo-cli -- agogo run --audio-in <device>
-  --midi-out <port> --bpm 120` emits a steady MIDI clock that
-  follows the input click within the PLL's jitter spec
-  (`plan-2026-04-22-02` baseline: ±0.05 BPM steady-state at ≤ 200 µs
-  input jitter).
+- `cargo run --bin agogo -- run --audio-in <device> --bpm 120
+  --source external --sr 48000 --ch dev=midi,div=t32t,out=<port>`
+  emits a steady MIDI clock that follows the input click within
+  the PLL's jitter spec (`plan-2026-04-22-02` baseline: ±0.05 BPM
+  steady-state at ≤ 200 µs input jitter). The docker-style
+  repeatable `--ch` flag (Plan 14) replaces the original
+  `--midi-out <port>` spelling — capability preserved, surface
+  generalises to N channels.
 - All `cargo test --workspace` properties green; `cargo clippy
   --all-targets -- -D warnings` clean; gitleaks job green.
 - `scripts/check-floats.sh` exits 0 (post-hardening).
