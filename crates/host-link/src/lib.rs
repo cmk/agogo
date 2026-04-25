@@ -25,10 +25,16 @@ pub mod transport;
 pub mod session;
 
 #[cfg(feature = "rusty-link")]
+pub mod source;
+
+#[cfg(feature = "rusty-link")]
 pub use link::{HostTimeAnchor, LinkClock};
 
 #[cfg(feature = "rusty-link")]
 pub use session::{LinkSession, LinkWriteConfig};
+
+#[cfg(feature = "rusty-link")]
+pub use source::{LinkPhaseSource, LinkSessionHandle};
 
 #[cfg(feature = "rusty-link")]
 pub use transport::{TransportEvent, TransportFsm, TransportOutput, TransportState};
