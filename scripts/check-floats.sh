@@ -19,6 +19,7 @@
 #   crates/host-cpal/src/cpal.rs                  PCM ABI (cpal stream callback)
 #   crates/host-cpal/src/cpal/callback.rs         PCM ABI (AudioIo input/output slices)
 #   crates/cli/src/main.rs                        argv parsers
+#   crates/cli/src/run.rs                         argv parsers (`--bpm` / `--link-quantum` / `--ch shift-ms`)
 #
 # Any `f32` / `f64` in a non-allowlisted file is a build failure.
 # To add a new allowlisted file, amend both this script and
@@ -49,6 +50,7 @@ ALLOWED=(
   "crates/host-cpal/src/cpal.rs"
   "crates/host-cpal/src/cpal/callback.rs"
   "crates/cli/src/main.rs"
+  "crates/cli/src/run.rs"
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
