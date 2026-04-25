@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "run")]
+mod run;
+
 use bpaf::Bpaf;
 use time_sched::schedule_args;
 
@@ -51,6 +54,14 @@ enum Command {
     Demo {
         #[bpaf(external(demo_sub))]
         sub: DemoSub,
+    },
+    /// Plan 14's end-to-end runner. N-channel Machine, six-rate
+    /// dispatch, internal/external/link sources, Ctrl-C teardown.
+    #[cfg(feature = "run")]
+    #[bpaf(command("run"))]
+    Run {
+        #[bpaf(external(run::run_args))]
+        args: run::RunArgs,
     },
 }
 
@@ -574,6 +585,13 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        #[cfg(feature = "run")]
+        Some(Command::Run { args }) => {
+            if let Err(e) = run::run(&args) {
+                eprintln!("error: {e}");
+                std::process::exit(2);
+            }
+        }
         None => {
             #[cfg(feature = "core")]
             let tag = "with core";

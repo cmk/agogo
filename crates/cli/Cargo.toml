@@ -16,6 +16,11 @@ midi = ["dep:agogo-host-midi"]
 # midir MIDI out + the SPSC drain thread + CallbackState pipeline.
 # Plan 13 T5.
 demo = ["cpal", "midi"]
+# `run` activates Plan 14's `agogo run`: N-channel Machine,
+# six-rate static dispatch, Ctrl-C handling, top-level pipeline.
+# Includes `link` so `--source link` is wired up; without `link`
+# the handler errors cleanly on `--source link`.
+run = ["demo", "link", "dep:ctrlc"]
 
 [dependencies]
 agogo-core = { workspace = true, optional = true }
@@ -28,3 +33,16 @@ agogo-host-cpal = { path = "../host-cpal", optional = true }
 agogo-host-link = { path = "../host-link", optional = true }
 agogo-host-midi = { path = "../host-midi", optional = true }
 bpaf = { workspace = true }
+ctrlc = { version = "3", optional = true }
+
+# Plan 14: explicit binary entry. `agogo` is the user-facing name
+# (matches `doc/versions/version-0.1.md` acceptance literal). The
+# default `agogo-cli` binary stays available for the v0.1 release
+# so existing scripts keep working; remove in v0.2.
+[[bin]]
+name = "agogo"
+path = "src/main.rs"
+
+[[bin]]
+name = "agogo-cli"
+path = "src/main.rs"
