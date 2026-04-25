@@ -1316,13 +1316,14 @@ pub mod demo {
     use agogo_core::channel::{Channel, ChannelMode};
     use agogo_core::fxp::{Micro, S48, SampleRate, Tempo};
     use agogo_core::host::{AudioHost, Config};
+    use agogo_core::machine::{Machine, TransportPolicy};
     use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-    use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
     use agogo_core::time::tick::PPQN;
     use agogo_host_cpal::CpalHost;
-    use agogo_host_cpal::cpal::callback::{CallbackState, max_events_for_buffer};
+    use agogo_host_cpal::cpal::callback::CallbackState;
+    use std::collections::VecDeque;
     use agogo_host_cpal::cpal::control::spsc;
     use agogo_host_midi::MidirSink;
     use std::sync::Arc;
@@ -1435,8 +1436,12 @@ pub mod demo {
         let drain_sink: Arc<dyn agogo_core::out::midi::MidiSink + Send + Sync> = sink;
         let drain = consumer.spawn_drain(drain_sink);
 
-        // CallbackState.
-        let stc = SampleTickConn::new(args.sr, bpm, PPQN);
+        // Machine + CallbackState. Plan 14 generalises Plan 13's
+        // single-channel state to N channels; the demo keeps its
+        // single-channel CLI surface by building a one-channel
+        // Machine with `TransportPolicy::Scripted { empty }` so the
+        // emitted byte stream stays byte-identical to Plan 13's
+        // (no Start / Stop / Continue, just clock).
         let channel = Channel {
             mode: ChannelMode::MidiClock,
             divider,
@@ -1448,13 +1453,18 @@ pub mod demo {
             offset: Micro::ZERO,
             snap_to_quantum: None,
         };
-        let mut state = CallbackState::<S48> {
+        let machine = Machine::<S48>::new(
+            vec![channel],
             phase_source,
-            channel,
-            stc,
-            producer,
-            events: Vec::with_capacity(max_events_for_buffer(args.buffer_frames as usize)),
-        };
+            args.sr,
+            bpm,
+            PPQN,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+            args.buffer_frames as usize,
+        );
+        let mut state = CallbackState::<S48> { machine, producer };
 
         // Open audio host.
         let host = if args.audio_in == "default" {
@@ -1474,7 +1484,7 @@ pub mod demo {
 
         // Move state into the data callback.
         let cb = Box::new(move |io: &mut agogo_core::host::AudioIo| {
-            state.on_buffer(io, None);
+            state.on_buffer(io);
         });
 
         let stream_handle = host

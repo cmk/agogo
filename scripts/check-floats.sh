@@ -15,6 +15,7 @@
 #   crates/core/src/machine.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction in tests)
 #   crates/core/src/machine/spec.rs               argv-boundary (--ch shift-ms / offset-ms via F64F06)
 #   crates/host-link/src/link.rs                  Link FFI (AblLink C++ ABI)
+#   crates/host-link/src/source.rs                PCM ABI (PhaseSourceImpl::feed_samples slice param)
 #   crates/host-cpal/src/cpal.rs                  PCM ABI (cpal stream callback)
 #   crates/host-cpal/src/cpal/callback.rs         PCM ABI (AudioIo input/output slices)
 #   crates/cli/src/main.rs                        argv parsers
@@ -44,6 +45,7 @@ ALLOWED=(
   "crates/core/src/machine.rs"
   "crates/core/src/machine/spec.rs"
   "crates/host-link/src/link.rs"
+  "crates/host-link/src/source.rs"
   "crates/host-cpal/src/cpal.rs"
   "crates/host-cpal/src/cpal/callback.rs"
   "crates/cli/src/main.rs"
