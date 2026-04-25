@@ -44,6 +44,65 @@ enum Command {
         #[bpaf(external(link_sub))]
         sub: LinkSub,
     },
+    /// End-to-end demo: cpal audio in → PLL / Internal clock →
+    /// scheduler → renderer → SPSC drain → midir MIDI out.
+    #[cfg(feature = "demo")]
+    #[bpaf(command("demo"))]
+    Demo {
+        #[bpaf(external(demo_sub))]
+        sub: DemoSub,
+    },
+}
+
+#[cfg(feature = "demo")]
+#[derive(Debug, Clone, Bpaf)]
+enum DemoSub {
+    /// Run the demo pipeline. Connects cpal input + midir output,
+    /// constructs a single MidiClock channel, and pumps the
+    /// scheduler/renderer through the SPSC drain thread for
+    /// `--duration-ms` ms (or until Ctrl-C).
+    #[bpaf(command("run"))]
+    Run {
+        /// cpal input device name; pass `default` for the host's
+        /// default input.
+        #[bpaf(long, argument("DEVICE"))]
+        audio_in: String,
+        /// midir output port name; pass `default` for the first
+        /// available output port.
+        #[bpaf(long, argument("PORT"))]
+        midi_out: String,
+        /// Phase source: `internal` runs from `--bpm`,
+        /// `external` drives a PLL from the audio input pulse
+        /// train.
+        #[bpaf(long, argument("SOURCE"))]
+        source: String,
+        /// Tempo in BPM.
+        #[bpaf(long, argument("BPM"), parse(parse_positive_f64))]
+        bpm: f64,
+        /// Sample rate in Hz. Plan 13 T5 supports 48000 only;
+        /// other rates from the channel pipeline's allowlist
+        /// arrive when `agogo run` lands in Plan 14.
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
+        sr: u32,
+        /// Per-channel divider — `t32t` for spec-compliant 24
+        /// PPQN MIDI clock at 192 PPQN master.
+        #[bpaf(long, argument("TBASE"))]
+        divider: String,
+        /// cpal buffer size in frames.
+        #[bpaf(long, argument("FRAMES"), parse(parse_positive_u32), fallback(1024))]
+        buffer_frames: u32,
+        /// How long to run before exiting.
+        #[bpaf(long, argument("MS"), parse(parse_positive_u32), fallback(5_000))]
+        duration_ms: u32,
+    },
+    /// Print the names of cpal input devices visible to the host.
+    /// One per line.
+    #[bpaf(command("list-audio-inputs"))]
+    ListAudioInputs,
+    /// Print the names of midir output ports visible to the host.
+    /// One per line.
+    #[bpaf(command("list-midi-outputs"))]
+    ListMidiOutputs,
 }
 
 #[derive(Debug, Clone, Bpaf)]
@@ -462,6 +521,57 @@ fn main() {
         }) => {
             link_commands::diag(bpm, sr, settle_ms);
         }
+        #[cfg(feature = "demo")]
+        Some(Command::Demo {
+            sub:
+                DemoSub::Run {
+                    audio_in,
+                    midi_out,
+                    source,
+                    bpm,
+                    sr,
+                    divider,
+                    buffer_frames,
+                    duration_ms,
+                },
+        }) => {
+            let args = demo::DemoArgs {
+                audio_in,
+                midi_out,
+                source,
+                bpm,
+                sr,
+                divider,
+                buffer_frames,
+                duration_ms,
+            };
+            if let Err(e) = demo::run(&args) {
+                eprintln!("error: {e}");
+                std::process::exit(2);
+            }
+        }
+        #[cfg(feature = "demo")]
+        Some(Command::Demo {
+            sub: DemoSub::ListAudioInputs,
+        }) => {
+            for name in demo::list_audio_inputs() {
+                println!("{name}");
+            }
+        }
+        #[cfg(feature = "demo")]
+        Some(Command::Demo {
+            sub: DemoSub::ListMidiOutputs,
+        }) => match demo::list_midi_outputs() {
+            Ok(names) => {
+                for name in names {
+                    println!("{name}");
+                }
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(2);
+            }
+        },
         None => {
             #[cfg(feature = "core")]
             let tag = "with core";
@@ -1187,6 +1297,230 @@ pub mod time_sched {
                 swing::effective_tick(&cfg, nominal)
             })
             .collect()
+    }
+}
+
+#[cfg(feature = "demo")]
+pub mod demo {
+    //! `agogo demo run` end-to-end pipeline (Plan 13 T5).
+    //!
+    //! Wires together every Plan 13 piece: cpal audio in via
+    //! `host-cpal::CpalHost`, the `CallbackState` hot loop, the
+    //! rtrb SPSC + drain thread, and midir output via
+    //! `host-midi::MidirSink`. Single-channel `MidiClock` for v0.1;
+    //! Plan 14's `agogo run` generalises to N channels via
+    //! `Machine`.
+
+    use agogo_core::channel::{Channel, ChannelMode};
+    use agogo_core::fxp::{Micro, S48, SampleRate, Tempo};
+    use agogo_core::host::{AudioHost, Config};
+    use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+    use agogo_core::time::conn::SampleTickConn;
+    use agogo_core::time::swing::SwingConfig;
+    use agogo_core::time::tbase::TBase;
+    use agogo_core::time::tick::PPQN;
+    use agogo_host_cpal::CpalHost;
+    use agogo_host_cpal::cpal::callback::{CallbackState, max_events_for_buffer};
+    use agogo_host_cpal::cpal::control::spsc;
+    use agogo_host_midi::MidirSink;
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    /// `--ppq 24` — MIDI clock baseline. Hard-coded for the demo;
+    /// the user picks the *output* PPQN via `--divider` (`t32t` =
+    /// 24 PPQN at 192 PPQN master).
+    const DEMO_PPQ: u32 = 24;
+
+    pub struct DemoArgs {
+        pub audio_in: String,
+        pub midi_out: String,
+        pub source: String,
+        pub bpm: f64,
+        pub sr: u32,
+        pub divider: String,
+        pub buffer_frames: u32,
+        pub duration_ms: u32,
+    }
+
+    /// Run the demo for `args.duration_ms` ms, then drop the audio
+    /// stream + drain handle. Returns the dropped-message count
+    /// observed at shutdown via `eprintln!` and an exit-2 path if
+    /// non-zero.
+    pub fn run(args: &DemoArgs) -> Result<(), String> {
+        let divider: TBase = args
+            .divider
+            .parse()
+            .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
+        // argv-boundary BPM (matches channel_trace + midi_trace).
+        let bpm = {
+            let scaled = (args.bpm * 1.0e6).round();
+            if !(0.0..u32::MAX as f64).contains(&scaled) {
+                return Err(format!(
+                    "--bpm {} out of range (expected (0, {}) BPM)",
+                    args.bpm,
+                    u32::MAX as f64 / 1.0e6
+                ));
+            }
+            Tempo(scaled as u32)
+        };
+        // SR validation matches the channel pipeline's allowlist.
+        match args.sr {
+            44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => {}
+            _ => {
+                return Err(format!(
+                    "--sr {} unsupported; expected one of 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000",
+                    args.sr
+                ));
+            }
+        }
+        // Plan 13 T5 instantiates `CallbackState<S48>` only —
+        // multi-rate dispatch via a static `match args.sr { ... }`
+        // arrives with `agogo run` in Plan 14.
+        if args.sr != S48::HZ {
+            return Err(format!(
+                "--sr {} not yet supported by `agogo demo` (only 48000 in Plan 13 T5; \
+                 wider rate dispatch lands with `agogo run` in Plan 14)",
+                args.sr
+            ));
+        }
+
+        // PhaseSource: Internal | External(Pll).
+        let phase_source: PhaseSource<S48> = match args.source.as_str() {
+            "internal" => PhaseSource::Internal { bpm },
+            "external" => {
+                // Detector + PLL defaults — calibrated for click-track
+                // input at 48 kHz. The CLI doesn't expose every PLL
+                // knob; `agogo sync trace` is the debugging surface
+                // for tuning. `hold_samples = sr / 4` allows up to
+                // ~240 BPM clicks without spurious double-detections.
+                let detector = PeakDetector::<S48>::new(DetectorConfig {
+                    threshold_q15: 16_384, // 0.5 in Q0.15
+                    hold_samples: args.sr / 4,
+                });
+                let pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, DEMO_PPQ);
+                PhaseSource::External { detector, pll }
+            }
+            other => {
+                return Err(format!(
+                    "--source {other} unknown (try `internal` or `external`)"
+                ));
+            }
+        };
+
+        // Open MIDI sink.
+        let midi_port_name = if args.midi_out == "default" {
+            MidirSink::list_output_ports()
+                .map_err(|e| format!("midi enumeration: {e}"))?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    "no MIDI output ports available (try `agogo demo \
+                     list-midi-outputs`)"
+                        .to_string()
+                })?
+        } else {
+            args.midi_out.clone()
+        };
+        let sink = Arc::new(
+            MidirSink::open(&midi_port_name)
+                .map_err(|e| format!("midi open `{midi_port_name}`: {e}"))?,
+        );
+
+        // SPSC + drain.
+        let (producer, consumer) = spsc(1024);
+        let dropped_handle = producer.dropped_handle();
+        let drain_sink: Arc<dyn agogo_core::out::midi::MidiSink + Send + Sync> = sink;
+        let drain = consumer.spawn_drain(drain_sink);
+
+        // CallbackState.
+        let stc = SampleTickConn::new(args.sr, bpm, PPQN);
+        let channel = Channel {
+            mode: ChannelMode::MidiClock,
+            divider,
+            shuffle: SwingConfig {
+                amount: 0,
+                multiplier: 1,
+            },
+            shift: Micro::ZERO,
+            offset: Micro::ZERO,
+            snap_to_quantum: None,
+        };
+        let mut state = CallbackState::<S48> {
+            phase_source,
+            channel,
+            stc,
+            producer,
+            events: Vec::with_capacity(max_events_for_buffer(args.buffer_frames as usize)),
+        };
+
+        // Open audio host.
+        let host = if args.audio_in == "default" {
+            CpalHost::default_input()
+        } else {
+            CpalHost::with_input_name(&args.audio_in)
+        }
+        .map_err(|e| format!("cpal open: {e}"))?;
+        let cfg = Config {
+            input_device: None,
+            output_device: None,
+            sample_rate: args.sr,
+            buffer_frames: args.buffer_frames,
+            input_channels: 1,
+            output_channels: 0,
+        };
+
+        // Move state into the data callback.
+        let cb = Box::new(move |io: &mut agogo_core::host::AudioIo| {
+            state.on_buffer(io, None);
+        });
+
+        let stream_handle = host
+            .run(cfg, cb)
+            .map_err(|e| format!("cpal run: {e}"))?;
+
+        eprintln!(
+            "agogo demo: running for {} ms, --bpm {} --sr {} --divider {} \
+             --source {} --audio-in {} --midi-out {}",
+            args.duration_ms,
+            args.bpm,
+            args.sr,
+            args.divider,
+            args.source,
+            args.audio_in,
+            midi_port_name,
+        );
+
+        // Block the main thread for the requested duration. Ctrl-C
+        // handling lands with `agogo run` (Plan 14); for the demo
+        // a fixed duration is sufficient.
+        std::thread::sleep(Duration::from_millis(u64::from(args.duration_ms)));
+
+        // Tear down: stream first (stops the producer), then drain
+        // (flushes the ring + joins the drain thread).
+        drop(stream_handle);
+        drop(drain);
+
+        let dropped = dropped_handle.load(Ordering::Relaxed);
+        if dropped > 0 {
+            eprintln!("agogo demo: {dropped} messages dropped on overrun");
+            return Err(format!("{dropped} messages dropped"));
+        }
+        eprintln!("agogo demo: clean exit, 0 dropped");
+        Ok(())
+    }
+
+    /// Enumerate cpal input device names. Infallible — returns an
+    /// empty `Vec` on a host with no input devices.
+    pub fn list_audio_inputs() -> Vec<String> {
+        CpalHost::list_input_devices()
+    }
+
+    /// Enumerate midir output port names. Returns the underlying
+    /// midir init error if the platform's MIDI subsystem can't be
+    /// queried at all.
+    pub fn list_midi_outputs() -> Result<Vec<String>, String> {
+        MidirSink::list_output_ports().map_err(|e| format!("midi enumeration: {e}"))
     }
 }
 
