@@ -97,9 +97,9 @@ enum DemoSub {
         /// arrive when `agogo run` lands in Plan 14.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
         sr: u32,
-        /// Per-channel divider — `t32t` for spec-compliant 24
-        /// PPQN MIDI clock at 192 PPQN master.
-        #[bpaf(long, argument("TBASE"))]
+        /// Per-channel divider — `t64t` for spec-compliant 24
+        /// PPQN MIDI clock at 960 PPQN master.
+        #[bpaf(long, argument("GRID"))]
         divider: String,
         /// cpal buffer size in frames.
         #[bpaf(long, argument("FRAMES"), parse(parse_positive_u32), fallback(1024))]
@@ -137,8 +137,8 @@ enum MidiSub {
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
-        /// Per-channel divider (e.g. `t4`, `t16`, `t32t`).
-        #[bpaf(long, argument("TBASE"))]
+        /// Per-channel divider (e.g. `t4`, `t16`, `t32t`, `t8q`, `t2p`).
+        #[bpaf(long, argument("GRID"))]
         divider: String,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
@@ -282,10 +282,10 @@ enum ChannelSub {
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
-        /// Per-channel divider (e.g. `t4`, `t16`, `t8t`).
-        #[bpaf(long, argument("TBASE"))]
+        /// Per-channel divider (e.g. `t4`, `t16`, `t8t`, `t8q`, `t2p`).
+        #[bpaf(long, argument("GRID"))]
         divider: String,
-        /// `SwingConfig::amount` with `multiplier = 1`.
+        /// `SwingConfig::amount` — signed `i8` tick offset on a `t16` resolution grid.
         #[bpaf(long, argument("AMOUNT"), fallback(0))]
         shuffle: i32,
         /// Positive latency shift in ms; clamped to `[0, 300]` inside
@@ -1359,8 +1359,8 @@ pub mod demo {
     use std::time::Duration;
 
     /// `--ppq 24` — MIDI clock baseline. Hard-coded for the demo;
-    /// the user picks the *output* PPQN via `--divider` (`t32t` =
-    /// 24 PPQN at 192 PPQN master).
+    /// the user picks the *output* PPQN via `--divider` (`t64t` =
+    /// 24 PPQN at 960 PPQN master).
     const DEMO_PPQ: u32 = 24;
 
     pub struct DemoArgs {

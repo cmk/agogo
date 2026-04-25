@@ -286,3 +286,120 @@ appropriate for the mechanically-uniform `s/TBase/Grid/` migration.
   is once per bar. Worth either tightening the type to forbid
   mismatches or surfacing a CLI warning. Listed in the plan's v0.3+
   recommendations; tracking.
+
+## Local review (2026-04-25, round 2)
+
+**Branch:** `plan/2026-04-24-04`
+**Commits:** 5 (origin/main..plan/2026-04-24-04)
+**Reviewer:** Claude (sonnet, independent, fresh round)
+
+---
+
+### Round-2-specific check: did `9c78247` correctly fix what round 1 flagged?
+
+All four must-fix items resolved correctly:
+
+1. **`run.rs:71-75`** — `swing-mult` → `swing-res (binary
+   resolution, default t16)` in `--ch` help. ✅
+2. **`arb.rs:180`** adds `Just(Tick(u32::MAX))` arm; `swing.rs:215-243`
+   adds three saturation spot-checks covering both boundaries
+   (`u32::MAX` upper, `Tick(0)` lower) and both sign conventions
+   (`amount=127` and `amount=-127`), plus identity at every
+   resolution. ✅
+3. **`run.rs:39-41`** — `(192)` → `(960)` in `PULSE_PPQ` comment. ✅
+4. **`main.rs:127-131`** — midi-trace help text now reads "960 PPQN
+   master / 40 ticks / `Grid::T64T` / `--divider t64t`". ✅
+
+No secondary issues from the fixes themselves.
+
+### `prop_assume!` filter analysis
+
+`ceil_fits(n, g)` in `conn.rs:790-793` correctly rejects only the
+overflow-prone combinations (e.g. `Tick(u32::MAX) × Grid::T1`). The
+five guarded `quantize_at_*` proptests still exercise the bulk of
+the input domain; only the upper-boundary corner is filtered, and
+`swing.rs`'s saturation spot-checks compensate. The comment at
+`conn.rs:686-695` documents the delegation. No vacuous-pass risk.
+
+### Commit Hygiene
+
+5 commits, all conventional prefixes, imperative subjects under 72
+chars. The `fix:` commit is a standalone review-round commit per
+CLAUDE.md ("Review-round commits remain standalone so the audit
+trail survives"). Linear history. ✅
+
+### Code Quality
+
+`#![forbid(unsafe_code)]` preserved everywhere. No new stored floats.
+All numerical conversions go through named `Conn`s; `SampleTickConn`
+correctly classified as a Conn-lookalike with proptested adjoint laws
+because runtime-parameterised closures aren't expressible in the
+upstream `Conn` shape.
+
+### Test Coverage
+
+All 22 plan-listed properties present:
+- 11 swing properties ✅
+- 7 grid lattice / Heyting properties ✅
+- 1 channel scheduler at 960 (covered structurally by
+  `scheduler_events_in_window` over `arb_grid()`) ✅
+- 3 exact-rates properties + `non_divisor_bpm_is_not_exact`
+  discriminating sanity ✅
+
+13 plan spot-checks all present (effective_tick at MPC 80 / Linn 40
+/ -40 / 0; gcd/lcm pairs across triplet × quintuplet; Grid::ALL
+cardinality; DSL round-trip).
+
+### Plan Conformance
+
+T1–T7 implemented. All four documented design deviations are
+accurate. Single-PR recommendation followed.
+
+### Risks
+
+**One user-visible follow-up that round-1 missed:**
+
+`crates/cli/src/main.rs:100-101` — the `demo run --divider` bpaf
+doc-comment still reads "`t32t` for spec-compliant 24 PPQN MIDI
+clock at 192 PPQN master." This is the same class of stale-comment
+bug as round-1 must-fix #4 (`midi trace --help`), but in a
+different command. At 960 PPQN the correct value is `t64t`. A user
+running `agogo demo run --help` gets the wrong divider — 8× too
+few MIDI clock pulses if they follow the doc literally.
+
+Round 2 calls this **follow-up rather than must-fix** because
+`demo run` is superseded by `agogo run` (Plan 14) and the plan's
+Review section documents the divider value shift as a known
+artifact. But the same logic applied to `midi trace --help` would
+have made that follow-up too — round-1 escalated it to must-fix.
+Worth either escalating now or folding into the next plan's doc
+pass for consistency.
+
+Other open items (unchanged from round 1):
+- `crates/cli/src/main.rs:288` — `channel trace --shuffle` doc
+  references the removed `multiplier` field.
+- `swing-mult` → `swing-res` breaking change unrecorded in any
+  user-visible CHANGELOG (project has none).
+- `quantize_at` 36-arm exhaustion is runtime-only via
+  `unreachable!` (acceptable; type-level check would require
+  enumerating Grid).
+
+### Recommendations
+
+**Must fix before push:** None. All four round-1 must-fix items are
+correctly resolved. No new must-fix issues found in the migration.
+
+**Follow-up (open):**
+- `main.rs:100-101` — `demo run --divider` help text says `t32t` /
+  192 PPQN; should be `t64t` / 960 PPQN. **Worth folding into
+  this PR** for parity with round-1 must-fix #4 (which fixed the
+  same class of bug in `midi trace`'s help) — they were both
+  user-visible stale comments. Reviewer's call: round-2
+  classification is "follow-up", but round-1 would have called
+  this must-fix.
+- `main.rs:288` — stale `multiplier = 1` comment.
+- CHANGELOG entry for `swing-mult` → `swing-res` at v0.2 release.
+- Compile-time `quantize_at` exhaustiveness check before Grid grows.
+
+**The branch is ready to push** once the user decides on
+`main.rs:100-101`.
