@@ -49,3 +49,33 @@ jobs:
       - uses: actions/checkout@v4
       - name: check-floats.sh
         run: scripts/check-floats.sh
+
+  # Excluded crates (not workspace members) — `cargo test --workspace`
+  # in the `test` job above skips them by design (keeps the default
+  # CI path off platform system deps). These dedicated jobs exercise
+  # them with the runner's `libasound2-dev` preinstalled for ALSA.
+  host-cpal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: install ALSA dev headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: cargo test -p agogo-host-cpal
+      - run: cargo clippy -p agogo-host-cpal --all-targets -- -D warnings
+
+  host-midi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: install ALSA dev headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: cargo test -p agogo-host-midi
+      - run: cargo clippy -p agogo-host-midi --all-targets -- -D warnings
