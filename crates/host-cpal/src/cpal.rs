@@ -82,21 +82,44 @@ impl AudioHost for CpalHost {
         // *fixed* channel count for that config (not a range), so
         // `==` is the right test against `cfg.input_channels = 1`.
         // ALSA can default to i16 on some cards; scanning the
-        // supported configs surfaces the mismatch as
-        // `UnsupportedSampleRate` rather than a cryptic cpal error
-        // later.
-        let supports_rate = self
+        // supported configs surfaces the mismatch at configuration
+        // time rather than as a cryptic cpal error later.
+        //
+        // Collect once so we can distinguish "rate unsupported"
+        // from "rate supported, format/channel mismatch" — the
+        // former surfaces as `UnsupportedSampleRate`, the latter
+        // as `UnsupportedConfig` with enough detail for the caller
+        // to understand what's available vs. requested.
+        let supported: Vec<_> = self
             .device
             .supported_input_configs()
             .map_err(|e| AudioHostError::Backend(Box::new(e)))?
-            .any(|c| {
-                c.sample_format() == SampleFormat::F32
-                    && c.min_sample_rate().0 <= cfg.sample_rate
-                    && c.max_sample_rate().0 >= cfg.sample_rate
-                    && c.channels() == cfg.input_channels
-            });
-        if !supports_rate {
-            return Err(AudioHostError::UnsupportedSampleRate(cfg.sample_rate));
+            .collect();
+        let rate_ok = |c: &::cpal::SupportedStreamConfigRange| {
+            c.min_sample_rate().0 <= cfg.sample_rate
+                && c.max_sample_rate().0 >= cfg.sample_rate
+        };
+        let any_rate = supported.iter().any(rate_ok);
+        let exact_match = supported.iter().any(|c| {
+            rate_ok(c)
+                && c.sample_format() == SampleFormat::F32
+                && c.channels() == cfg.input_channels
+        });
+        if !exact_match {
+            if !any_rate {
+                return Err(AudioHostError::UnsupportedSampleRate(cfg.sample_rate));
+            }
+            let any_f32_at_rate = supported
+                .iter()
+                .any(|c| rate_ok(c) && c.sample_format() == SampleFormat::F32);
+            let any_mono_at_rate = supported
+                .iter()
+                .any(|c| rate_ok(c) && c.channels() == cfg.input_channels);
+            return Err(AudioHostError::UnsupportedConfig(format!(
+                "device supports {} Hz but not f32 mono \
+                 (f32 available at rate: {}, channels={} available at rate: {})",
+                cfg.sample_rate, any_f32_at_rate, cfg.input_channels, any_mono_at_rate,
+            )));
         }
 
         let stream_config = StreamConfig {
@@ -231,8 +254,10 @@ mod tests {
 
     /// `CpalHost::list_input_devices` never panics; it may return
     /// an empty list on a host with no input devices (typical for
-    /// CI runners without audio). That's acceptable — hardware
-    /// smoke tests fixture-gate on `cpal_default_input` instead.
+    /// CI runners without audio). That's acceptable — Plan 14's
+    /// `agogo run` acceptance path is where a real hardware
+    /// fixture lands (Plan 13 T6 is deferred per the plan's
+    /// Review section).
     #[test]
     fn list_input_devices_is_infallible() {
         let _devices = CpalHost::list_input_devices();

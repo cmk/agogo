@@ -12,9 +12,10 @@ publish = false
 # starting in Plan 13 T5. The detached status keeps `cargo test
 # --workspace` from eagerly pulling cpal + its platform system deps
 # (libasound on Linux, CoreAudio on macOS, WASAPI on Windows) into
-# the default CI path. A dedicated `cargo test -p agogo-host-cpal`
-# job in `.github/workflows/ci.yml` exercises this crate with the
-# runner's `libasound2-dev` preinstalled.
+# the default CI path. A dedicated `host-cpal` job in
+# `.github/workflows/ci.yml` (with `working-directory:
+# crates/host-cpal`) exercises this crate with the runner's
+# `libasound2-dev` preinstalled.
 
 [dependencies]
 agogo-core = { path = "../core" }

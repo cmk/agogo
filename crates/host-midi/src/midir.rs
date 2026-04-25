@@ -113,8 +113,10 @@ mod tests {
 
     /// `list_output_ports` should not panic. It may return an empty
     /// `Vec` on a host with no MIDI ports (typical for CI runners
-    /// without a virtual MIDI bus); that's acceptable — hardware
-    /// loopback tests fixture-gate on `midir_loopback` instead.
+    /// without a virtual MIDI bus); that's acceptable — Plan 14's
+    /// `agogo run` acceptance path is where a real loopback
+    /// fixture lands (Plan 13 T6 is deferred per the plan's
+    /// Review section).
     #[test]
     fn list_output_ports_does_not_panic() {
         // Behaviour: returns Ok(...) even when empty. Surfaces

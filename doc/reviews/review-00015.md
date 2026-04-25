@@ -243,6 +243,14 @@ section; follow-ups tracked below.
    `cargo test -p <crate>` and `cargo clippy -p <crate>
    --all-targets -- -D warnings`.
 
+   **Round 2 correction** (Copilot gh-id 3141035633 / 3141035679):
+   `-p <crate>` does not resolve crates that are excluded from
+   `[workspace].members`. The round-1 CI jobs above would have
+   errored with "package ID specification ... did not match any
+   packages". The round-2 fix commit replaces `-p` with
+   `defaults.run.working-directory: crates/host-<name>` so cargo
+   runs from the crate's own directory.
+
 2. **`CpalHost::run` channel-validation comparison inverted.**
    `crates/host-cpal/src/cpal.rs:76` had
    `cfg.input_channels >= c.channels()`. The intent is "the device
@@ -508,3 +516,293 @@ Fixed — `CpalHost::run` rejects `cfg.input_channels != 1` at entry, so the aud
 #### ↳ cmk ([2026-04-25 01:17 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141026215))
 
 Fixed — `spawn_drain`'s doc comment now spells out the drop ordering explicitly: drop the audio stream's `Handle` before the `DrainHandle`. The reverse order causes final-buffer messages to be counted as overruns instead of reaching the sink. `agogo demo run` already does this correctly; the doc just makes the requirement explicit for future API callers.
+
+<!-- gh-id: 3141035612 -->
+### Copilot on [`crates/host-cpal/src/cpal.rs:222`](https://github.com/cmk/agogo/pull/15#discussion_r3141035612) (2026-04-25 01:22 UTC)
+
+This test module doc comment refers to “hardware smoke tests fixture-gate on `cpal_default_input`”, but there’s no such fixture-gated hardware test in this crate (no `cpal_default_input_smoke` or similar). This is misleading for maintainers/debugging; either add the referenced fixture test or update the comment to match what actually exists today.
+
+<!-- gh-id: 3141035625 -->
+### Copilot on [`doc/plans/plan-2026-04-24-02.md:68`](https://github.com/cmk/agogo/pull/15#discussion_r3141035625) (2026-04-25 01:22 UTC)
+
+This plan text says CI/build gates run `cargo test -p agogo-host-cpal` / `-p agogo-host-midi` (and similarly `cargo build -p ...` later), but both crates are explicitly excluded from `[workspace].members` so `-p` from the repo root won’t resolve them. Please update the plan to use `--manifest-path crates/host-*/Cargo.toml` (or `working-directory: crates/host-*`) consistently wherever it documents build/test commands.
+
+
+<!-- gh-id: 3141035633 -->
+### Copilot on [`.github/workflows/ci.yml:81`](https://github.com/cmk/agogo/pull/15#discussion_r3141035633) (2026-04-25 01:22 UTC)
+
+Same issue as `host-cpal`: this job uses `cargo test -p agogo-host-midi` / `cargo clippy -p ...`, but `agogo-host-midi` is excluded from the workspace, so `-p` won’t work from the repo root. Use `--manifest-path crates/host-midi/Cargo.toml` or set `working-directory: crates/host-midi` for these steps.
+
+<!-- gh-id: 3141035639 -->
+### Copilot on [`crates/host-cpal/README.md:20`](https://github.com/cmk/agogo/pull/15#discussion_r3141035639) (2026-04-25 01:22 UTC)
+
+This README’s suggested commands (`cargo build/test -p agogo-host-cpal`) won’t work from the repo root because `agogo-host-cpal` is not a workspace member. Use `--manifest-path crates/host-cpal/Cargo.toml` (or `cd crates/host-cpal && cargo …`). Also, it references a `cpal_default_input_smoke` hardware test/fixture that doesn’t exist in this crate (no matches under `crates/host-cpal/**/*.rs`), so the instructions aren’t currently actionable.
+
+<!-- gh-id: 3141035647 -->
+### Copilot on [`crates/host-cpal/src/cpal.rs:83`](https://github.com/cmk/agogo/pull/15#discussion_r3141035647) (2026-04-25 01:22 UTC)
+
+The input config validation is inconsistent with how cpal handles channel counts: `SupportedStreamConfigRange::channels()` is a fixed channel count, but the check here uses `c.channels() >= cfg.input_channels` and the comment claims “we slice the leading channels in the callback” (no such slicing exists). This can report “supported” and then still fail `build_input_stream`, and if `cfg.input_channels > 1` the callback will pass interleaved PCM to `AudioIo`/`PhaseSource::feed_samples` (which expects mono). Either enforce `cfg.input_channels == 1` (and require `c.channels() == 1`), or build the stream at the device’s channel count and explicitly down-mix/deinterleave before calling the callback.
+
+<!-- gh-id: 3141035654 -->
+### Copilot on [`crates/host-cpal/src/cpal/control.rs:56`](https://github.com/cmk/agogo/pull/15#discussion_r3141035654) (2026-04-25 01:22 UTC)
+
+`MidiMessage::as_slice` can panic if `bytes_len > 3` (because `bytes_len` is public and is used directly as a slice bound). Even if current constructors/tests keep it in-range, this is a public type and it only takes one accidental `MidiMessage { bytes_len: 4, .. }` to crash the drain thread. Clamp `bytes_len` to 3 when slicing (or make the fields private and enforce the invariant in constructors).
+
+<!-- gh-id: 3141035659 -->
+### Copilot on [`crates/host-cpal/src/cpal/control.rs:170`](https://github.com/cmk/agogo/pull/15#discussion_r3141035659) (2026-04-25 01:22 UTC)
+
+`spawn_drain`’s shutdown behavior depends on drop order (dropping the drain while the audio callback is still producing can lose final-buffer messages). The doc comment currently doesn’t state the required ordering; please document that callers should stop/drop the audio stream (producer) before dropping `DrainHandle` if they need flush-at-shutdown semantics.
+
+<!-- gh-id: 3141035662 -->
+### Copilot on [`crates/host-midi/src/midir.rs:117`](https://github.com/cmk/agogo/pull/15#discussion_r3141035662) (2026-04-25 01:22 UTC)
+
+This comment says hardware loopback tests are fixture-gated on `midir_loopback`, but there’s no such hardware/fixture test in this crate right now (only the unit tests in this module). Please update the comment to avoid implying coverage that doesn’t exist yet, or add the corresponding fixture-gated test.
+
+
+<!-- gh-id: 3141035670 -->
+### Copilot on [`doc/reviews/review-00015.md:243`](https://github.com/cmk/agogo/pull/15#discussion_r3141035670) (2026-04-25 01:22 UTC)
+
+This review record states that CI was fixed by adding jobs that run `cargo test -p agogo-host-cpal` / `-p agogo-host-midi`, but these crates are excluded from the workspace, so `-p` from the repo root does not work. If the intended fix is “dedicated jobs”, the commands should be recorded as `--manifest-path crates/host-*/Cargo.toml` or “run with working directory set to the crate”.
+
+
+<!-- gh-id: 3141035679 -->
+### Copilot on [`.github/workflows/ci.yml:68`](https://github.com/cmk/agogo/pull/15#discussion_r3141035679) (2026-04-25 01:22 UTC)
+
+The `host-cpal` CI job runs `cargo test -p agogo-host-cpal` / `cargo clippy -p ...`, but `agogo-host-cpal` is excluded from `[workspace].members` (see root `Cargo.toml`), so `-p` from the repo root won’t resolve the package and this job will fail. Run cargo with `--manifest-path crates/host-cpal/Cargo.toml` or set the job’s working directory to `crates/host-cpal` before invoking `cargo test`/`clippy`.
+
+<!-- gh-id: 4174378757 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-25 01:22 UTC](https://github.com/cmk/agogo/pull/15#pullrequestreview-4174378757))
+
+## Pull request overview
+
+Adds Plan 13’s cross-platform “host” layer and demo wiring: cpal audio input feeds the core scheduler/renderer, MIDI is dispatched via an RT-safe SPSC + drain thread into a midir-backed sink, exposed through `agogo demo`.
+
+**Changes:**
+- Introduces `agogo_core::host` (`AudioHost`, `AudioIo`, `Handle`, errors) and an allocation-free `tick_stream_into` scheduler path.
+- Adds two detached backend crates: `agogo-host-cpal` (cpal input + RT callback/control plane) and `agogo-host-midi` (midir `MidiSink`).
+- Integrates a feature-gated `agogo demo` CLI plus CI/docs/allowlists for the new detached crates.
+
+### Reviewed changes
+
+Copilot reviewed 21 out of 23 changed files in this pull request and generated 13 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| scripts/check-floats.sh | Extends float allowlist for new PCM-ABI files. |
+| doc/reviews/review-00015.md | Adds Plan 13 review record and verification notes. |
+| doc/plans/plan-2026-04-24-02.md | Adds Plan 13 design/verification plan and wiring details. |
+| crates/host-midi/src/midir.rs | Implements `MidirSink` over midir with port enumeration + unit tests. |
+| crates/host-midi/src/lib.rs | Declares/exports the host-midi crate API. |
+| crates/host-midi/README.md | Documents detached-crate workflow and intended loopback testing. |
+| crates/host-midi/Cargo.toml | Adds detached crate manifest + deps (midir/thiserror/tracing). |
+| crates/host-cpal/src/lib.rs | Declares/exports the host-cpal crate API. |
+| crates/host-cpal/src/cpal/control.rs | Implements RT SPSC ring + drain thread for MIDI dispatch. |
+| crates/host-cpal/src/cpal/callback.rs | Implements `CallbackState` hot loop + capacity sizing helper + tests. |
+| crates/host-cpal/src/cpal.rs | Implements `CpalHost` as `AudioHost` with worker-thread stream ownership. |
+| crates/host-cpal/README.md | Documents detached-crate workflow and intended hardware smoke testing. |
+| crates/host-cpal/Cargo.toml | Adds detached crate manifest + deps (cpal/rtrb/thiserror/tracing). |
+| crates/core/src/lib.rs | Exposes the new `host` module. |
+| crates/core/src/host.rs | Defines `AudioHost` trait surface and callback payload types. |
+| crates/core/src/channel/scheduler.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
+| crates/cli/src/main.rs | Adds feature-gated `agogo demo` subcommands and demo pipeline module. |
+| crates/cli/Cargo.toml | Adds optional path deps + features (`cpal`, `midi`, `demo`). |
+| Cargo.toml | Excludes new host crates from workspace members. |
+| Cargo.lock | Locks new dependencies (cpal, midir, rtrb, etc.). |
+| CLAUDE.md | Updates float-exception count and referenced exception files. |
+| .gitignore | Ignores detached-crate `Cargo.lock` files for new host crates. |
+| .github/workflows/ci.yml | Adds dedicated CI jobs intended to test/clippy the detached host crates. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3141035684 -->
+### Copilot on [`crates/host-midi/README.md:35`](https://github.com/cmk/agogo/pull/15#discussion_r3141035684) (2026-04-25 01:22 UTC)
+
+This README’s build/test commands use `-p agogo-host-midi`, but `agogo-host-midi` is not a workspace member, so `-p` from the repo root won’t resolve. Use `--manifest-path crates/host-midi/Cargo.toml` (or run cargo from `crates/host-midi/`). Also, the `midir_loopback_roundtrip` hardware test mentioned here doesn’t exist yet (no matches under `crates/host-midi/**/*.rs`), so readers will not be able to run it as written.
+
+<!-- gh-id: 3141035693 -->
+### Copilot on [`crates/core/src/host.rs:58`](https://github.com/cmk/agogo/pull/15#discussion_r3141035693) (2026-04-25 01:22 UTC)
+
+`AudioIo` exposes `frames` (“samples per channel”) but does not specify the channel layout or expose `input_channels`/`output_channels`. Since `Config` does carry channel counts (and cpal delivers interleaved buffers), this makes it ambiguous how callbacks should interpret `input`/`output`. Either document/enforce that Plan 13 is mono-only (e.g., `input_channels == 1`) or add explicit channel-count/layout fields to `AudioIo` so downstream code can safely handle multi-channel streams.
+
+<!-- gh-id: 3141035697 -->
+### Copilot on [`crates/cli/src/main.rs:65`](https://github.com/cmk/agogo/pull/15#discussion_r3141035697) (2026-04-25 01:22 UTC)
+
+The `--help` text for `agogo demo run` says it runs “for `--duration-ms` ms (or until Ctrl-C)”, but the implementation just sleeps for the fixed duration and explicitly defers Ctrl-C handling. Please update this docstring so the CLI help matches actual behavior.
+
+
+<!-- gh-id: 3141063403 -->
+### Copilot on [`crates/host-cpal/Cargo.toml:16`](https://github.com/cmk/agogo/pull/15#discussion_r3141063403) (2026-04-25 01:38 UTC)
+
+The comment says CI runs a dedicated `cargo test -p agogo-host-cpal` job, but this crate is detached (not a workspace member) and the workflow in this PR runs cargo from `crates/host-cpal` instead. Please update this comment to match the actual CI invocation (e.g., working-directory / `--manifest-path`).
+
+
+<!-- gh-id: 3141063411 -->
+### Copilot on [`crates/host-midi/README.md:13`](https://github.com/cmk/agogo/pull/15#discussion_r3141063411) (2026-04-25 01:38 UTC)
+
+README says CI runs `cargo test -p agogo-host-midi`, but the CI workflow in this PR uses `working-directory: crates/host-midi` (since `-p` won’t resolve detached crates from the workspace root). Please update this section so the README matches the real CI job behavior.
+
+
+<!-- gh-id: 3141063420 -->
+### Copilot on [`crates/host-cpal/src/cpal/control.rs:185`](https://github.com/cmk/agogo/pull/15#discussion_r3141063420) (2026-04-25 01:38 UTC)
+
+The drop-ordering doc claims messages produced after the drain thread exits “get counted as overruns by `dropped_count`”. In reality, messages can still be successfully enqueued (and then silently lost) until the ring fills; only pushes that hit a full ring increment `dropped_count`. Please adjust the wording to reflect that the reverse drop order can lose messages (not necessarily count them) unless/until the buffer overruns.
+
+
+<!-- gh-id: 3141063427 -->
+### Copilot on [`crates/host-cpal/src/cpal.rs:101`](https://github.com/cmk/agogo/pull/15#discussion_r3141063427) (2026-04-25 01:38 UTC)
+
+The support-scan predicate checks sample format (F32) and channels in addition to sample rate, but the error returned on failure is `UnsupportedSampleRate(cfg.sample_rate)`. This can produce a misleading error when the rate is supported but only a different format/channel count is available. Consider either (a) narrowing the predicate to rate-only, or (b) adding an `UnsupportedConfig`/`UnsupportedFormat`/`UnsupportedChannels` error (or including details in the error message) so callers can distinguish the real cause.
+
+
+<!-- gh-id: 3141063430 -->
+### Copilot on [`doc/plans/plan-2026-04-24-02.md:583`](https://github.com/cmk/agogo/pull/15#discussion_r3141063430) (2026-04-25 01:38 UTC)
+
+This plan doc’s Build gates section still uses `cargo build -p agogo-host-cpal` / `-p agogo-host-midi` (and later `cargo clippy -p ...`) even though the crates are intentionally detached and earlier in the plan it correctly notes that `-p <crate>` from the workspace root won’t resolve them. Please update these commands to use `--manifest-path crates/host-*/Cargo.toml` or `cd crates/host-*` so the instructions are reproducible.
+
+<!-- gh-id: 4174435551 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-25 01:38 UTC](https://github.com/cmk/agogo/pull/15#pullrequestreview-4174435551))
+
+## Pull request overview
+
+Implements Plan 13’s first runnable end-to-end demo pipeline by adding an `AudioHost` trait to `agogo-core`, introducing detached platform backends for cpal audio input and midir MIDI output, and wiring them into `agogo demo` behind feature flags (plus CI/docs/conventions updates to support the detached crates).
+
+**Changes:**
+- Added `agogo_core::host` (`AudioHost`, `AudioIo`, `Config`, `Handle`, `AudioHostError`) and an allocation-free scheduler API (`tick_stream_into`).
+- Introduced detached backend crates `agogo-host-cpal` (cpal stream + RT callback + rtrb SPSC/drain thread) and `agogo-host-midi` (midir `MidiSink`).
+- Integrated feature-gated `agogo demo` CLI and updated CI + float allowlisting/docs to account for the new crates.
+
+### Reviewed changes
+
+Copilot reviewed 21 out of 23 changed files in this pull request and generated 5 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| scripts/check-floats.sh | Extends float allowlist to new PCM-ABI sites. |
+| doc/reviews/review-00015.md | Adds a Plan 13 review record (verification narrative, follow-ups). |
+| doc/plans/plan-2026-04-24-02.md | Adds the Plan 13 design/plan document and verification checklist. |
+| crates/host-midi/src/midir.rs | Implements `MidirSink` over midir with basic tests and port listing. |
+| crates/host-midi/src/lib.rs | host-midi crate root + docs + exports. |
+| crates/host-midi/README.md | Documents detached-crate workflow and local setup notes. |
+| crates/host-midi/Cargo.toml | Adds detached `agogo-host-midi` crate manifest and deps. |
+| crates/host-cpal/src/lib.rs | host-cpal crate root + docs + exports. |
+| crates/host-cpal/src/cpal/control.rs | Adds rtrb SPSC + RT producer + drain thread + tests. |
+| crates/host-cpal/src/cpal/callback.rs | Adds `CallbackState` hot loop + preallocation helper + tests. |
+| crates/host-cpal/src/cpal.rs | Implements `CpalHost: AudioHost` with stream-owner thread. |
+| crates/host-cpal/README.md | Documents detached-crate workflow and development notes. |
+| crates/host-cpal/Cargo.toml | Adds detached `agogo-host-cpal` crate manifest and deps. |
+| crates/core/src/lib.rs | Exposes new `host` module. |
+| crates/core/src/host.rs | Defines `AudioHost` API and RT callback payload shape (`AudioIo`). |
+| crates/core/src/channel/scheduler.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
+| crates/cli/src/main.rs | Adds `agogo demo` commands and end-to-end wiring module. |
+| crates/cli/Cargo.toml | Adds optional path deps + features (`cpal`, `midi`, `demo`). |
+| Cargo.toml | Excludes new detached host crates from the workspace. |
+| Cargo.lock | Updates lockfile for new dependencies pulled by `agogo-cli`. |
+| CLAUDE.md | Updates “no stored floats” exception-module count/notes. |
+| .gitignore | Ignores detached crates’ per-crate `Cargo.lock` files. |
+| .github/workflows/ci.yml | Adds CI jobs to test/clippy detached host crates from their dirs. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3141092170 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141092170))
+
+Fixed in the round-3 fix commit — test-module doc comment no longer references the nonexistent `cpal_default_input` fixture; it now points at Plan 14's `agogo run` acceptance path per Plan 13's §T6 deferral.
+
+<!-- gh-id: 3141092247 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141092247))
+
+Fixed — the plan doc's workspace/CI section was updated in round 1 to use `working-directory: crates/host-<name>`. The Build gates section at lines 581–594 still had stale `-p` commands though, which round 3 (`a2196fa`) cleans up (`--manifest-path crates/host-*/Cargo.toml` for the detached crates; `-p agogo-cli` stays since `agogo-cli` IS a workspace member).
+
+<!-- gh-id: 3141092353 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141092353))
+
+Stale — fixed in the round-1 fix commit (`ca3b622`). `ci.yml` at line 81 now contains `working-directory: crates/host-midi`, not `cargo test -p`. Copilot appears to be reviewing the pre-fix commit's diff rather than the current HEAD.
+
+<!-- gh-id: 3141092444 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141092444))
+
+Stale on the `-p` commands — fixed in round 1 (`ca3b622`): the Dev workflow section uses `--manifest-path crates/host-cpal/Cargo.toml` (with a `cd` alternative). Stale on `cpal_default_input_smoke` too — the README now explicitly points at Plan 14 per Plan 13's T6 deferral.
+
+<!-- gh-id: 3141092533 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141092533))
+
+Stale — fixed in round 1 (`ca3b622`): comparison is now `c.channels() == cfg.input_channels`, paired with `cfg.input_channels != 1` rejection at `CpalHost::run` entry. Round 3 (`a2196fa`) additionally splits the error into `UnsupportedSampleRate` vs `UnsupportedConfig(String)` so a format/channel mismatch no longer surfaces as a rate error (your gh-id 3141063427).
+
+<!-- gh-id: 3141092635 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141092635))
+
+Stale — fixed in round 1 (`ca3b622`): `as_slice` now clamps `bytes_len` with `min(3)`, so a `MidiMessage { bytes_len: 4, .. }` returns the full 3-byte view rather than panicking. Keeping fields public with the `debug_assert!` in `from_slice` as the primary invariant guard — see the round-1 reply (gh-id 3141025525) for rationale.
+
+<!-- gh-id: 3141092708 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141092708))
+
+Stale — drop-ordering doc comment was added in round 1 (`ca3b622`). Round 3 (`a2196fa`) additionally refines the wording per your own gh-id 3141063420 catch: messages land in the ring successfully (no overrun), they're just silently lost when the drain thread exits. `dropped_count` only bumps on full-ring pushes.
+
+<!-- gh-id: 3141092888 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141092888))
+
+Fixed in round 3 (`a2196fa`) — same shape as the `cpal_default_input` fix for cpal.rs's test module: the midir.rs test-module doc comment now points at Plan 14's acceptance path rather than the `midir_loopback` fixture (deferred per Plan 13 T6).
+
+<!-- gh-id: 3141093182 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141093182))
+
+Fixed in round 3 (`a2196fa`) — the local-review section now carries an inline "Round 2 correction" note pointing at Copilot gh-id 3141035633 / 3141035679 and the actual `working-directory` fix. Keeping the original text as a historical record of round 1's (broken) intent; the correction note makes it clear that approach was superseded.
+
+<!-- gh-id: 3141093339 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141093339))
+
+Stale — fixed in round 1 (`ca3b622`). Same as gh-id 3141035633 for the host-midi job: line 68 of the current ci.yml is `crates/host-cpal` as a `working-directory`, not `-p agogo-host-cpal`. Copilot is re-flagging the pre-fix content.
+
+<!-- gh-id: 3141093469 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141093469))
+
+Stale on the `-p` commands in the Dev workflow section — fixed in round 1 (`ca3b622`) with `--manifest-path`. Round 3 (`a2196fa`) additionally fixes the top-of-file intro paragraph that still had a stray `-p agogo-host-midi` reference (your gh-id 3141063411). The `midir_loopback_roundtrip` reference now points at Plan 14's acceptance path per Plan 13's T6 deferral.
+
+<!-- gh-id: 3141093532 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141093532))
+
+Stale — fixed in round 1 (`ca3b622`): `AudioIo` doc now pins Plan 13 to mono explicitly, and `CpalHost::run` enforces `cfg.input_channels == 1` at entry. See round-1 reply gh-id 3141025822 for the full picked-option-(b) rationale.
+
+<!-- gh-id: 3141093612 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141093612))
+
+Stale — fixed in round 1 (`ca3b622`). The docstring no longer claims "(or until Ctrl-C)"; explicit note that Plan 13 has no signal handler and Plan 14's `agogo run` adds it. See round-1 reply gh-id 3141025364.
+
+<!-- gh-id: 3141093712 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141093712))
+
+Fixed in round 3 (`a2196fa`) — the `host-cpal/Cargo.toml` preamble comment now describes the actual CI pattern (`working-directory: crates/host-cpal` in `ci.yml`) rather than the stale `cargo test -p agogo-host-cpal`.
+
+<!-- gh-id: 3141093799 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141093799))
+
+Fixed in round 3 (`a2196fa`) — the host-midi README intro paragraph (line 12) now matches CI: `CI runs \`cargo test\` from this crate's directory in a dedicated \`host-midi\` job`. The Dev workflow section's build commands were already `--manifest-path` after round 1; this was the stray intro I missed.
+
+<!-- gh-id: 3141093892 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141093892))
+
+Fixed in round 3 (`a2196fa`) — `spawn_drain`'s doc comment now says the reverse-drop-order case lands messages in the ring successfully (no overrun) and then silently loses them when the drain thread exits; `dropped_count` only increments on full-ring pushes. Accurate description replaces round 1's wording that implied they'd all be counted.
+
+<!-- gh-id: 3141094057 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141094057))
+
+Fixed in round 3 (`a2196fa`) — `AudioHostError` gains an `UnsupportedConfig(String)` variant (and is marked `#[non_exhaustive]` so future variants can land cleanly). `CpalHost::run` now distinguishes: if no config covers the requested rate, `UnsupportedSampleRate(sample_rate)`; if the rate IS supported but no f32 mono config exists, `UnsupportedConfig` with details of what's available vs. requested. Preserves the existing variant's intent while giving callers a clearer signal when the failure is format/channel, not rate.
+
+<!-- gh-id: 3141094277 -->
+#### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141094277))
+
+Fixed in round 3 (`a2196fa`) — plan doc Build gates section (lines 581–594) now uses `--manifest-path crates/host-*/Cargo.toml` for the detached crates; `cargo build -p agogo-cli --features demo` stays with `-p` since `agogo-cli` IS a workspace member.

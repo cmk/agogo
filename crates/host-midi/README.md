@@ -9,8 +9,10 @@ as sibling crates.
 Not a workspace member by design — `cargo test --workspace` skips
 it so the default CI path doesn't pull midir + its platform
 system libraries (`libasound` on Linux, CoreMIDI on macOS, WinMM on
-Windows). CI runs `cargo test -p agogo-host-midi` in a dedicated
-job that installs `libasound2-dev` up front.
+Windows). CI runs `cargo test` from this crate's directory in a
+dedicated `host-midi` job (`working-directory: crates/host-midi`
+in `.github/workflows/ci.yml`) that installs `libasound2-dev` up
+front.
 
 ## Dev workflow
 

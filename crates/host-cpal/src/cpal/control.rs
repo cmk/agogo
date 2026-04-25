@@ -180,11 +180,13 @@ impl ControlConsumer {
     /// `Handle` returned by `AudioHost::run`) *before* the
     /// `DrainHandle`. If the order is reversed, the audio
     /// callback keeps producing messages into the ring after the
-    /// drain thread has already exited, and those final-buffer
-    /// messages get counted as overruns by `dropped_count` rather
-    /// than reaching the sink. `agogo demo run` does this
-    /// correctly (`crates/cli/src/main.rs` drops `stream_handle`
-    /// then `drain`).
+    /// drain thread has already exited. Those messages land in
+    /// the ring successfully (so `dropped_count` does NOT
+    /// increment — the counter only bumps on full-ring overruns);
+    /// they are simply never drained to the sink, which is a
+    /// silent loss. `agogo demo run` does this correctly
+    /// (`crates/cli/src/main.rs` drops `stream_handle` then
+    /// `drain`).
     ///
     /// `sink` is `Arc<dyn MidiSink + Send + Sync>` — the explicit
     /// `Send + Sync` bounds let the `Arc` move into the drain
