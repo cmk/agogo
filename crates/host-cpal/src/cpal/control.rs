@@ -139,6 +139,16 @@ pub struct ControlConsumer {
 }
 
 impl ControlConsumer {
+    /// Non-blocking dequeue. Returns `None` if the ring is empty.
+    /// Useful for tests and for callers that drive their own
+    /// drain loop (e.g. the `CallbackState` test harness in
+    /// `cpal::callback::tests`); production deployments use
+    /// [`Self::spawn_drain`] which spawns the dedicated drain
+    /// thread.
+    pub fn try_pop(&mut self) -> Option<MidiMessage> {
+        self.inner.pop().ok()
+    }
+
     /// Spawn a drain thread that forwards every dequeued message
     /// to `sink`. Returns a [`DrainHandle`] whose `Drop` impl
     /// flushes any in-flight messages and joins the thread.

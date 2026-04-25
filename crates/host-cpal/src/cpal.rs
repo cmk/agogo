@@ -1,5 +1,6 @@
 //! `CpalHost` — cpal-backed [`AudioHost`] implementation.
 
+pub mod callback;
 pub mod control;
 
 use ::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
