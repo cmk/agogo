@@ -154,7 +154,9 @@ impl Grid {
 
 /// Divisibility preorder: `a.ple(&b)` iff `a`'s tick count divides
 /// `b`'s. Factors component-wise — `a.ple(&b) ⟺ a.n.ple(&b.n) ∧
-/// (a.t ≥ b.t) ∧ (a.q ≥ b.q)` (treating `false < true`).
+/// (a.t ≥ b.t) ∧ (a.q ≥ b.q)` (treating `true < false`, since
+/// `t = true` / `q = true` mean the corresponding factor is absent,
+/// making the tick count finer / lower on those axes).
 impl Ple for Grid {
     fn ple(&self, other: &Self) -> bool {
         self.n.ple(&other.n)

@@ -403,3 +403,117 @@ correctly resolved. No new must-fix issues found in the migration.
 
 **The branch is ready to push** once the user decides on
 `main.rs:100-101`.
+
+<!-- gh-id: 3141804046 -->
+### Copilot on [`crates/core/src/time/grid.rs:157`](https://github.com/cmk/agogo/pull/17#discussion_r3141804046) (2026-04-25 10:11 UTC)
+
+The `Grid` `Ple` doc comment says it's treating `false < true`, but the implementation uses `(self.t as u8) >= (other.t as u8)` / `(self.q as u8) >= …`, which corresponds to `true ≤ false` on those axes (i.e. `t=true` / `q=true` are *finer* / lower because they remove factors from the tick count). Please update the comment so the stated boolean order matches the implementation and the tick-count divisibility semantics.
+```suggestion
+/// (a.t ≥ b.t) ∧ (a.q ≥ b.q)` (treating `true < false`, since
+/// `t = true` / `q = true` mean the corresponding factor is absent,
+/// making the tick count finer / lower on those axes).
+```
+
+<!-- gh-id: 3141804055 -->
+### Copilot on [`doc/plans/plan-2026-04-24-04.md:253`](https://github.com/cmk/agogo/pull/17#discussion_r3141804055) (2026-04-25 10:11 UTC)
+
+The plan’s DSL/`Display` section claims the canonical `Grid` `Display` format is upper-case (e.g. `"T16Q"`) and the snippet shows `write!(f, "T{plan_idx}{suffix}")`. In the actual implementation (`crates/core/src/time/grid.rs`), `Display` emits lower-case (`t16q`, `t512p`, …) and parsing is case-insensitive. Please update this section (including the “canonical Display is upper-case” statement) so it matches the code’s real canonical formatting.
+
+<!-- gh-id: 3141804058 -->
+### Copilot on [`crates/core/src/time/tick.rs:4`](https://github.com/cmk/agogo/pull/17#discussion_r3141804058) (2026-04-25 10:11 UTC)
+
+The module-level doc example has an incorrect tick-count equivalence: `Time { 16, T512P }` is 16 ticks because `T512P.tick_count() == 1`. If the intent is to show two representations of 240 ticks, this should be something like `Time { 240, T512P }` vs `Time { 1, T16 }` (since `T16.tick_count() == 240` at 960 PPQN).
+```suggestion
+//! representations of the same duration (`Time { 240, T512P }` and
+```
+
+<!-- gh-id: 4175418817 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-25 10:11 UTC](https://github.com/cmk/agogo/pull/17#pullrequestreview-4175418817))
+
+## Pull request overview
+
+Extends the time core to 960 PPQN and replaces the v0.1 “flat” `TBase` lattice with a `TBase` (binary axis) + `Grid` (36-element product lattice) split, along with the `SwingConfig` reshape to direct `i8` tick offsets and updated CLI/scheduler plumbing.
+
+**Changes:**
+- Bump `PPQN` to 960 and update `Tick`/`Time` canonicalisation and related Galois connections to operate over `Grid`.
+- Introduce `time::grid::Grid` (36-element lattice) and contract `time::tbase::TBase` to the 9-value binary axis.
+- Reshape swing to `{ resolution: TBase, amount: i8 }`, propagate through channel scheduling, CLI parsing, and add/adjust property + spot-check tests (including exact-rate tests).
+
+### Reviewed changes
+
+Copilot reviewed 23 out of 24 changed files in this pull request and generated 4 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00017.md | Adds a local review record summarizing Plan 15 changes and checks. |
+| doc/plans/plan-2026-04-24-04.md | Adds the Plan 15 design + verification plan and review notes. |
+| crates/host-link/tests/bidirectional.rs | Updates fixtures for `Grid` divider + new `SwingConfig` shape. |
+| crates/host-link/src/session.rs | Updates tests for `Grid` divider + new `SwingConfig` shape. |
+| crates/host-cpal/src/cpal/callback.rs | Updates callback tests to use `Grid` divider and `SwingConfig { resolution, amount }`. |
+| crates/core/src/time/tick.rs | Bumps PPQN to 960; `Time.base` becomes `Grid`; updates canonicalisation and tests. |
+| crates/core/src/time/tbase.rs | Contracts `TBase` to binary axis; adds exp/from_exp; updates parsing/display and tests. |
+| crates/core/src/time/swing.rs | Implements new swing semantics (binary `resolution`, `i8 amount`) + expanded tests. |
+| crates/core/src/time/grid.rs | New `Grid` lattice module (consts, tick_count, meet/join/heyting, parsing/display, tests). |
+| crates/core/src/time/exact_rates.rs | New integer-exactness proptests for `SampleTickConn` at 48k/96k with 960 PPQN. |
+| crates/core/src/time/conn.rs | Migrates connections to `Grid` (incl. `quantize_at(Grid)` and lattice `grid()` conn); updates tests. |
+| crates/core/src/time.rs | Exposes new `grid` module and wires in exact-rate tests. |
+| crates/core/src/out/midi.rs | Updates MIDI output tests for new divider/swing types and 960 PPQN. |
+| crates/core/src/machine/spec.rs | Updates channel mini-language (`div`→`Grid`, `swing-res`, `swing` as i8) + tests. |
+| crates/core/src/machine.rs | Updates machine tests for `Grid` divider and new `SwingConfig`. |
+| crates/core/src/channel/transform.rs | Migrates divider to `Grid`, swing changes, and updates/extends tests. |
+| crates/core/src/channel/scheduler.rs | Updates scheduler swing-window logic for new sign convention and `Grid` divider + tests. |
+| crates/core/src/arb.rs | Adds `arb_grid`, updates `arb_tbase`/`arb_time`/`arb_tick`/`arb_swing` for the new model. |
+| crates/core/proptest-regressions/time/tick.txt | Adds regression seeds for updated tick canonicalisation tests. |
+| crates/core/proptest-regressions/time/swing.txt | Adds regression seeds for swing properties. |
+| crates/core/proptest-regressions/time/grid.txt | Adds regression seeds for grid lattice properties. |
+| crates/core/proptest-regressions/time/conn.txt | Adds regression seeds for updated conn properties. |
+| crates/cli/src/run.rs | Updates `--ch` help text for `swing-res` and PPQN=960. |
+| crates/cli/src/main.rs | Renames `time schedule --tbase`→`--grid`, updates help text/examples, and migrates divider parsing to `Grid`. |
+</details>
+
+
+
+<details>
+<summary>Comments suppressed due to low confidence (1)</summary>
+
+**crates/cli/src/main.rs:1277**
+* `ScheduleArgs` help text says `--swing` is a ratio where `0.75 = full triplet swing`, but `swing_to_config` preserves the legacy mapping `amount = (swing - 0.5) * 96` (so at 960 PPQN / T16=240, `0.75` becomes `amount=24`, which is not a triplet-feel displacement). Either update the help text to describe the legacy mapping (not a literal ratio at 960 PPQN), or change the conversion to compute the displacement from `TBase::T16.tick_count()` so the advertised ratio is accurate.
+```
+        /// Swing ratio in `[0.5, 0.75]`: 0.5 = straight, 0.75 = full
+        /// triplet swing. f64 per the CLI argv-boundary rule
+        /// (CLAUDE.md §Repository conventions).
+```
+</details>
+
+
+
+<!-- gh-id: 3141804060 -->
+### Copilot on [`crates/core/src/time/tbase.rs:9`](https://github.com/cmk/agogo/pull/17#discussion_r3141804060) (2026-04-25 10:11 UTC)
+
+The doc comment describing the chain order is reversed relative to the actual `Ple` order (`ple` is implemented as `self.exp() >= other.exp()`, so finer grids are ≤ coarser grids). As written, `T1 < T2 < … < T256` is not true under `ple`; it should be expressed as `T256 ≤ … ≤ T2 ≤ T1` (or equivalent wording) if you want it to match the code.
+```suggestion
+//! `T256 ≤ … ≤ T4 ≤ T2 ≤ T1` in the lattice's divisibility order,
+```
+
+<!-- gh-id: 3142559978 -->
+#### ↳ cmk ([2026-04-25 20:57 UTC](https://github.com/cmk/agogo/pull/17#discussion_r3142559978))
+
+Fixed in e2010c4 — reworded the Ple doc comment to read `treating true < false, since t = true / q = true mean the corresponding factor is absent, making the tick count finer / lower on those axes`, matching the implementation.
+
+<!-- gh-id: 3142560115 -->
+#### ↳ cmk ([2026-04-25 20:58 UTC](https://github.com/cmk/agogo/pull/17#discussion_r3142560115))
+
+Fixed in e2010c4 — flipped the plan's DSL morphism section to lower-case (`t16q`, `t512p`, …) including the embedded `write!` macro and the `FromStr` example, and added a note that lower-case is the shell-friendly form used by `--ch div=…` / `--grid …` argv values.
+
+<!-- gh-id: 3142560296 -->
+#### ↳ cmk ([2026-04-25 20:58 UTC](https://github.com/cmk/agogo/pull/17#discussion_r3142560296))
+
+Fixed in e2010c4 — changed the example to `Time { 240, T512P }` so the equivalence with `Time { 1, T16 }` is genuine at 960 PPQN.
+
+<!-- gh-id: 3142560400 -->
+#### ↳ cmk ([2026-04-25 20:58 UTC](https://github.com/cmk/agogo/pull/17#discussion_r3142560400))
+
+Fixed in e2010c4 — flipped the chain-order doc to `T256 ≤ … ≤ T4 ≤ T2 ≤ T1` and added a parenthetical that finer grids (smaller tick counts) are lower under `Ple`.
