@@ -212,12 +212,16 @@ mod tests {
         fn _accepts_dyn_audio_host(_h: Box<dyn AudioHost>) {}
     }
 
-    /// Sanity match over every known `AudioHostError` variant.
-    /// Uses a wildcard arm because `AudioHostError` is
-    /// `#[non_exhaustive]` — adding a variant mustn't break
-    /// downstream match statements. The `_` arm catches new
-    /// variants at runtime; if a future variant needs explicit
-    /// handling here, add it above the `_`.
+    /// Sanity match over every `AudioHostError` variant.
+    ///
+    /// Inside `agogo-core` (the defining crate), `#[non_exhaustive]`
+    /// has no effect on exhaustiveness checks — adding a new
+    /// variant here will fail to compile until this match is
+    /// updated, which is what we want. Downstream crates DO see
+    /// `#[non_exhaustive]`, and their own tests should include a
+    /// wildcard arm; clippy's `unreachable_patterns` warns on
+    /// that wildcard in this local match because it is unreachable
+    /// here.
     #[test]
     fn audio_host_error_variants_constructible() {
         let errs = [
@@ -234,7 +238,6 @@ mod tests {
                 | AudioHostError::UnsupportedSampleRate(_)
                 | AudioHostError::UnsupportedConfig(_)
                 | AudioHostError::Backend(_) => {}
-                _ => unreachable!("new AudioHostError variant not handled here"),
             }
         }
     }
