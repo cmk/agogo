@@ -201,6 +201,7 @@ impl LinkSession {
 mod tests {
     use super::*;
     use agogo_core::channel::{Channel, ChannelMode, MAX_SHIFT};
+    use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
     use std::num::NonZeroU32;
@@ -215,8 +216,11 @@ mod tests {
     fn channel_with_snap(q: Option<Quantum>) -> Channel {
         Channel {
             mode: ChannelMode::MidiClock,
-            divider: TBase::T4,
-            shuffle: SwingConfig { amount: 0, multiplier: 1 },
+            divider: Grid::T4,
+            shuffle: SwingConfig {
+                resolution: TBase::T16,
+                amount: 0,
+            },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: q,

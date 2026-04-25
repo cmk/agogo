@@ -3,9 +3,10 @@
 //! Grammar: `key=val[,key=val]*`. Whitespace tolerated; `=` and `,`
 //! separate; values may be quoted `"..."` to embed spaces or commas.
 //!
-//! Required keys: `div`, `dev`. Optional keys: `id`, `out`, `swing`,
-//! `swing-mult`, `shift-ms`, `offset-ms`, `snap-quantum-us`. Unknown
-//! keys are hard errors so typos are caught early.
+//! Required keys: `div`, `dev`. Optional keys: `id`, `out`, `swing`
+//! (i8 tick offset), `swing-res` (binary resolution, default `t16`),
+//! `shift-ms`, `offset-ms`, `snap-quantum-us`. Unknown keys are hard
+//! errors so typos are caught early.
 //!
 //! [`ChannelSpec`] holds the parsed form; [`ChannelSpec::into_channel`]
 //! converts to a [`Channel`] at the CLI argv boundary, where the only
@@ -17,6 +18,7 @@ use std::fmt::{self, Display};
 use crate::channel::transform::MAX_SHIFT;
 use crate::channel::{Channel, ChannelMode};
 use crate::fxp::{Extended, ExtendedFloat, F64F06, Micro};
+use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
 use crate::time::tbase::TBase;
 
@@ -31,12 +33,15 @@ pub struct ChannelSpec {
     pub dev: ChannelDev,
     /// Device-specific routing target (port name, channel index).
     pub out: Option<String>,
-    /// Tempo divider. Required.
-    pub div: TBase,
-    /// `SwingConfig::amount`.
-    pub swing: i32,
-    /// `SwingConfig::multiplier` (default 1).
-    pub swing_mult: i32,
+    /// Tempo divider. Required. Any 36-element `Grid` value is
+    /// allowed (`t4`, `t16`, `t8q`, `t32t`, `t2p`, …).
+    pub div: Grid,
+    /// `SwingConfig::amount` — signed `i8` tick offset on the
+    /// resolution grid. Default 0 (no swing).
+    pub swing: i8,
+    /// `SwingConfig::resolution` — binary subdivision the swing
+    /// grid lives on. Default `TBase::T16`.
+    pub swing_res: TBase,
     /// Positive shift in milliseconds. Clamped to MAX_SHIFT (300 ms)
     /// in `into_channel`.
     pub shift_ms: f64, // argv boundary
@@ -94,9 +99,9 @@ impl ChannelSpec {
         let mut id: Option<String> = None;
         let mut dev: Option<ChannelDev> = None;
         let mut out: Option<String> = None;
-        let mut div: Option<TBase> = None;
-        let mut swing: i32 = 0;
-        let mut swing_mult: i32 = 1;
+        let mut div: Option<Grid> = None;
+        let mut swing: i8 = 0;
+        let mut swing_res: TBase = TBase::T16;
         let mut shift_ms: f64 = 0.0; // argv boundary
         let mut offset_ms: f64 = 0.0; // argv boundary
         let mut snap_to_quantum_micro: Option<i64> = None;
@@ -116,25 +121,19 @@ impl ChannelSpec {
                 "out" => out = Some(v),
                 "div" => {
                     div = Some(
-                        v.parse::<TBase>()
+                        v.parse::<Grid>()
                             .map_err(|e| ChannelSpecError::BadValue("div", e.to_string()))?,
                     );
                 }
                 "swing" => {
                     swing = v
-                        .parse::<i32>()
+                        .parse::<i8>()
                         .map_err(|e| ChannelSpecError::BadValue("swing", e.to_string()))?;
                 }
-                "swing-mult" => {
-                    swing_mult = v
-                        .parse::<i32>()
-                        .map_err(|e| ChannelSpecError::BadValue("swing-mult", e.to_string()))?;
-                    if swing_mult <= 0 {
-                        return Err(ChannelSpecError::BadValue(
-                            "swing-mult",
-                            "must be ≥ 1".into(),
-                        ));
-                    }
+                "swing-res" => {
+                    swing_res = v
+                        .parse::<TBase>()
+                        .map_err(|e| ChannelSpecError::BadValue("swing-res", e.to_string()))?;
                 }
                 "shift-ms" => {
                     let parsed = v
@@ -177,7 +176,7 @@ impl ChannelSpec {
             out,
             div: div.ok_or(ChannelSpecError::MissingKey("div"))?,
             swing,
-            swing_mult,
+            swing_res,
             shift_ms,
             offset_ms,
             snap_to_quantum_micro,
@@ -202,8 +201,8 @@ impl ChannelSpec {
             mode,
             divider: self.div,
             shuffle: SwingConfig {
+                resolution: self.swing_res,
                 amount: self.swing,
-                multiplier: self.swing_mult,
             },
             shift,
             offset,
@@ -247,8 +246,8 @@ impl Display for ChannelSpec {
         if self.swing != 0 {
             write!(f, ",swing={}", self.swing)?;
         }
-        if self.swing_mult != 1 {
-            write!(f, ",swing-mult={}", self.swing_mult)?;
+        if self.swing_res != TBase::T16 {
+            write!(f, ",swing-res={}", self.swing_res)?;
         }
         if self.shift_ms != 0.0 {
             write!(f, ",shift-ms={}", self.shift_ms)?;
@@ -370,14 +369,35 @@ mod tests {
     fn parse_full_spec() {
         let s = "div=t32t,dev=midi,out=IAC Bus 1,swing=10,shift-ms=2.5,offset-ms=-1.0";
         let spec = ChannelSpec::parse(s).expect("parse");
-        assert_eq!(spec.div, TBase::T32t);
+        assert_eq!(spec.div, Grid::T32T);
         assert_eq!(spec.dev, ChannelDev::Midi);
         assert_eq!(spec.out.as_deref(), Some("IAC Bus 1"));
         assert_eq!(spec.swing, 10);
-        assert_eq!(spec.swing_mult, 1);
+        assert_eq!(spec.swing_res, TBase::T16);
         assert!((spec.shift_ms - 2.5).abs() < 1e-9);
         assert!((spec.offset_ms - -1.0).abs() < 1e-9);
         assert_eq!(spec.snap_to_quantum_micro, None);
+    }
+
+    #[test]
+    fn parse_swing_res_default_t16() {
+        let spec = ChannelSpec::parse("dev=midi,div=t16,swing=80").unwrap();
+        assert_eq!(spec.swing_res, TBase::T16);
+        assert_eq!(spec.swing, 80);
+    }
+
+    #[test]
+    fn parse_swing_res_explicit() {
+        let spec =
+            ChannelSpec::parse("dev=midi,div=t8,swing=40,swing-res=t8").unwrap();
+        assert_eq!(spec.swing_res, TBase::T8);
+        assert_eq!(spec.swing, 40);
+    }
+
+    #[test]
+    fn parse_quintuplet_divider() {
+        let spec = ChannelSpec::parse("dev=midi,div=t8q").unwrap();
+        assert_eq!(spec.div, Grid::T8Q);
     }
 
     #[test]
@@ -417,9 +437,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_rejects_non_binary_swing_res() {
+        // `swing-res` is `TBase` (binary chain only) — quintuplet /
+        // triplet names must fail at parse time.
+        let err = ChannelSpec::parse("dev=midi,div=t16,swing-res=t8q").unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "swing-res"),
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
     fn into_channel_clamps_shift_ms() {
-        // 500 ms exceeds MAX_SHIFT (300 ms); clamped to 300 ms
-        // (300_000 µs).
+        // 500 ms exceeds MAX_SHIFT (300 ms); clamped to 300 ms.
         let spec = ChannelSpec::parse("dev=midi,div=t32t,shift-ms=500").unwrap();
         let ch = spec.into_channel().unwrap();
         assert_eq!(ch.shift, MAX_SHIFT);
@@ -440,21 +470,15 @@ mod tests {
         assert_eq!(spec, reparsed);
     }
 
-    /// `out=` values containing whitespace round-trip through
-    /// `Display` → `parse` thanks to the auto-quote in
-    /// `quote_if_needed`. The original "IAC Bus 1" macOS port name
-    /// is the canonical regression case.
     #[test]
     fn display_quotes_values_with_spaces() {
         let spec = ChannelSpec::parse(r#"dev=midi,div=t32t,out="IAC Bus 1""#).unwrap();
         let s = spec.to_string();
-        // Display emits `out="IAC Bus 1"`; parse strips the quotes.
         assert!(s.contains(r#"out="IAC Bus 1""#), "got: {s}");
         let reparsed = ChannelSpec::parse(&s).unwrap();
         assert_eq!(spec, reparsed);
     }
 
-    /// Same for embedded commas in the value.
     #[test]
     fn display_quotes_values_with_commas() {
         let spec =
@@ -466,71 +490,27 @@ mod tests {
     }
 
     fn arb_dev() -> impl Strategy<Value = ChannelDev> {
-        // `Audio` is reserved (parser rejects); generate `Midi` only.
         Just(ChannelDev::Midi)
     }
 
+    fn arb_grid() -> impl Strategy<Value = Grid> {
+        prop::sample::select(Grid::ALL.as_slice())
+    }
+
     fn arb_tbase() -> impl Strategy<Value = TBase> {
-        prop::sample::select(&[
-            TBase::T1,
-            TBase::T2,
-            TBase::T4,
-            TBase::T8,
-            TBase::T16,
-            TBase::T32,
-            TBase::T64,
-            TBase::T2t,
-            TBase::T4t,
-            TBase::T8t,
-            TBase::T16t,
-            TBase::T32t,
-            TBase::T64t,
-            TBase::T128t,
-        ])
+        prop::sample::select(TBase::ALL.as_slice())
     }
 
     fn arb_spec() -> impl Strategy<Value = ChannelSpec> {
-        // Identifiers and ports include spaces, commas, and equals
-        // so the generator exercises `quote_if_needed` in the
-        // `Display` → `parse` round-trip. Values containing a
-        // literal `"` are excluded — the parser has no escape
-        // sequence and the spec doesn't expose a code path that
-        // produces such values in v0.1 (documented in
-        // `quote_if_needed`).
         let ident = r#"[a-zA-Z0-9 ,=_]{1,15}"#;
         (
             arb_dev(),
+            arb_grid(),
+            prop::option::of(ident),
+            prop::option::of(ident),
+            any::<i8>(),
             arb_tbase(),
-            prop::option::of(ident),
-            prop::option::of(ident),
-            // `swing` and `swing_mult` use the full SwingConfig
-            // contract: `amount` is signed (negative = early
-            // off-beat), `multiplier` is positive (proptest hits
-            // up to a generous integer range; `Display`/`parse`
-            // round-trip is identity for any i32, so the bound
-            // is about shrink speed, not coverage).
-            any::<i32>(),
-            (1i32..=i32::MAX),
-            // shift-ms in [0, 300] (MAX_SHIFT) and rounded to ms
-            // increments so the f64 → Micro round-trip is exact at
-            // the µs precision F64F06 gives us. Float values
-            // outside this range either clamp (>=300) or saturate
-            // (negative → 0) inside `into_channel`, breaking the
-            // ChannelSpec → Channel round-trip — but `ChannelSpec`
-            // → `Display` → `ChannelSpec::parse` does round-trip
-            // for any finite f64. The narrowing here is about
-            // round-trip exactness, not domain coverage; the
-            // saturation paths are spot-checked by
-            // `into_channel_clamps_shift_ms` /
-            // `into_channel_negative_shift_clamps_to_zero`.
             (0u32..=300).prop_map(|n| n as f64),
-            // offset-ms: same rationale as shift-ms — narrowed to
-            // ms increments so `Display` (`{}` formatter on f64)
-            // emits a string `parse::<f64>()` recovers exactly.
-            // `Channel::offset` is signed, so the range straddles
-            // zero. Saturation outside this range is exercised by
-            // `into_channel`-level spot checks, not this
-            // round-trip property.
             (-100i32..=100).prop_map(|n| n as f64),
             prop::option::of(any::<i32>().prop_map(|n| n as i64)),
         )
@@ -541,7 +521,7 @@ mod tests {
                     id,
                     out,
                     swing,
-                    swing_mult,
+                    swing_res,
                     shift_ms,
                     offset_ms,
                     snap_to_quantum_micro,
@@ -551,7 +531,7 @@ mod tests {
                     out,
                     div,
                     swing,
-                    swing_mult,
+                    swing_res,
                     shift_ms,
                     offset_ms,
                     snap_to_quantum_micro,

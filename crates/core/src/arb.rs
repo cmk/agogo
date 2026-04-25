@@ -101,6 +101,7 @@ mod strategies {
     use num_rational::Rational64;
     use proptest::prelude::*;
 
+    use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
     use crate::time::tick::{Tick, Time};
@@ -141,29 +142,43 @@ mod strategies {
         ]
     }
 
+    /// Binary subdivision strategy (9 variants). Used wherever a
+    /// `TBase`-typed value is required — most prominently
+    /// `SwingConfig.resolution`.
     pub fn arb_tbase() -> impl Strategy<Value = TBase> {
         prop_oneof![
             1 => Just(TBase::T1),
-            1 => Just(TBase::T128t),
+            1 => Just(TBase::T256),
             4 => prop::sample::select(TBase::ALL.as_slice()),
+        ]
+    }
+
+    /// Full 36-element Grid lattice strategy. Used wherever the
+    /// channel divider, `quantize_at` argument, or `Time::base`
+    /// crosses the test surface.
+    pub fn arb_grid() -> impl Strategy<Value = Grid> {
+        prop_oneof![
+            1 => Just(Grid::T1),
+            1 => Just(Grid::T512P),
+            4 => prop::sample::select(Grid::ALL.as_slice()),
         ]
     }
 
     pub fn arb_tick() -> impl Strategy<Value = Tick> {
         prop_oneof![
             1 => Just(Tick(0)),
-            1 => Just(Tick(TBase::T128t.tick_count())),
-            1 => Just(Tick(TBase::T1.tick_count())),
+            1 => Just(Tick(Grid::T512P.tick_count())),
+            1 => Just(Tick(Grid::T1.tick_count())),
             4 => (0u32..=1_000_000).prop_map(Tick),
         ]
     }
 
     pub fn arb_time() -> impl Strategy<Value = Time> {
-        (0u32..=100_000, arb_tbase()).prop_map(|(beats, base)| Time { beats, base })
+        (0u32..=100_000, arb_grid()).prop_map(|(beats, base)| Time { beats, base })
     }
 
     pub fn arb_small_time() -> impl Strategy<Value = Time> {
-        (0u32..=50, arb_tbase()).prop_map(|(beats, base)| Time { beats, base })
+        (0u32..=50, arb_grid()).prop_map(|(beats, base)| Time { beats, base })
     }
 
     pub fn arb_rational_nonneg() -> impl Strategy<Value = Rational64> {
@@ -171,25 +186,32 @@ mod strategies {
             1 => Just(Rational64::new(0, 1)),
             1 => Just(Rational64::new(1, 4)),
             1 => Just(Rational64::new(1, 1)),
-            4 => (0i64..=10_000, 1i64..=768).prop_map(|(n, d)| Rational64::new(n, d)),
+            4 => (0i64..=10_000, 1i64..=3840).prop_map(|(n, d)| Rational64::new(n, d)),
         ]
     }
 
+    /// Swing strategy. `amount` ranges over `i8` with bias toward
+    /// musically-meaningful magnitudes (0, MPC full-shuffle ±80,
+    /// Linn ±40); `resolution` ranges over the binary chain.
     pub fn arb_swing() -> impl Strategy<Value = SwingConfig> {
         prop_oneof![
-            1 => Just(SwingConfig { amount: 0, multiplier: 1 }),
-            1 => Just(SwingConfig { amount: 16, multiplier: 1 }),
-            1 => Just(SwingConfig { amount: 8, multiplier: 2 }),
-            4 => (-16i32..=16, 1i32..=16)
-                 .prop_map(|(amount, multiplier)| SwingConfig { amount, multiplier }),
+            1 => Just(SwingConfig { resolution: TBase::T16, amount: 0 }),
+            1 => Just(SwingConfig { resolution: TBase::T16, amount: 80 }),
+            1 => Just(SwingConfig { resolution: TBase::T16, amount: 40 }),
+            1 => Just(SwingConfig { resolution: TBase::T16, amount: -40 }),
+            1 => Just(SwingConfig { resolution: TBase::T8, amount: 0 }),
+            5 => (arb_tbase(), -120i8..=120)
+                 .prop_map(|(resolution, amount)| SwingConfig { resolution, amount }),
+            1 => (arb_tbase(), any::<i8>())
+                 .prop_map(|(resolution, amount)| SwingConfig { resolution, amount }),
         ]
     }
 }
 
 #[cfg(any(test, feature = "testkit"))]
 pub use strategies::{
-    arb_bpm, arb_jitter_sigma, arb_rational_nonneg, arb_sample_rate, arb_small_time, arb_swing,
-    arb_tbase, arb_tick, arb_time,
+    arb_bpm, arb_grid, arb_jitter_sigma, arb_rational_nonneg, arb_sample_rate, arb_small_time,
+    arb_swing, arb_tbase, arb_tick, arb_time,
 };
 
 // Fallback to satisfy the unused-trait import on non-testkit builds.

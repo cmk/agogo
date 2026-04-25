@@ -377,20 +377,21 @@ mod tests {
     use crate::channel::{Channel, ChannelMode, scheduler::tick_stream};
     use crate::fxp::{Micro, Tempo};
     use crate::time::conn::SampleTickConn;
+    use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
 
     fn stc_120_48k() -> SampleTickConn {
-        SampleTickConn::new(48_000, Tempo::from_bpm_integer(120), 192)
+        SampleTickConn::new(48_000, Tempo::from_bpm_integer(120), 960)
     }
 
-    fn zero_channel(mode: ChannelMode, divider: TBase) -> Channel {
+    fn zero_channel(mode: ChannelMode, divider: Grid) -> Channel {
         Channel {
             mode,
             divider,
             shuffle: SwingConfig {
+                resolution: TBase::T16,
                 amount: 0,
-                multiplier: 1,
             },
             shift: Micro::ZERO,
             offset: Micro::ZERO,
@@ -400,7 +401,7 @@ mod tests {
 
     #[test]
     fn midi_clock_mode_routes_through_render_buffer() {
-        let ch = zero_channel(ChannelMode::MidiClock, TBase::T4);
+        let ch = zero_channel(ChannelMode::MidiClock, Grid::T4);
         let evs = [ev(0), ev(24_000)];
         let sink = TestSink::new();
         render_channel_block(&ch, &evs, Some(MidiRtByte::Start), 0, &sink);
@@ -431,7 +432,7 @@ mod tests {
             ])),
             buffer_start in any::<u64>(),
         ) {
-            let ch = zero_channel(mode, TBase::T4);
+            let ch = zero_channel(mode, Grid::T4);
             let evs: Vec<ScheduledEvent> = samples.into_iter().map(ev).collect();
             let sink = TestSink::new();
             render_channel_block(&ch, &evs, transport, buffer_start, &sink);
@@ -456,7 +457,7 @@ mod tests {
             buffer_start in 0u64..=1_000_000,
             frames in 1usize..=8_192,
         ) {
-            let ch = zero_channel(ChannelMode::MidiClock, TBase::T16);
+            let ch = zero_channel(ChannelMode::MidiClock, Grid::T16);
             let stc = stc_120_48k();
             let evs = tick_stream(&ch, &stc, buffer_start, frames);
             let sink = TestSink::new();
