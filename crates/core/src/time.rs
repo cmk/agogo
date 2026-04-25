@@ -27,3 +27,6 @@ pub mod grid;
 pub mod swing;
 pub mod tbase;
 pub mod tick;
+
+#[cfg(test)]
+mod exact_rates;
