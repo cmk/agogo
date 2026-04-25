@@ -242,20 +242,30 @@ mod tests {
             }
         }
 
-        /// Plan 13 property `tick_stream_into_matches_tick_stream`:
-        /// pushing into a preallocated `Vec` via `tick_stream_into`
-        /// produces the same sequence `tick_stream` returns. Pins the
-        /// contract that Plan 13's RT callback relies on — the inlined
-        /// pipeline inside `tick_stream_into` stays bit-identical to
-        /// `transform`'s forward path.
+        /// Plan 13 property `tick_stream_into_matches_transform_filtered`:
+        /// `tick_stream_into`'s inlined per-tick pipeline stays
+        /// bit-identical to `transform`'s forward path (filtered to
+        /// the buffer window). Comparing `tick_stream_into` against
+        /// `tick_stream` would be circular — `tick_stream` delegates
+        /// to `tick_stream_into` post-Plan-13-T0b — so the reference
+        /// here is `transform` directly. Drift between the two
+        /// pipelines trips this test immediately.
+        ///
+        /// The reference applies `transform` over a generous fixed
+        /// tick range (`0..=65_536`); at PPQN 192 / 48 kHz / 120
+        /// BPM that covers samples up to ~13 s, well past the
+        /// `buffer_start ≤ 1_000_000` + `frames ≤ 8_192` bound the
+        /// proptest itself uses (~21 s of stream time max).
         #[test]
-        fn tick_stream_into_matches_tick_stream(
+        fn tick_stream_into_matches_transform_filtered(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
             shift_us in 0_i64..=MAX_SHIFT.0,
             offset_us in -5_000_i64..=5_000,
             buffer_start in 0u64..=1_000_000,
             frames in 1usize..=8_192,
         ) {
+            use crate::channel::transform::transform;
+
             let ch = Channel {
                 mode: ChannelMode::MidiClock,
                 divider,
@@ -265,10 +275,24 @@ mod tests {
                 snap_to_quantum: None,
             };
             let stc = stc_120_48k();
-            let returned = tick_stream(&ch, &stc, buffer_start, frames);
+            let buffer_end = buffer_start + frames as u64;
+
+            // Reference: `transform` over a generous tick range,
+            // then window-filtered. Calls `transform` directly so
+            // the inlined pipeline in `tick_stream_into` cannot
+            // shadow drift behind a delegation chain.
+            let reference: Vec<ScheduledEvent> = transform(
+                (0..=65_536u32).map(Tick),
+                &ch,
+                &stc,
+            )
+            .into_iter()
+            .filter(|e| e.sample_index >= buffer_start && e.sample_index < buffer_end)
+            .collect();
+
             let mut pushed = Vec::new();
             tick_stream_into(&mut pushed, &ch, &stc, buffer_start, frames);
-            prop_assert_eq!(returned, pushed);
+            prop_assert_eq!(pushed, reference);
         }
 
         /// Plan 13 property `tick_stream_into_no_realloc`: when the

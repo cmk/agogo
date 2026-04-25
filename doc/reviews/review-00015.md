@@ -213,3 +213,95 @@ midir → peer chain works end-to-end.
   third v0.1 output-chain slot. Generalises Plan 13's
   single-channel demo to N channels, lands the v0.1 acceptance
   scenario, and absorbs `agogo demo` → `agogo run` semantics.
+
+## Local review (2026-04-24)
+
+**Branch:** plan/2026-04-24-02
+**Commits:** 9 (origin/main..plan/2026-04-24-02)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Outcome
+
+Three must-fix items, three follow-ups. All three must-fixes
+addressed in the fix commit that lands alongside this review
+section; follow-ups tracked below.
+
+### Must-fix issues addressed
+
+1. **CI jobs missing for the new excluded crates.** Plan §Workspace
+   + CLI wiring specified `cargo test -p agogo-host-cpal` and
+   `cargo test -p agogo-host-midi` jobs in
+   `.github/workflows/ci.yml`. Both crates were excluded from
+   `[workspace].members` (so `cargo test --workspace` skips them by
+   design), and no other CI entry point exercised them — the 10
+   `host-cpal` proptests + 2 `host-midi` tests would never run on
+   CI. Fixed by adding two dedicated jobs (`host-cpal`,
+   `host-midi`) to `.github/workflows/ci.yml`, each preinstalling
+   `libasound2-dev` for the Linux runner before running
+   `cargo test -p <crate>` and `cargo clippy -p <crate>
+   --all-targets -- -D warnings`.
+
+2. **`CpalHost::run` channel-validation comparison inverted.**
+   `crates/host-cpal/src/cpal.rs:76` had
+   `cfg.input_channels >= c.channels()`. The intent is "the device
+   offers at least as many channels as we request"; the comparison
+   should be `c.channels() >= cfg.input_channels`. As written, a
+   2-channel device rejected a 1-channel request while a 1-channel
+   device wrongly accepted a 64-channel request, producing
+   confusing `UnsupportedSampleRate` errors. The demo path always
+   passes `input_channels: 1` so no current call site triggered
+   the bug, but multi-channel callers would have hit it
+   immediately. Fixed with the comparison swapped + a comment
+   documenting the inversion-and-fix.
+
+3. **`tick_stream_into_matches_tick_stream` cross-check was
+   circular.** Post-T0b, `tick_stream` delegates to
+   `tick_stream_into`, so the proptest compared
+   `tick_stream_into`'s output against itself — bugs in the
+   inlined per-tick pipeline could not trip the test. Renamed to
+   `tick_stream_into_matches_transform_filtered` and rewrote the
+   reference path to apply `transform` directly over a fixed tick
+   range (`0..=65_536`, ample for the proptest's
+   `buffer_start ≤ 1_000_000` + `frames ≤ 8_192` domain) plus a
+   window filter. Drift between `transform`'s forward path and
+   `tick_stream_into`'s inlined copy now trips the test.
+
+### Follow-ups (tracked, not blocking)
+
+A. **`tick_stream_into_no_realloc` bounded domain at large
+   `frames` not spot-checked.** CLAUDE.md §property-based testing
+   requires "a separate `#[test]` spot-check at the un-sampled
+   boundary" when bounding a generator domain. The existing bound
+   on `frames in 1usize..=8_192` is documented in line; a
+   `frames = usize::MAX / 2` spot check belongs alongside but
+   isn't load-bearing for Plan 13. Add with Plan 14's RT
+   verification work.
+
+B. **`drain_thread_forwards_all_messages` is a unit test, not a
+   proptest, despite being listed as a property in the
+   Verification table.** Implementation note in the plan's Review
+   section already covers this. The 100-message deterministic check
+   is functionally equivalent; classification mismatch is doc-only.
+   Treat as documentation cleanup with the next plan touch.
+
+C. **`spawn_drain` doc comment doesn't enforce the
+   drop-stream-handle-before-drain ordering.** The demo
+   (`crates/cli/src/main.rs:415-416`) does drop in the right
+   order, but `ControlConsumer::spawn_drain`'s API contract is
+   silent about the constraint. A caller that drops the
+   `DrainHandle` before the audio stream will see the final-buffer
+   messages silently dropped (counted in `dropped_count`) with no
+   compile-time signal. Document the requirement in the doc
+   comment (or refactor to make the lifetime relationship
+   explicit, but that's heavier than v0.1 needs).
+
+### Plan deferral note added (T5 follow-up E)
+
+Plan's Review section gains an explicit T5 deviation entry for
+`--log-dropped`: the periodic-warn flag was dropped from T5 because
+the implicit exit-1-on-drop already covers the diagnostic
+guarantee, and a polling thread is noise-only for the demo's
+typical 5 s runs. Land the periodic variant with v0.4 telemetry
+where it has peer signals to display next to.

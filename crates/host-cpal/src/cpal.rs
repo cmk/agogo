@@ -70,10 +70,16 @@ impl AudioHost for CpalHost {
             .supported_input_configs()
             .map_err(|e| AudioHostError::Backend(Box::new(e)))?
             .any(|c| {
+                // Match a config that offers AT LEAST the requested
+                // channel count (we slice the leading channels in
+                // the callback). The earlier `>=` had the
+                // comparison inverted — a 2-channel device rejected
+                // a 1-channel request, while a 1-channel device
+                // wrongly accepted a 64-channel request.
                 c.sample_format() == SampleFormat::F32
                     && c.min_sample_rate().0 <= cfg.sample_rate
                     && c.max_sample_rate().0 >= cfg.sample_rate
-                    && cfg.input_channels >= c.channels()
+                    && c.channels() >= cfg.input_channels
             });
         if !supports_rate {
             return Err(AudioHostError::UnsupportedSampleRate(cfg.sample_rate));
