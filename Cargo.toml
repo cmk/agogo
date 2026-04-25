@@ -14,7 +14,7 @@ members = [
 # `ext/` similarly holds third-party path deps (rusty_link and
 # friends) and is excluded so their tests / examples stay out of
 # `cargo test --workspace`.
-exclude = ["crates/host-cpal", "crates/host-link", "ext"]
+exclude = ["crates/host-cpal", "crates/host-link", "crates/host-midi", "ext"]
 resolver = "3"
 
 [workspace.package]

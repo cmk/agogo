@@ -21,12 +21,13 @@ doc/notes/
 # External
 ext/
 
-# `crates/host-link` and `crates/host-cpal` are detached crates (not
-# workspace members); their own Cargo.lock files are auto-generated on
-# standalone `cargo test` runs. The workspace Cargo.lock is the
-# authoritative one for CI/cli builds.
+# `crates/host-link`, `crates/host-cpal`, and `crates/host-midi` are
+# detached crates (not workspace members); their own Cargo.lock files
+# are auto-generated on standalone `cargo test` runs. The workspace
+# Cargo.lock is the authoritative one for CI/cli builds.
 crates/host-link/Cargo.lock
 crates/host-cpal/Cargo.lock
+crates/host-midi/Cargo.lock
 
 # /watch-pr dynamic-mode backoff state (per-PR consecutive-quiet-tick counters)
 /.watch-pr/
