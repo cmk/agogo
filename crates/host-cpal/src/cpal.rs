@@ -66,15 +66,17 @@ impl AudioHost for CpalHost {
         // with explicit deinterleave / down-mix lands in v0.4
         // alongside the CV output side; until then, fail fast at
         // configuration time rather than silently produce garbage.
+        //
+        // This is a user-config error, not a back-end failure, so
+        // it surfaces as `UnsupportedConfig` (not `Backend`) —
+        // lets callers distinguish "your config isn't supported"
+        // from "the audio driver blew up".
         if cfg.input_channels != 1 {
-            return Err(AudioHostError::Backend(
-                format!(
-                    "Plan 13 supports only mono input (input_channels=1); \
-                     got input_channels={}. Multi-channel input lands in v0.4.",
-                    cfg.input_channels
-                )
-                .into(),
-            ));
+            return Err(AudioHostError::UnsupportedConfig(format!(
+                "Plan 13 supports only mono input (input_channels=1); \
+                 got input_channels={}. Multi-channel input lands in v0.4.",
+                cfg.input_channels
+            )));
         }
 
         // Verify the device supports f32 mono input at the requested

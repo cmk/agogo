@@ -806,3 +806,86 @@ Fixed in round 3 (`a2196fa`) — `AudioHostError` gains an `UnsupportedConfig(St
 #### ↳ cmk ([2026-04-25 01:53 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141094277))
 
 Fixed in round 3 (`a2196fa`) — plan doc Build gates section (lines 581–594) now uses `--manifest-path crates/host-*/Cargo.toml` for the detached crates; `cargo build -p agogo-cli --features demo` stays with `-p` since `agogo-cli` IS a workspace member.
+
+<!-- gh-id: 3141114797 -->
+### Copilot on [`crates/cli/src/main.rs:1317`](https://github.com/cmk/agogo/pull/15#discussion_r3141114797) (2026-04-25 01:59 UTC)
+
+`SampleRate` is imported in the `demo` module but never used. When building/clippying with `--features demo`, this will trigger an `unused_imports` warning (and can fail `-D warnings`). Remove the import or use it.
+
+
+<!-- gh-id: 3141114806 -->
+### Copilot on [`crates/host-cpal/src/cpal.rs:77`](https://github.com/cmk/agogo/pull/15#discussion_r3141114806) (2026-04-25 01:59 UTC)
+
+Invalid user configuration (`input_channels != 1`) is currently returned as `AudioHostError::Backend(...)`. Since `AudioHostError` has `UnsupportedConfig`, this should be reported as `UnsupportedConfig` (or a dedicated variant) so callers can distinguish user config errors from true back-end failures.
+
+
+<!-- gh-id: 4174506140 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-25 01:59 UTC](https://github.com/cmk/agogo/pull/15#pullrequestreview-4174506140))
+
+## Pull request overview
+
+Implements Plan 13’s first runnable end-to-end demo pipeline by adding a core audio-host trait (`AudioHost`/`AudioIo`), introducing detached platform backends for cpal audio input and midir MIDI output, and wiring the full RT callback → scheduler → renderer → SPSC drain → MIDI-out chain behind `agogo demo`.
+
+**Changes:**
+- Adds `agogo_core::host` and extends the scheduler with allocation-free `tick_stream_into`.
+- Introduces detached crates `agogo-host-cpal` (cpal stream + RT callback + rtrb SPSC/drain) and `agogo-host-midi` (midir-backed `MidiSink`).
+- Updates CLI (`agogo demo`), CI, and repo conventions (float allowlist, detached-crate CI jobs, gitignore).
+
+### Reviewed changes
+
+Copilot reviewed 21 out of 23 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| scripts/check-floats.sh | Extends float allowlist for new PCM-ABI sites. |
+| doc/reviews/review-00015.md | Adds review record/verification narrative for Plan 13. |
+| doc/plans/plan-2026-04-24-02.md | Adds Plan 13 plan doc (design + tasks + verification + review notes). |
+| crates/host-midi/src/midir.rs | Implements `MidirSink` over midir + basic tests. |
+| crates/host-midi/src/lib.rs | host-midi crate root and exports. |
+| crates/host-midi/README.md | Documents detached-crate workflow and setup notes. |
+| crates/host-midi/Cargo.toml | Adds detached `agogo-host-midi` manifest and deps. |
+| crates/host-cpal/src/lib.rs | host-cpal crate root and exports. |
+| crates/host-cpal/src/cpal/control.rs | Adds rtrb SPSC producer/consumer + drain thread + tests. |
+| crates/host-cpal/src/cpal/callback.rs | Adds RT `CallbackState` hot loop + sizing helper + tests. |
+| crates/host-cpal/src/cpal.rs | Implements `CpalHost: AudioHost` with worker-thread stream ownership. |
+| crates/host-cpal/README.md | Documents detached-crate workflow and development notes. |
+| crates/host-cpal/Cargo.toml | Adds detached `agogo-host-cpal` manifest and deps. |
+| crates/core/src/lib.rs | Exposes new `host` module. |
+| crates/core/src/host.rs | Defines `AudioHost` API, `AudioIo`, `Handle`, and `AudioHostError`. |
+| crates/core/src/channel/scheduler.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
+| crates/cli/src/main.rs | Adds feature-gated `agogo demo` subcommands and wiring. |
+| crates/cli/Cargo.toml | Adds optional path deps + features (`cpal`, `midi`, `demo`). |
+| Cargo.toml | Excludes new host crates from workspace members. |
+| Cargo.lock | Locks new dependencies pulled in by CLI feature(s). |
+| CLAUDE.md | Updates float-exception module count/notes for Plan 13. |
+| .gitignore | Ignores detached-crate `Cargo.lock` files for host crates. |
+| .github/workflows/ci.yml | Adds dedicated CI jobs for detached host crates. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3141114811 -->
+### Copilot on [`doc/plans/plan-2026-04-24-02.md:486`](https://github.com/cmk/agogo/pull/15#discussion_r3141114811) (2026-04-25 01:59 UTC)
+
+This section still states that `--duration-ms` defaults to “run until Ctrl-C”, but the implemented `agogo demo run` path is fixed-duration and explicitly defers Ctrl-C handling to Plan 14. Please update this CLI synopsis (and the related handler-flow / acceptance steps that mention Ctrl-C) so the plan doc matches what actually ships in this PR.
+
+<!-- gh-id: 3141135168 -->
+#### ↳ cmk ([2026-04-25 02:09 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141135168))
+
+Push-back — `SampleRate` IS used. `S48::HZ` at line 1382 (`if args.sr != S48::HZ`) accesses a trait-associated constant, so the `SampleRate` trait must be in scope at the call site. Verified locally: `cargo clippy -p agogo-cli --features demo --all-targets -- -D warnings` is clean.
+
+<!-- gh-id: 3141135276 -->
+#### ↳ cmk ([2026-04-25 02:09 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141135276))
+
+Fixed in round 4 (`ccd767c`) — `CpalHost::run`'s mono rejection now returns `AudioHostError::UnsupportedConfig(...)` instead of `Backend(...)`. Round 3 added the `UnsupportedConfig` variant for format/channel mismatches but I missed the mono-rejection site; caught here, fixed here.
+
+<!-- gh-id: 3141135399 -->
+#### ↳ cmk ([2026-04-25 02:09 UTC](https://github.com/cmk/agogo/pull/15#discussion_r3141135399))
+
+Fixed in round 4 (`ccd767c`) — plan doc lines 485 (CLI synopsis), 505 (handler flow), and 615 (E2E acceptance) no longer claim `--duration-ms` runs "until Ctrl-C"; each now explicitly notes Plan 13 has no signal handler and SIGINT hard-kills before teardown. Plan 14's `agogo run` adds clean interrupt.
