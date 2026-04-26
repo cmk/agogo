@@ -1,48 +1,43 @@
-//! AST → [`TrackSpec`] evaluator.
+//! AST → [`Grid`] evaluator.
 //!
 //! Trivially recursive on [`Expr`]: each variant maps to the
-//! corresponding lattice operation on [`Grid`].
+//! corresponding lattice operation on [`Grid`]. Variables are looked
+//! up in an environment of previously-resolved channel grids.
 
 use super::ast::*;
+use super::error::{DslError, DslErrorKind};
 use crate::time::grid::{self, Grid};
-use crate::time::swing::SwingConfig;
 
-/// Evaluate a [`TrackAst`] into a [`TrackSpec`].
-pub fn eval_track(track: &TrackAst) -> TrackSpec {
-    let grid = eval_expr(&track.expr);
-    let mut swing = None;
-    let mut offset_ticks = None;
-
-    for m in &track.modifiers {
-        match m {
-            Modifier::Swing(res, amount, _) => {
-                swing = Some(SwingConfig {
-                    resolution: *res,
-                    amount: *amount,
-                });
-            }
-            Modifier::Offset(ticks, _) => {
-                offset_ticks = Some(*ticks);
-            }
-        }
-    }
-
-    TrackSpec {
-        grid,
-        swing,
-        offset_ticks,
-    }
-}
-
-/// Evaluate a grid expression to a [`Grid`].
-pub fn eval_expr(expr: &Expr) -> Grid {
+/// Evaluate a grid expression to a [`Grid`], resolving any variable
+/// references against `env`.
+///
+/// Variable lookup is case-sensitive. Returns
+/// `DslError::UnknownVariable` if a name is not found.
+pub fn eval_expr(expr: &Expr, env: &[(String, Grid)], source: &str) -> Result<Grid, DslError> {
     match expr {
-        Expr::Atom(g, _) => *g,
-        Expr::Neg(inner, _) => grid::neg(eval_expr(inner)),
-        Expr::Meet(a, b, _) => grid::meet(eval_expr(a), eval_expr(b)),
-        Expr::Join(a, b, _) => grid::join(eval_expr(a), eval_expr(b)),
-        Expr::Imply(a, b, _) => grid::imply(eval_expr(a), eval_expr(b)),
-        Expr::Coimply(a, b, _) => grid::coimp(eval_expr(a), eval_expr(b)),
+        Expr::Atom(g, _) => Ok(*g),
+        Expr::Var(name, span) => env
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, g)| *g)
+            .ok_or_else(|| DslError {
+                kind: DslErrorKind::UnknownVariable(name.clone()),
+                span: *span,
+                source: source.to_string(),
+            }),
+        Expr::Neg(inner, _) => Ok(grid::neg(eval_expr(inner, env, source)?)),
+        Expr::Meet(a, b, _) => {
+            Ok(grid::meet(eval_expr(a, env, source)?, eval_expr(b, env, source)?))
+        }
+        Expr::Join(a, b, _) => {
+            Ok(grid::join(eval_expr(a, env, source)?, eval_expr(b, env, source)?))
+        }
+        Expr::Imply(a, b, _) => {
+            Ok(grid::imply(eval_expr(a, env, source)?, eval_expr(b, env, source)?))
+        }
+        Expr::Coimply(a, b, _) => {
+            Ok(grid::coimp(eval_expr(a, env, source)?, eval_expr(b, env, source)?))
+        }
     }
 }
 
@@ -51,45 +46,38 @@ mod tests {
     use super::*;
     use crate::dsl::lexer::tokenize;
     use crate::dsl::parser::parse_tokens;
-    use crate::time::tbase::TBase;
 
-    fn eval(s: &str) -> TrackSpec {
-        let tokens = tokenize(s).unwrap();
-        let ast = parse_tokens(&tokens, s).unwrap();
-        eval_track(&ast)
+    fn eval(s: &str, env: &[(String, Grid)]) -> Result<Grid, DslError> {
+        let tokens = tokenize(s)?;
+        let expr = parse_tokens(&tokens, s)?;
+        eval_expr(&expr, env, s)
     }
 
     #[test]
     fn atom() {
-        assert_eq!(eval("T16").grid, Grid::T16);
+        assert_eq!(eval("T16", &[]).unwrap(), Grid::T16);
     }
 
     #[test]
-    fn meet_t16_t8() {
-        // meet(T16, T8) = GCD = T16 (finer)
-        assert_eq!(eval("T16&T8").grid, grid::meet(Grid::T16, Grid::T8));
+    fn meet() {
+        assert_eq!(
+            eval("T16&T8", &[]).unwrap(),
+            grid::meet(Grid::T16, Grid::T8)
+        );
     }
 
     #[test]
-    fn join_t16_t8() {
-        // join(T16, T8) = LCM = T8 (coarser)
-        assert_eq!(eval("T16|T8").grid, grid::join(Grid::T16, Grid::T8));
-    }
-
-    #[test]
-    fn meet_cross_track() {
-        assert_eq!(eval("T16t&T16q").grid, Grid::T16P);
-    }
-
-    #[test]
-    fn join_cross_track() {
-        assert_eq!(eval("T16t|T16q").grid, Grid::T8);
+    fn join() {
+        assert_eq!(
+            eval("T16|T8", &[]).unwrap(),
+            grid::join(Grid::T16, Grid::T8)
+        );
     }
 
     #[test]
     fn imply() {
         assert_eq!(
-            eval("T16>T8").grid,
+            eval("T16>T8", &[]).unwrap(),
             grid::imply(Grid::T16, Grid::T8)
         );
     }
@@ -97,38 +85,64 @@ mod tests {
     #[test]
     fn coimply() {
         assert_eq!(
-            eval("T16<T8").grid,
+            eval("T16<T8", &[]).unwrap(),
             grid::coimp(Grid::T16, Grid::T8)
         );
     }
 
     #[test]
     fn neg() {
-        assert_eq!(eval("!T16").grid, grid::neg(Grid::T16));
+        assert_eq!(eval("!T16", &[]).unwrap(), grid::neg(Grid::T16));
     }
 
     #[test]
-    fn swing_modifier() {
-        let spec = eval("T16~T16:80");
+    fn var_resolves() {
+        let env = vec![("kick".to_string(), Grid::T4)];
+        assert_eq!(eval("kick", &env).unwrap(), Grid::T4);
+    }
+
+    #[test]
+    fn var_in_expr() {
+        let env = vec![("kick".to_string(), Grid::T4)];
         assert_eq!(
-            spec.swing,
-            Some(SwingConfig {
-                resolution: TBase::T16,
-                amount: 80,
-            })
+            eval("kick&T16", &env).unwrap(),
+            grid::meet(Grid::T4, Grid::T16)
         );
     }
 
     #[test]
-    fn offset_modifier() {
-        let spec = eval("T16@-5");
-        assert_eq!(spec.offset_ticks, Some(-5));
+    fn positional_var() {
+        let env = vec![("C1".to_string(), Grid::T8)];
+        assert_eq!(eval("C1", &env).unwrap(), Grid::T8);
     }
 
     #[test]
-    fn no_modifiers_are_none() {
-        let spec = eval("T16");
-        assert_eq!(spec.swing, None);
-        assert_eq!(spec.offset_ticks, None);
+    fn unknown_var_errors() {
+        let err = eval("unknown", &[]).unwrap_err();
+        assert_eq!(
+            err.kind,
+            DslErrorKind::UnknownVariable("unknown".to_string())
+        );
+    }
+
+    #[test]
+    fn forward_ref_errors() {
+        // C1 is defined but C2 is not — strict monotonicity.
+        let env = vec![("C1".to_string(), Grid::T4)];
+        let err = eval("C2&C1", &env).unwrap_err();
+        assert_eq!(
+            err.kind,
+            DslErrorKind::UnknownVariable("C2".to_string())
+        );
+    }
+
+    #[test]
+    fn cross_track_meet() {
+        assert_eq!(eval("T16t&T16q", &[]).unwrap(), Grid::T16P);
+    }
+
+    #[test]
+    fn cross_track_join() {
+        assert_eq!(eval("T16t|T16q", &[]).unwrap(), Grid::T8);
     }
 }

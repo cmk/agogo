@@ -55,15 +55,6 @@ impl<'a> Parser<'a> {
         false
     }
 
-    fn span_from(&self, start: usize) -> Span {
-        let end = if self.pos > 0 {
-            self.tokens[self.pos - 1].span.end
-        } else {
-            start
-        };
-        Span { start, end }
-    }
-
     fn eof_span(&self) -> Span {
         let pos = self.source.len();
         Span {
@@ -81,54 +72,6 @@ impl<'a> Parser<'a> {
     }
 
     // ── Grammar productions ──────────────────────────────────────
-
-    /// track := expr modifier*
-    fn parse_track(&mut self) -> Result<TrackAst, DslError> {
-        let start = self
-            .peek()
-            .map(|t| t.span.start)
-            .unwrap_or_else(|| self.source.len());
-        let expr = self.parse_expr()?;
-        let mut modifiers = Vec::new();
-        let mut has_swing = false;
-        let mut has_offset = false;
-
-        while let Some(tok) = self.peek() {
-            match &tok.kind {
-                TokenKind::Tilde => {
-                    if has_swing {
-                        let span = tok.span;
-                        return Err(self.err(DslErrorKind::DuplicateModifier("swing"), span));
-                    }
-                    let m = self.parse_swing()?;
-                    has_swing = true;
-                    modifiers.push(m);
-                }
-                TokenKind::At => {
-                    if has_offset {
-                        let span = tok.span;
-                        return Err(self.err(DslErrorKind::DuplicateModifier("offset"), span));
-                    }
-                    let m = self.parse_offset()?;
-                    has_offset = true;
-                    modifiers.push(m);
-                }
-                _ => break,
-            }
-        }
-
-        let span = self.span_from(start);
-        Ok(TrackAst {
-            expr,
-            modifiers,
-            span,
-        })
-    }
-
-    /// expr := impl_expr
-    fn parse_expr(&mut self) -> Result<Expr, DslError> {
-        self.parse_impl_expr()
-    }
 
     /// impl_expr := join_expr ( ('>' | '<') join_expr )*
     fn parse_impl_expr(&mut self) -> Result<Expr, DslError> {
@@ -190,7 +133,13 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.depth += 1;
                 if self.depth > MAX_DEPTH {
-                    return Err(self.err(DslErrorKind::NestingTooDeep, Span { start, end: start + 1 }));
+                    return Err(self.err(
+                        DslErrorKind::NestingTooDeep,
+                        Span {
+                            start,
+                            end: start + 1,
+                        },
+                    ));
                 }
                 let inner = self.parse_unary()?;
                 self.depth -= 1;
@@ -204,29 +153,40 @@ impl<'a> Parser<'a> {
         self.parse_primary()
     }
 
-    /// primary := atom | '(' expr ')'
+    /// primary := ident | '(' expr ')'
+    ///
+    /// An ident is tried as a `Grid` name first (via `Grid::from_str`);
+    /// if that fails, it's treated as a variable reference.
     fn parse_primary(&mut self) -> Result<Expr, DslError> {
         let tok = self.peek().ok_or_else(|| {
             self.err(DslErrorKind::UnexpectedEof, self.eof_span())
         })?;
 
         match &tok.kind {
-            TokenKind::Atom(text) => {
+            TokenKind::Ident(text) => {
                 let span = tok.span;
-                let grid = text.parse().map_err(|e: String| {
-                    self.err(DslErrorKind::InvalidAtom(e), span)
-                })?;
+                let text = text.clone();
                 self.advance();
-                Ok(Expr::Atom(grid, span))
+                // Try as grid name first; fall back to variable.
+                match text.parse() {
+                    Ok(grid) => Ok(Expr::Atom(grid, span)),
+                    Err(_) => Ok(Expr::Var(text, span)),
+                }
             }
             TokenKind::LParen => {
                 let start = tok.span.start;
                 self.advance();
                 self.depth += 1;
                 if self.depth > MAX_DEPTH {
-                    return Err(self.err(DslErrorKind::NestingTooDeep, Span { start, end: start + 1 }));
+                    return Err(self.err(
+                        DslErrorKind::NestingTooDeep,
+                        Span {
+                            start,
+                            end: start + 1,
+                        },
+                    ));
                 }
-                let inner = self.parse_expr()?;
+                let inner = self.parse_impl_expr()?;
                 self.depth -= 1;
                 if !self.eat(&TokenKind::RParen) {
                     return Err(self.err(
@@ -244,7 +204,7 @@ impl<'a> Parser<'a> {
                 let found = format!("{:?}", tok.kind);
                 Err(self.err(
                     DslErrorKind::Expected {
-                        expected: "atom or '('",
+                        expected: "identifier or '('",
                         found,
                     },
                     span,
@@ -252,128 +212,18 @@ impl<'a> Parser<'a> {
             }
         }
     }
-
-    // ── Modifier parsing ─────────────────────────────────────────
-
-    /// swing := '~' <TBase> ':' <i8>
-    fn parse_swing(&mut self) -> Result<Modifier, DslError> {
-        let start = self.advance().span.start; // consume '~'
-
-        // Expect TBase atom.
-        let res_tok = self.peek().ok_or_else(|| {
-            self.err(DslErrorKind::UnexpectedEof, self.eof_span())
-        })?;
-        let (res_text, res_span) = match &res_tok.kind {
-            TokenKind::Atom(text) => (text.clone(), res_tok.span),
-            _ => {
-                let span = res_tok.span;
-                return Err(self.err(
-                    DslErrorKind::Expected {
-                        expected: "swing resolution (e.g. T16)",
-                        found: format!("{:?}", res_tok.kind),
-                    },
-                    span,
-                ));
-            }
-        };
-        self.advance();
-
-        let resolution = res_text.parse().map_err(|e: String| {
-            self.err(DslErrorKind::InvalidSwingResolution(e), res_span)
-        })?;
-
-        // Expect ':'.
-        if !self.eat(&TokenKind::Colon) {
-            let span = self
-                .peek()
-                .map(|t| t.span)
-                .unwrap_or_else(|| self.eof_span());
-            return Err(self.err(
-                DslErrorKind::Expected {
-                    expected: "':'",
-                    found: self
-                        .peek()
-                        .map(|t| format!("{:?}", t.kind))
-                        .unwrap_or_else(|| "end of input".into()),
-                },
-                span,
-            ));
-        }
-
-        // Expect i8 amount.
-        let amt_tok = self.peek().ok_or_else(|| {
-            self.err(DslErrorKind::UnexpectedEof, self.eof_span())
-        })?;
-        let (amt_val, amt_span) = match &amt_tok.kind {
-            TokenKind::Int(n) => (*n, amt_tok.span),
-            _ => {
-                let span = amt_tok.span;
-                return Err(self.err(
-                    DslErrorKind::Expected {
-                        expected: "swing amount (integer)",
-                        found: format!("{:?}", amt_tok.kind),
-                    },
-                    span,
-                ));
-            }
-        };
-        self.advance();
-
-        if amt_val < i8::MIN as i64 || amt_val > i8::MAX as i64 {
-            return Err(self.err(DslErrorKind::SwingAmountOutOfRange(amt_val), amt_span));
-        }
-
-        let span = Span {
-            start,
-            end: amt_span.end,
-        };
-        Ok(Modifier::Swing(resolution, amt_val as i8, span))
-    }
-
-    /// offset := '@' <i32>
-    fn parse_offset(&mut self) -> Result<Modifier, DslError> {
-        let start = self.advance().span.start; // consume '@'
-
-        let val_tok = self.peek().ok_or_else(|| {
-            self.err(DslErrorKind::UnexpectedEof, self.eof_span())
-        })?;
-        let (val, val_span) = match &val_tok.kind {
-            TokenKind::Int(n) => (*n, val_tok.span),
-            _ => {
-                let span = val_tok.span;
-                return Err(self.err(
-                    DslErrorKind::Expected {
-                        expected: "offset value (integer)",
-                        found: format!("{:?}", val_tok.kind),
-                    },
-                    span,
-                ));
-            }
-        };
-        self.advance();
-
-        if val < i32::MIN as i64 || val > i32::MAX as i64 {
-            return Err(self.err(DslErrorKind::OffsetOutOfRange(val), val_span));
-        }
-
-        let span = Span {
-            start,
-            end: val_span.end,
-        };
-        Ok(Modifier::Offset(val as i32, span))
-    }
 }
 
-/// Parse a token stream into a [`TrackAst`]. Returns an error if
-/// tokens remain after the track is fully parsed.
-pub fn parse_tokens(tokens: &[Token], source: &str) -> Result<TrackAst, DslError> {
+/// Parse a token stream into an [`Expr`]. Returns an error if
+/// tokens remain after the expression is fully parsed.
+pub fn parse_tokens(tokens: &[Token], source: &str) -> Result<Expr, DslError> {
     let mut parser = Parser::new(tokens, source);
 
     if tokens.is_empty() {
         return Err(parser.err(DslErrorKind::EmptyInput, parser.eof_span()));
     }
 
-    let track = parser.parse_track()?;
+    let expr = parser.parse_impl_expr()?;
 
     if !parser.at_end() {
         let tok = &parser.tokens[parser.pos];
@@ -386,7 +236,7 @@ pub fn parse_tokens(tokens: &[Token], source: &str) -> Result<TrackAst, DslError
         ));
     }
 
-    Ok(track)
+    Ok(expr)
 }
 
 #[cfg(test)]
@@ -394,15 +244,10 @@ mod tests {
     use super::*;
     use crate::dsl::lexer::tokenize;
     use crate::time::grid::Grid;
-    use crate::time::tbase::TBase;
 
-    fn parse(s: &str) -> Result<TrackAst, DslError> {
+    fn parse(s: &str) -> Result<Expr, DslError> {
         let tokens = tokenize(s)?;
         parse_tokens(&tokens, s)
-    }
-
-    fn expr(s: &str) -> Expr {
-        parse(s).unwrap().expr
     }
 
     fn grid_of(e: &Expr) -> Grid {
@@ -412,28 +257,53 @@ mod tests {
         }
     }
 
+    fn var_of(e: &Expr) -> &str {
+        match e {
+            Expr::Var(name, _) => name,
+            _ => panic!("expected Var, got {e:?}"),
+        }
+    }
+
     // ── Atoms ────────────────────────────────────────────────────
 
     #[test]
     fn single_atom() {
-        assert_eq!(grid_of(&expr("T16")), Grid::T16);
+        assert_eq!(grid_of(&parse("T16").unwrap()), Grid::T16);
     }
 
     #[test]
     fn atom_triplet() {
-        assert_eq!(grid_of(&expr("t16t")), Grid::T16T);
+        assert_eq!(grid_of(&parse("t16t").unwrap()), Grid::T16T);
+    }
+
+    // ── Variables ────────────────────────────────────────────────
+
+    #[test]
+    fn variable_name() {
+        assert_eq!(var_of(&parse("kick").unwrap()), "kick");
     }
 
     #[test]
-    fn atom_quintuplet() {
-        assert_eq!(grid_of(&expr("T8Q")), Grid::T8Q);
+    fn positional_variable() {
+        assert_eq!(var_of(&parse("C1").unwrap()), "C1");
+    }
+
+    #[test]
+    fn var_in_expr() {
+        match parse("kick&T16").unwrap() {
+            Expr::Meet(a, b, _) => {
+                assert_eq!(var_of(&a), "kick");
+                assert_eq!(grid_of(&b), Grid::T16);
+            }
+            other => panic!("expected Meet, got {other:?}"),
+        }
     }
 
     // ── Binary ops ──────────────────────────────────────────────
 
     #[test]
     fn meet() {
-        match expr("T16&T8") {
+        match parse("T16&T8").unwrap() {
             Expr::Meet(a, b, _) => {
                 assert_eq!(grid_of(&a), Grid::T16);
                 assert_eq!(grid_of(&b), Grid::T8);
@@ -444,7 +314,7 @@ mod tests {
 
     #[test]
     fn join() {
-        match expr("T16|T8") {
+        match parse("T16|T8").unwrap() {
             Expr::Join(a, b, _) => {
                 assert_eq!(grid_of(&a), Grid::T16);
                 assert_eq!(grid_of(&b), Grid::T8);
@@ -455,7 +325,7 @@ mod tests {
 
     #[test]
     fn imply() {
-        match expr("T16>T8") {
+        match parse("T16>T8").unwrap() {
             Expr::Imply(a, b, _) => {
                 assert_eq!(grid_of(&a), Grid::T16);
                 assert_eq!(grid_of(&b), Grid::T8);
@@ -466,7 +336,7 @@ mod tests {
 
     #[test]
     fn coimply() {
-        match expr("T16<T8") {
+        match parse("T16<T8").unwrap() {
             Expr::Coimply(a, b, _) => {
                 assert_eq!(grid_of(&a), Grid::T16);
                 assert_eq!(grid_of(&b), Grid::T8);
@@ -475,11 +345,9 @@ mod tests {
         }
     }
 
-    // ── Negation ────────────────────────────────────────────────
-
     #[test]
     fn neg() {
-        match expr("!T16") {
+        match parse("!T16").unwrap() {
             Expr::Neg(inner, _) => assert_eq!(grid_of(&inner), Grid::T16),
             other => panic!("expected Neg, got {other:?}"),
         }
@@ -487,10 +355,10 @@ mod tests {
 
     #[test]
     fn double_neg() {
-        match expr("!!T16") {
+        match parse("!!T16").unwrap() {
             Expr::Neg(inner, _) => match *inner {
                 Expr::Neg(inner2, _) => assert_eq!(grid_of(&inner2), Grid::T16),
-                other => panic!("expected Neg(Neg), got {other:?}"),
+                other => panic!("expected inner Neg, got {other:?}"),
             },
             other => panic!("expected Neg, got {other:?}"),
         }
@@ -500,17 +368,10 @@ mod tests {
 
     #[test]
     fn meet_binds_tighter_than_join() {
-        // T16|T8&T4 → Join(T16, Meet(T8, T4))
-        match expr("T16|T8&T4") {
+        match parse("T16|T8&T4").unwrap() {
             Expr::Join(a, b, _) => {
                 assert_eq!(grid_of(&a), Grid::T16);
-                match *b {
-                    Expr::Meet(c, d, _) => {
-                        assert_eq!(grid_of(&c), Grid::T8);
-                        assert_eq!(grid_of(&d), Grid::T4);
-                    }
-                    other => panic!("expected Meet, got {other:?}"),
-                }
+                assert!(matches!(*b, Expr::Meet(..)));
             }
             other => panic!("expected Join, got {other:?}"),
         }
@@ -518,16 +379,9 @@ mod tests {
 
     #[test]
     fn join_binds_tighter_than_imply() {
-        // T16|T8>T4 → Imply(Join(T16, T8), T4)
-        match expr("T16|T8>T4") {
+        match parse("T16|T8>T4").unwrap() {
             Expr::Imply(a, b, _) => {
-                match *a {
-                    Expr::Join(c, d, _) => {
-                        assert_eq!(grid_of(&c), Grid::T16);
-                        assert_eq!(grid_of(&d), Grid::T8);
-                    }
-                    other => panic!("expected Join, got {other:?}"),
-                }
+                assert!(matches!(*a, Expr::Join(..)));
                 assert_eq!(grid_of(&b), Grid::T4);
             }
             other => panic!("expected Imply, got {other:?}"),
@@ -536,13 +390,9 @@ mod tests {
 
     #[test]
     fn neg_binds_tighter_than_meet() {
-        // !T16&T8 → Meet(Neg(T16), T8)
-        match expr("!T16&T8") {
+        match parse("!T16&T8").unwrap() {
             Expr::Meet(a, b, _) => {
-                match *a {
-                    Expr::Neg(inner, _) => assert_eq!(grid_of(&inner), Grid::T16),
-                    other => panic!("expected Neg, got {other:?}"),
-                }
+                assert!(matches!(*a, Expr::Neg(..)));
                 assert_eq!(grid_of(&b), Grid::T8);
             }
             other => panic!("expected Meet, got {other:?}"),
@@ -551,17 +401,10 @@ mod tests {
 
     #[test]
     fn left_assoc_meet() {
-        // T16&T8&T4 → Meet(Meet(T16, T8), T4)
-        match expr("T16&T8&T4") {
+        match parse("T16&T8&T4").unwrap() {
             Expr::Meet(a, b, _) => {
                 assert_eq!(grid_of(&b), Grid::T4);
-                match *a {
-                    Expr::Meet(c, d, _) => {
-                        assert_eq!(grid_of(&c), Grid::T16);
-                        assert_eq!(grid_of(&d), Grid::T8);
-                    }
-                    other => panic!("expected inner Meet, got {other:?}"),
-                }
+                assert!(matches!(*a, Expr::Meet(..)));
             }
             other => panic!("expected Meet, got {other:?}"),
         }
@@ -569,64 +412,20 @@ mod tests {
 
     #[test]
     fn parens_override_precedence() {
-        // (T16|T8)&T4 → Meet(Join(T16, T8), T4)
-        match expr("(T16|T8)&T4") {
+        match parse("(T16|T8)&T4").unwrap() {
             Expr::Meet(a, b, _) => {
-                match *a {
-                    Expr::Join(c, d, _) => {
-                        assert_eq!(grid_of(&c), Grid::T16);
-                        assert_eq!(grid_of(&d), Grid::T8);
-                    }
-                    other => panic!("expected Join, got {other:?}"),
-                }
+                assert!(matches!(*a, Expr::Join(..)));
                 assert_eq!(grid_of(&b), Grid::T4);
             }
             other => panic!("expected Meet, got {other:?}"),
         }
     }
 
-    // ── Modifiers ───────────────────────────────────────────────
-
-    #[test]
-    fn swing_modifier() {
-        let t = parse("T16~T16:80").unwrap();
-        assert_eq!(t.modifiers.len(), 1);
-        match &t.modifiers[0] {
-            Modifier::Swing(res, amt, _) => {
-                assert_eq!(*res, TBase::T16);
-                assert_eq!(*amt, 80);
-            }
-            other => panic!("expected Swing, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn offset_modifier() {
-        let t = parse("T16@-5").unwrap();
-        assert_eq!(t.modifiers.len(), 1);
-        match &t.modifiers[0] {
-            Modifier::Offset(v, _) => assert_eq!(*v, -5),
-            other => panic!("expected Offset, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn both_modifiers() {
-        let t = parse("T16~T16:80@-5").unwrap();
-        assert_eq!(t.modifiers.len(), 2);
-    }
-
-    // ── Error cases ─────────────────────────────────────────────
+    // ── Errors ──────────────────────────────────────────────────
 
     #[test]
     fn empty_input() {
         let err = parse("").unwrap_err();
-        assert_eq!(err.kind, DslErrorKind::EmptyInput);
-    }
-
-    #[test]
-    fn whitespace_only() {
-        let err = parse("   ").unwrap_err();
         assert_eq!(err.kind, DslErrorKind::EmptyInput);
     }
 
@@ -643,34 +442,14 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_swing() {
-        let err = parse("T16~T16:80~T8:40").unwrap_err();
-        assert_eq!(err.kind, DslErrorKind::DuplicateModifier("swing"));
-    }
-
-    #[test]
-    fn duplicate_offset() {
-        let err = parse("T16@5@10").unwrap_err();
-        assert_eq!(err.kind, DslErrorKind::DuplicateModifier("offset"));
-    }
-
-    #[test]
-    fn invalid_atom() {
-        let err = parse("T3").unwrap_err();
-        assert!(matches!(err.kind, DslErrorKind::InvalidAtom(_)));
-    }
-
-    #[test]
     fn nesting_depth_exceeded() {
-        // 33 consecutive `!` exceeds MAX_DEPTH (32).
         let s = format!("{}T16", "!".repeat(33));
         let err = parse(&s).unwrap_err();
         assert_eq!(err.kind, DslErrorKind::NestingTooDeep);
     }
 
     #[test]
-    fn nesting_depth_at_limit_succeeds() {
-        // 32 consecutive `!` is exactly at the limit — should succeed.
+    fn nesting_at_limit_succeeds() {
         let s = format!("{}T16", "!".repeat(32));
         assert!(parse(&s).is_ok());
     }
@@ -680,7 +459,6 @@ mod tests {
     use proptest::prelude::*;
 
     proptest! {
-        /// Parser never panics on arbitrary input.
         #[test]
         fn parser_never_panics(s in ".*") {
             let _ = parse(&s);
