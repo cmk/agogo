@@ -1,8 +1,11 @@
-//! `Channel` configuration + the pure transform pipeline.
+//! `Channel` (sum-typed by routing target) + the pure transform
+//! pipeline.
 //!
-//! Pipeline stages, applied in order (agogo.md §6):
+//! Pipeline stages, applied in order (agogo.md §6) — operate on
+//! [`ChannelCommon`] alone (the role-specific payload is consulted
+//! only at the renderer layer):
 //! 1. **Divide** — keep only master ticks divisible by
-//!    `channel.divider.tick_count()`.
+//!    `common.divider.tick_count()`.
 //! 2. **Shuffle** — apply [`swing::effective_tick`] (off-beats shift
 //!    earlier by `amount × multiplier`; on-beats pass through).
 //! 3. **Tick → Sample** via [`SampleTickConn::inner`].
@@ -13,52 +16,62 @@
 //! 5. **Offset** — same composition chain for the signed calibration
 //!    offset.
 
-use core::num::NonZeroU16;
-
-use crate::channel::mode::ChannelMode;
+use crate::channel::role::{ChannelCommon, CvRole, DinRole, MidiRole};
 use crate::fxp::pico_to_samples;
 use crate::time::conn::SampleTickConn;
-use crate::time::grid::Grid;
-use crate::time::swing::{self, SwingConfig};
+use crate::time::swing;
 use crate::time::tick::Tick;
 use connections::conn::fixed::{F12F06, Micro};
 
 /// Maximum positive delay before saturation: 300 ms = 300 000 µs.
 pub const MAX_DELAY: Micro = Micro(300_000);
 
-/// Per-channel configuration.
+/// Per-channel configuration, sum-typed by routing target.
+///
+/// Each variant carries a [`ChannelCommon`] (the field set the
+/// scheduler / transform pipeline operates on) and a target-specific
+/// `*Role` payload that the renderer consumes. Renderers narrow on
+/// the outer variant: a non-MIDI `Channel` doesn't type-check as
+/// input to `render_midi_channel`. Plan 21 (audit P3).
+///
+/// `Channel::Audio` is **not** a variant in v0.1 — an empty
+/// `AudioRole` would make the variant uninhabited; v0.4's
+/// audio-click renderer is the natural slot to introduce both.
 #[derive(Copy, Clone, Debug)]
-pub struct Channel {
-    pub mode: ChannelMode,
-    /// Divider expressed as the `Grid` whose tick count is the
-    /// channel's step (agogo.md §6 mapping). E.g. `Grid::T16` fires
-    /// 16th notes, `Grid::T4` fires quarter notes, `Grid::T8Q` fires
-    /// quintuplet 8ths (5 per quarter at 192 ticks each).
-    pub divider: Grid,
-    pub shuffle: SwingConfig,
-    /// Positive-only delay compensation, clamped to
-    /// `[Micro::ZERO, MAX_DELAY]` on use.
-    pub delay: Micro,
-    /// Signed calibration offset. Not clamped here — CLI / UI should
-    /// pick a musical range (agogo.md §6 cites ±5 ms = ±5 000 µs).
-    /// Audit P2 (Plan 20) folded the previous `snap_to_quantum`
-    /// arming intent into this single offset field at orchestrator
-    /// startup time; the snap intent now lives only on `ChannelSpec`
-    /// (`spec.snap_intent()`) and is applied via
-    /// `LinkSession::snap_offset_for(intent)` by the caller.
-    pub offset: Micro,
-    /// Period multiplier on the channel's grid output. When
-    /// `Some(N)`, the channel emits every `N`-th `tick_stream` event
-    /// — applied as a pre-renderer filter in `Machine::on_buffer`
-    /// against the per-channel `bar_counters` slot. The name reflects
-    /// the most idiomatic case (`grid=t1,bars=N` = `N` literal bars
-    /// in 4/4); the mechanism is divider-agnostic, so `grid=t8,bars=3`
-    /// expresses a dotted-quarter period that isn't in `Grid::ALL`.
-    /// `NonZeroU16` caps `N` at 65,535 — worst-case multiplied period
-    /// `65,535 × Grid::T1.tick_count() (3840) ≈ 251M` ticks fits in
-    /// `Tick(u32)` (`u32::MAX ≈ 4.29B`) with no overflow-check
-    /// arithmetic.
-    pub bar_multiplier: Option<NonZeroU16>,
+pub enum Channel {
+    Midi {
+        common: ChannelCommon,
+        role: MidiRole,
+    },
+    Din {
+        common: ChannelCommon,
+        role: DinRole,
+    },
+    Cv {
+        common: ChannelCommon,
+        role: CvRole,
+    },
+}
+
+impl Channel {
+    /// Borrow the shared [`ChannelCommon`] regardless of variant.
+    /// Single match arm per variant; `cargo` inlines.
+    pub fn common(&self) -> &ChannelCommon {
+        match self {
+            Channel::Midi { common, .. } => common,
+            Channel::Din { common, .. } => common,
+            Channel::Cv { common, .. } => common,
+        }
+    }
+
+    /// Mutably borrow the shared [`ChannelCommon`].
+    pub fn common_mut(&mut self) -> &mut ChannelCommon {
+        match self {
+            Channel::Midi { common, .. } => common,
+            Channel::Din { common, .. } => common,
+            Channel::Cv { common, .. } => common,
+        }
+    }
 }
 
 /// A master-tick-driven event scheduled at a specific sample index.
@@ -95,21 +108,26 @@ pub(crate) fn micro_to_samples(m: Micro, sr: u32) -> i64 {
 /// Run the divider → shuffle → sample → delay → offset pipeline over
 /// a master tick stream. Pure: output order matches input order and
 /// no I/O is performed.
+///
+/// Operates on [`ChannelCommon`] alone — call sites that hold a
+/// `Channel` pass `ch.common()`. The role payload is irrelevant to
+/// the transform pipeline; it's only consulted at the renderer
+/// layer.
 pub fn transform(
     master_ticks: impl IntoIterator<Item = Tick>,
-    channel: &Channel,
+    common: &ChannelCommon,
     stc: &SampleTickConn,
 ) -> Vec<ScheduledEvent> {
-    let divisor = channel.divider.tick_count();
-    let delay_clamped = Micro(channel.delay.0.clamp(0, MAX_DELAY.0));
+    let divisor = common.divider.tick_count();
+    let delay_clamped = Micro(common.delay.0.clamp(0, MAX_DELAY.0));
     let delay_samples = micro_to_samples(delay_clamped, stc.sr()).max(0) as u64;
-    let offset_samples = micro_to_samples(channel.offset, stc.sr());
+    let offset_samples = micro_to_samples(common.offset, stc.sr());
 
     master_ticks
         .into_iter()
         .filter(|t| t.0 % divisor == 0)
         .map(|t| {
-            let swung = swing::effective_tick(&channel.shuffle, t);
+            let swung = swing::effective_tick(&common.shuffle, t);
             let base = stc.inner(swung);
             let with_delay = base.saturating_add(delay_samples);
             let final_sample = if offset_samples >= 0 {
@@ -129,6 +147,8 @@ pub fn transform(
 mod tests {
     use super::*;
     use crate::arb::arb_grid;
+    use crate::time::grid::Grid;
+    use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
     use proptest::prelude::*;
 
@@ -136,9 +156,11 @@ mod tests {
         SampleTickConn::new(48_000, crate::fxp::Tempo::from_bpm_integer(120), 960)
     }
 
-    fn zero_channel(divider: Grid) -> Channel {
-        Channel {
-            mode: ChannelMode::MidiClock,
+    /// Bare `ChannelCommon` for transform-pipeline tests — the
+    /// pipeline doesn't care about role, so the test fixture
+    /// doesn't either.
+    fn zero_common(divider: Grid) -> ChannelCommon {
+        ChannelCommon {
             divider,
             shuffle: SwingConfig {
                 resolution: TBase::T16,
@@ -150,15 +172,60 @@ mod tests {
         }
     }
 
-    // ── Spot checks ──────────────────────────────────────────────
+    /// Full `Channel::Midi` for sites that need to construct a
+    /// channel rather than just a `ChannelCommon`.
+    fn zero_midi_clock_channel(divider: Grid) -> Channel {
+        Channel::Midi {
+            common: zero_common(divider),
+            role: MidiRole::Clock,
+        }
+    }
+
+    // ── Channel structural tests ─────────────────────────────────
+
+    #[test]
+    fn channel_common_borrow_matches_inner_field() {
+        let ch = zero_midi_clock_channel(Grid::T4);
+        assert_eq!(ch.common().divider, Grid::T4);
+        assert_eq!(ch.common().delay, Micro::ZERO);
+    }
+
+    #[test]
+    fn channel_common_mut_round_trip() {
+        let mut ch = zero_midi_clock_channel(Grid::T4);
+        ch.common_mut().delay = Micro(10_000);
+        assert_eq!(ch.common().delay, Micro(10_000));
+    }
+
+    #[test]
+    fn channel_din_constructible() {
+        let _ = Channel::Din {
+            common: zero_common(Grid::T4),
+            role: DinRole::Sync24,
+        };
+    }
+
+    #[test]
+    fn channel_cv_constructible() {
+        let _ = Channel::Cv {
+            common: zero_common(Grid::T4),
+            role: CvRole::Pulse,
+        };
+        let _ = Channel::Cv {
+            common: zero_common(Grid::T4),
+            role: CvRole::Lfo,
+        };
+    }
+
+    // ── Spot checks (transform pipeline; role is irrelevant) ─────
 
     #[test]
     fn t4_at_120bpm_48k_emits_at_half_second_multiples() {
         // Divider T4 (quarter, 960 ticks at 960 PPQN), shuffle 0,
         // delay 0, offset 0 → samples 0, 24 000, 48 000, …
-        let ch = zero_channel(Grid::T4);
+        let common = zero_common(Grid::T4);
         let master: Vec<Tick> = (0..=3840).map(Tick).collect();
-        let ev = transform(master, &ch, &stc_120_48k());
+        let ev = transform(master, &common, &stc_120_48k());
         let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
         assert_eq!(samples, vec![0, 24_000, 48_000, 72_000, 96_000]);
     }
@@ -166,9 +233,9 @@ mod tests {
     #[test]
     fn delay_10ms_adds_exactly_480_samples() {
         // delay = 10 ms at 48 kHz → +480 samples.
-        let mut ch = zero_channel(Grid::T4);
-        ch.delay = Micro(10_000); // 10 ms
-        let ev = transform([Tick(0), Tick(960)], &ch, &stc_120_48k());
+        let mut common = zero_common(Grid::T4);
+        common.delay = Micro(10_000); // 10 ms
+        let ev = transform([Tick(0), Tick(960)], &common, &stc_120_48k());
         let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
         assert_eq!(samples, vec![480, 24_480]);
     }
@@ -177,9 +244,9 @@ mod tests {
     fn divider_filters_unaligned_ticks() {
         // Divider T4 (960 ticks). Master stream contains every tick in
         // [0, 1000]; only 0 and 960 survive the filter.
-        let ch = zero_channel(Grid::T4);
+        let common = zero_common(Grid::T4);
         let master: Vec<Tick> = (0..=1000).map(Tick).collect();
-        let ev = transform(master, &ch, &stc_120_48k());
+        let ev = transform(master, &common, &stc_120_48k());
         let ticks: Vec<u32> = ev.iter().map(|e| e.tick.0).collect();
         assert_eq!(ticks, vec![0, 960]);
     }
@@ -188,36 +255,36 @@ mod tests {
     fn t8q_quintuplet_divider_fires_at_192_ticks() {
         // T8Q = 192 ticks (5 per quarter). Master stream covers
         // [0, 1000] → ticks 0, 192, 384, 576, 768, 960.
-        let ch = zero_channel(Grid::T8Q);
+        let common = zero_common(Grid::T8Q);
         let master: Vec<Tick> = (0..=1000).map(Tick).collect();
-        let ev = transform(master, &ch, &stc_120_48k());
+        let ev = transform(master, &common, &stc_120_48k());
         let ticks: Vec<u32> = ev.iter().map(|e| e.tick.0).collect();
         assert_eq!(ticks, vec![0, 192, 384, 576, 768, 960]);
     }
 
     #[test]
     fn delay_over_300ms_saturates() {
-        let mut ch = zero_channel(Grid::T4);
-        ch.delay = Micro(1_000_000); // 1 s
-        let ev = transform([Tick(0)], &ch, &stc_120_48k());
+        let mut common = zero_common(Grid::T4);
+        common.delay = Micro(1_000_000); // 1 s
+        let ev = transform([Tick(0)], &common, &stc_120_48k());
         // Clamped to 300 ms → 14 400 samples at 48 kHz.
         assert_eq!(ev[0].sample_index, 14_400);
     }
 
     #[test]
     fn negative_delay_clamped_to_zero() {
-        let mut ch = zero_channel(Grid::T4);
-        ch.delay = Micro(-100_000); // -100 ms
-        let ev = transform([Tick(0), Tick(960)], &ch, &stc_120_48k());
+        let mut common = zero_common(Grid::T4);
+        common.delay = Micro(-100_000); // -100 ms
+        let ev = transform([Tick(0), Tick(960)], &common, &stc_120_48k());
         assert_eq!(ev[0].sample_index, 0);
         assert_eq!(ev[1].sample_index, 24_000);
     }
 
     #[test]
     fn offset_negative_shifts_earlier() {
-        let mut ch = zero_channel(Grid::T4);
-        ch.offset = Micro(-1_000); // -1 ms = -48 samples at 48 kHz.
-        let ev = transform([Tick(960)], &ch, &stc_120_48k());
+        let mut common = zero_common(Grid::T4);
+        common.offset = Micro(-1_000); // -1 ms = -48 samples at 48 kHz.
+        let ev = transform([Tick(960)], &common, &stc_120_48k());
         assert_eq!(ev[0].sample_index, 24_000 - 48);
     }
 
@@ -258,8 +325,7 @@ mod tests {
             offset_us in -5_000_i64..=5_000,
             max_tick in 960u32..=10_000,
         ) {
-            let ch = Channel {
-                mode: ChannelMode::MidiClock,
+            let common = ChannelCommon {
                 divider,
                 shuffle,
                 delay: Micro(delay_us),
@@ -267,7 +333,7 @@ mod tests {
                 bar_multiplier: None,
             };
             let master: Vec<Tick> = (0..=max_tick).map(Tick).collect();
-            let ev = transform(master, &ch, &stc_120_48k());
+            let ev = transform(master, &common, &stc_120_48k());
             for w in ev.windows(2) {
                 prop_assert!(
                     w[0].tick <= w[1].tick,
@@ -290,10 +356,10 @@ mod tests {
             divider in arb_grid(),
             beats in 1u32..=16,
         ) {
-            let ch = zero_channel(divider);
+            let common = zero_common(divider);
             let span = beats * 960;
             let master: Vec<Tick> = (0..span).map(Tick).collect();
-            let ev = transform(master, &ch, &stc_120_48k());
+            let ev = transform(master, &common, &stc_120_48k());
             let expected = span.div_ceil(divider.tick_count());
             prop_assert_eq!(ev.len() as u32, expected);
         }
@@ -301,10 +367,10 @@ mod tests {
         /// Plan property `shift_clamping`, upper bound.
         #[test]
         fn delay_upper_clamp(delay_us in MAX_DELAY.0..=10_000_000_i64) {
-            let mut ch = zero_channel(Grid::T4);
-            ch.delay = Micro(delay_us);
+            let mut common = zero_common(Grid::T4);
+            common.delay = Micro(delay_us);
             let stc = stc_120_48k();
-            let ev = transform([Tick(960)], &ch, &stc);
+            let ev = transform([Tick(960)], &common, &stc);
             let cap_samples = super::micro_to_samples(MAX_DELAY, stc.sr()) as u64;
             prop_assert_eq!(ev[0].sample_index, 24_000 + cap_samples);
         }
@@ -312,9 +378,9 @@ mod tests {
         /// Plan property `shift_clamping`, lower bound.
         #[test]
         fn delay_lower_clamp(delay_us in -10_000_000_i64..0) {
-            let mut ch = zero_channel(Grid::T4);
-            ch.delay = Micro(delay_us);
-            let ev = transform([Tick(960)], &ch, &stc_120_48k());
+            let mut common = zero_common(Grid::T4);
+            common.delay = Micro(delay_us);
+            let ev = transform([Tick(960)], &common, &stc_120_48k());
             prop_assert_eq!(ev[0].sample_index, 24_000);
         }
 
@@ -323,14 +389,14 @@ mod tests {
         /// 0, 480, 960, 1440 (two T16 steps per T8 boundary).
         #[test]
         fn shuffle_identity_on_even_steps(amount in any::<i8>()) {
-            let mut ch = zero_channel(Grid::T16);
-            ch.shuffle = SwingConfig {
+            let mut common = zero_common(Grid::T16);
+            common.shuffle = SwingConfig {
                 resolution: TBase::T16,
                 amount,
             };
             let stc = stc_120_48k();
             for step in [0u32, 480, 960, 1440] {
-                let ev = transform([Tick(step)], &ch, &stc);
+                let ev = transform([Tick(step)], &common, &stc);
                 prop_assert_eq!(ev[0].tick, Tick(step));
             }
         }

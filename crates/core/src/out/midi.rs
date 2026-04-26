@@ -148,7 +148,7 @@ pub fn render_buffer(
 
 // ── MIDI Note (click) rendering ─────────────────────────────────────
 
-use crate::channel::mode::MidiClickConfig;
+use crate::channel::role::MidiClickConfig;
 
 /// Render a block of MIDI click events. Per scheduled tick: emits a
 /// 3-byte Note On followed by a same-sample 3-byte Note Off (vel=0).
@@ -186,46 +186,42 @@ pub fn render_midi_click_block(
 
 // ── Per-channel dispatch ────────────────────────────────────────────
 
-use crate::channel::Channel;
-use crate::channel::mode::{ChannelMode, ClickConfig};
+use crate::channel::role::{ChannelCommon, MidiRole};
 
-/// Render one channel's block to the sink. Exhaustive match on
-/// [`ChannelMode`]; `MidiClock` emits 0xF8 bytes (per Plan 12) and
-/// `Click(ClickConfig::Midi(_))` emits Note On / Note Off pairs (per
-/// Plan 2026-04-25-03). The other variants' rendering paths (DIN
-/// bytes, CV pulses, analog LFO, MIDI CC) land in v0.2+ per the doc
-/// comments on [`ChannelMode`](crate::channel::ChannelMode).
+/// Render one MIDI channel's block to the sink. Match-exhaustive on
+/// [`MidiRole`]; the `Machine`-level dispatch hands us only
+/// `Channel::Midi` variants — a `Cv` / `Din` channel literally
+/// cannot reach this function (compile-time, not runtime, guarantee).
 ///
-/// `click_counter` must be `Some(_)` when `ch.mode` is a `Click(_)`
-/// variant. `Machine` supplies a per-channel slot for every channel;
-/// non-`Machine` callers (the existing `MidiClock`-only render-path
-/// tests) pass `None`.
-pub fn render_channel_block(
-    ch: &Channel,
+/// Plan 21 (audit P3) replaced the old `render_channel_block`
+/// (which dispatched on a flat `ChannelMode` and silently no-op'd
+/// non-MIDI variants) with this typed version. `click_counter`
+/// must be `Some(_)` for `MidiRole::Click(_)`; non-`Machine`
+/// callers (the `Clock`-only render-path tests) pass `None`.
+///
+/// `common` is unused today — v0.5's per-channel mute / mix /
+/// transport-state logic threads through it. Borrowed (not
+/// copied) so the unused parameter doesn't silently grow.
+pub fn render_midi_channel(
+    _common: &ChannelCommon,
+    role: &MidiRole,
     events: &[ScheduledEvent],
     transport: Option<MidiRtByte>,
     buffer_start_sample: u64,
     click_counter: Option<&mut u32>,
     sink: &dyn MidiSink,
 ) {
-    match &ch.mode {
-        ChannelMode::MidiClock => {
+    match role {
+        MidiRole::Clock => {
             render_buffer(events, transport, buffer_start_sample, sink);
         }
-        // v0.2+: DIN sync24 bit stream.
-        // v0.4:  AnalogPulse (single-sample CV impulse, see
-        //        `doc/designs/cv-pulse.md`).
-        // v0.4:  AnalogLfo (sample-rate-rendered envelope).
-        // Post-v0.5: MidiCc (needs a real u7 newtype outside core).
-        ChannelMode::Din
-        | ChannelMode::AnalogPulse
-        | ChannelMode::AnalogLfo
-        | ChannelMode::MidiCc { .. } => {}
-        ChannelMode::Click(ClickConfig::Midi(cfg)) => {
+        MidiRole::Click(cfg) => {
             let counter = click_counter
-                .expect("ChannelMode::Click(_) requires a counter slot from Machine");
+                .expect("MidiRole::Click(_) requires a counter slot from Machine");
             render_midi_click_block(events, cfg, counter, sink);
         }
+        // Spec-surface stub; rendering lands in v0.2+.
+        MidiRole::Cc(_) => {}
     }
 }
 
@@ -430,11 +426,10 @@ mod tests {
         }
     }
 
-    // ── render_channel_block ──────────────────────────────────────
+    // ── render_midi_channel ───────────────────────────────────────
 
-    use crate::channel::{Channel, ChannelMode, scheduler::tick_stream};
+    use crate::channel::{Channel, scheduler::tick_stream};
     use crate::fxp::{Micro, Tempo};
-    use crate::midi::U7;
     use crate::time::conn::SampleTickConn;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
@@ -444,9 +439,8 @@ mod tests {
         SampleTickConn::new(48_000, Tempo::from_bpm_integer(120), 960)
     }
 
-    fn zero_channel(mode: ChannelMode, divider: Grid) -> Channel {
-        Channel {
-            mode,
+    fn midi_common(divider: Grid) -> ChannelCommon {
+        ChannelCommon {
             divider,
             shuffle: SwingConfig {
                 resolution: TBase::T16,
@@ -459,11 +453,12 @@ mod tests {
     }
 
     #[test]
-    fn midi_clock_mode_routes_through_render_buffer() {
-        let ch = zero_channel(ChannelMode::MidiClock, Grid::T4);
+    fn midi_clock_role_routes_through_render_buffer() {
+        let common = midi_common(Grid::T4);
+        let role = MidiRole::Clock;
         let evs = [ev(0), ev(24_000)];
         let sink = TestSink::new();
-        render_channel_block(&ch, &evs, Some(MidiRtByte::Start), 0, None, &sink);
+        render_midi_channel(&common, &role, &evs, Some(MidiRtByte::Start), 0, None, &sink);
         let recs = sink.records();
         assert_eq!(recs.len(), 3);
         assert_eq!(recs[0].bytes, vec![MIDI_START]);
@@ -471,37 +466,32 @@ mod tests {
         assert_eq!(recs[2].bytes, vec![MIDI_CLOCK]);
     }
 
-    proptest! {
-        /// Plan 12 property `non_clock_modes_are_noop`: every
-        /// non-MidiClock `ChannelMode` variant produces zero sink
-        /// records, even with non-empty events and a transport byte.
-        #[test]
-        fn non_clock_modes_are_noop(
-            mode in prop::sample::select(&[
-                ChannelMode::Din,
-                ChannelMode::AnalogPulse,
-                ChannelMode::AnalogLfo,
-                ChannelMode::MidiCc { cc: U7(74), range: (U7(0), U7(127)) },
-            ]),
-            samples in prop::collection::vec(any::<u64>(), 0..16),
-            transport in prop::option::of(prop::sample::select(&[
-                MidiRtByte::Start,
-                MidiRtByte::Continue,
-                MidiRtByte::Stop,
-            ])),
-            buffer_start in any::<u64>(),
-        ) {
-            let ch = zero_channel(mode, Grid::T4);
-            let evs: Vec<ScheduledEvent> = samples.into_iter().map(ev).collect();
-            let sink = TestSink::new();
-            render_channel_block(&ch, &evs, transport, buffer_start, None, &sink);
-            prop_assert!(sink.is_empty());
-        }
+    /// Plan 21 (audit P3): `Channel::Midi { role: MidiRole::Cc(_) }`
+    /// is a v0.2+ stub — the renderer's `MidiRole::Cc(_)` arm is
+    /// `=> {}`. The pre-P3 `non_clock_modes_are_noop` proptest
+    /// covered Din / AnalogPulse / AnalogLfo / MidiCc all dispatching
+    /// to the no-op arm; under P3 the first three are *structurally
+    /// unreachable* by `render_midi_channel` (they're `Channel::Din`
+    /// / `Channel::Cv`, not `Channel::Midi`) so the no-op contract
+    /// only needs to cover `MidiRole::Cc(_)`.
+    #[test]
+    fn cc_role_is_noop_until_v02() {
+        let common = midi_common(Grid::T4);
+        let role = MidiRole::Cc(crate::channel::MidiCcConfig {
+            cc: crate::midi::U7(74),
+            range: (crate::midi::U7(0), crate::midi::U7(127)),
+        });
+        let evs = [ev(0), ev(24_000)];
+        let sink = TestSink::new();
+        render_midi_channel(&common, &role, &evs, Some(MidiRtByte::Start), 0, None, &sink);
+        assert!(sink.is_empty());
+    }
 
+    proptest! {
         /// Plan 12 property `block_render_matches_scheduler`: for an
         /// arbitrary MidiClock channel and buffer window, the
         /// `TestSink.at_sample` list emitted by
-        /// `render_channel_block(..., transport: None, ...)` equals
+        /// `render_midi_channel(..., transport: None, ...)` equals
         /// `tick_stream(...)`'s `ScheduledEvent.sample_index` list
         /// bit-for-bit. Pins the composition contract Plan 13's RT
         /// callback relies on.
@@ -516,21 +506,27 @@ mod tests {
             buffer_start in 0u64..=1_000_000,
             frames in 1usize..=8_192,
         ) {
-            let ch = zero_channel(ChannelMode::MidiClock, Grid::T16);
+            let common = midi_common(Grid::T16);
+            let role = MidiRole::Clock;
             let stc = stc_120_48k();
-            let evs = tick_stream(&ch, &stc, buffer_start, frames);
+            let evs = tick_stream(&common, &stc, buffer_start, frames);
             let sink = TestSink::new();
-            render_channel_block(&ch, &evs, None, buffer_start, None, &sink);
+            render_midi_channel(&common, &role, &evs, None, buffer_start, None, &sink);
             let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();
             let expected: Vec<u64> = evs.iter().map(|e| e.sample_index).collect();
             prop_assert_eq!(emitted, expected);
         }
     }
 
+    // Suppress unused-import warning when the only consumer of
+    // `Channel` in this module is the click-dispatch tests below.
+    #[allow(dead_code)]
+    fn _channel_type_is_used(_: Channel) {}
+
     // ── render_midi_click_block ───────────────────────────────────
 
-    use crate::channel::mode::{ClickConfig, MidiClickAccent, MidiClickConfig};
-    use crate::midi::U4;
+    use crate::channel::role::{MidiClickAccent, MidiClickConfig};
+    use crate::midi::{U4, U7};
     use core::num::NonZeroU32;
 
     fn click_cfg(note: u8, vel: u8, ch: u8, accent: Option<MidiClickAccent>) -> MidiClickConfig {
@@ -757,18 +753,19 @@ mod tests {
         }
     }
 
-    // ── render_channel_block dispatch on Click ────────────────────
+    // ── render_midi_channel dispatch on Click ─────────────────────
 
     #[test]
-    fn click_mode_routes_through_render_midi_click_block() {
+    fn click_role_routes_through_render_midi_click_block() {
         let cfg = click_cfg(76, 100, 9, None);
-        let mut ch = zero_channel(ChannelMode::Click(ClickConfig::Midi(cfg)), Grid::T4);
-        ch.bar_multiplier = None;
+        let common = midi_common(Grid::T4);
+        let role = MidiRole::Click(cfg);
         let evs = [ev(0), ev(24_000)];
         let sink = TestSink::new();
         let mut counter = 0u32;
-        render_channel_block(
-            &ch,
+        render_midi_channel(
+            &common,
+            &role,
             &evs,
             Some(MidiRtByte::Start),
             0,
@@ -786,14 +783,15 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "ChannelMode::Click(_) requires a counter slot")]
-    fn click_mode_panics_without_counter() {
+    #[should_panic(expected = "MidiRole::Click(_) requires a counter slot")]
+    fn click_role_panics_without_counter() {
         let cfg = click_cfg(76, 100, 9, None);
-        let ch = zero_channel(ChannelMode::Click(ClickConfig::Midi(cfg)), Grid::T4);
+        let common = midi_common(Grid::T4);
+        let role = MidiRole::Click(cfg);
         let evs = [ev(0)];
         let sink = TestSink::new();
         // Plan 2026-04-25-03 contract: Machine always supplies the
         // counter; passing None is a programmer error and panics fast.
-        render_channel_block(&ch, &evs, None, 0, None, &sink);
+        render_midi_channel(&common, &role, &evs, None, 0, None, &sink);
     }
 }

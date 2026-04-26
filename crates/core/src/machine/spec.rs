@@ -30,9 +30,9 @@
 use core::num::{NonZeroU16, NonZeroU32};
 use std::fmt::{self, Display};
 
-use crate::channel::mode::{ClickConfig, MidiClickAccent, MidiClickConfig};
+use crate::channel::role::{ChannelCommon, MidiClickAccent, MidiClickConfig, MidiRole};
 use crate::channel::transform::MAX_DELAY;
-use crate::channel::{Channel, ChannelMode};
+use crate::channel::Channel;
 use crate::dsl;
 use crate::fxp::{Extended, ExtendedFloat, F64F06, Micro};
 use crate::midi::{U4, U7};
@@ -51,12 +51,13 @@ pub struct ChannelSpec {
     pub out: Option<String>,
     /// Grid — resolved from a DSL expression at parse time.
     pub grid: Grid,
-    /// Per-channel output role. Default `ChannelMode::MidiClock`;
-    /// `mode=click` produces
-    /// `ChannelMode::Click(ClickConfig::Midi(_))`. Reusing the
-    /// runtime enum keeps spec/runtime in sync without a parallel
-    /// type hierarchy.
-    pub mode: ChannelMode,
+    /// Per-channel output role. Default `MidiRole::Clock`;
+    /// `mode=click` produces `MidiRole::Click(MidiClickConfig)`.
+    /// The spec parser only ever produces MIDI-target roles
+    /// (audit P3 reshaped Channel into per-target variants;
+    /// non-MIDI targets aren't user-constructible from the
+    /// `--ch` mini-language today).
+    pub mode: MidiRole,
     /// Swing configuration. Default: `T8:0` (no swing at eighth-note
     /// resolution).
     pub swing: SwingConfig,
@@ -293,7 +294,7 @@ impl ChannelSpec {
 
         // Cross-key validation: assemble `mode` from the per-key
         // values according to the mode= keyword. Defaults to
-        // ChannelMode::MidiClock if mode= absent.
+        // MidiRole::Clock if mode= absent.
         let mode = match mode_kw.unwrap_or("clock") {
             "clock" => {
                 // Reject click-only keys when mode is clock — they're
@@ -324,7 +325,7 @@ impl ChannelSpec {
                         ));
                     }
                 }
-                ChannelMode::MidiClock
+                MidiRole::Clock
             }
             "click" => {
                 let note = note.ok_or(ChannelSpecError::MissingKey("note"))?;
@@ -356,12 +357,12 @@ impl ChannelSpec {
                         None
                     }
                 };
-                ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
+                MidiRole::Click(MidiClickConfig {
                     note,
                     vel,
                     ch,
                     accent,
-                }))
+                })
             }
             _ => unreachable!("mode_kw is constrained to clock|click at parse"),
         };
@@ -384,7 +385,7 @@ impl ChannelSpec {
     pub fn into_channel(self) -> Result<Channel, ChannelSpecError> {
         // dev=audio is reserved for v0.4. The mode/click validation
         // already happened in `parse`, so by here `self.mode` is the
-        // ready-to-use ChannelMode (MidiClock or Click(...)).
+        // ready-to-use MidiRole (Clock or Click(MidiClickConfig)).
         if matches!(self.dev, ChannelDev::Audio) {
             return Err(ChannelSpecError::AudioDeferred);
         }
@@ -413,13 +414,15 @@ impl ChannelSpec {
             ));
         }
 
-        Ok(Channel {
-            mode: self.mode,
-            divider: self.grid,
-            shuffle: self.swing,
-            delay,
-            offset: Micro::ZERO,
-            bar_multiplier: self.bars,
+        Ok(Channel::Midi {
+            common: ChannelCommon {
+                divider: self.grid,
+                shuffle: self.swing,
+                delay,
+                offset: Micro::ZERO,
+                bar_multiplier: self.bars,
+            },
+            role: self.mode,
         })
     }
 
@@ -524,11 +527,11 @@ impl Display for ChannelSpec {
         if let Some(out) = &self.out {
             write!(f, ",out={}", quote_if_needed(out))?;
         }
-        // mode + click keys: emit only when non-default (MidiClock
-        // is the implicit default, so it's omitted).
+        // mode + click keys: emit only when non-default
+        // (MidiRole::Clock is the implicit default, so it's omitted).
         match &self.mode {
-            ChannelMode::MidiClock => {}
-            ChannelMode::Click(ClickConfig::Midi(cfg)) => {
+            MidiRole::Clock => {}
+            MidiRole::Click(cfg) => {
                 write!(
                     f,
                     ",mode=click,note={},vel={},mch={}",
@@ -546,12 +549,9 @@ impl Display for ChannelSpec {
                     }
                 }
             }
-            // Other ChannelMode variants aren't constructable through
-            // the parser today.
-            ChannelMode::Din
-            | ChannelMode::AnalogPulse
-            | ChannelMode::AnalogLfo
-            | ChannelMode::MidiCc { .. } => {}
+            // MidiRole::Cc is a spec-surface stub; the parser doesn't
+            // produce it today, so the Display side stays silent.
+            MidiRole::Cc(_) => {}
         }
         if self.swing.amount != 0 || self.swing.resolution != TBase::T8 {
             if self.swing.resolution == TBase::T8 {
@@ -836,14 +836,14 @@ mod tests {
     fn into_channel_clamps_delay() {
         let spec = ChannelSpec::parse("dev=midi,delay=500", &[]).unwrap();
         let ch = spec.into_channel().unwrap();
-        assert_eq!(ch.delay, MAX_DELAY);
+        assert_eq!(ch.common().delay, MAX_DELAY);
     }
 
     #[test]
     fn into_channel_negative_delay_clamps_to_zero() {
         let spec = ChannelSpec::parse("dev=midi,delay=-50", &[]).unwrap();
         let ch = spec.into_channel().unwrap();
-        assert_eq!(ch.delay, Micro(0));
+        assert_eq!(ch.common().delay, Micro(0));
     }
 
     // ── Display round-trip ───────────────────────────────────────
@@ -912,8 +912,8 @@ mod tests {
         prop::sample::select(TBase::ALL.as_slice())
     }
 
-    /// Generate a `ChannelMode` reachable from the spec parser:
-    /// `MidiClock` or `Click(ClickConfig::Midi(_))` with arbitrary
+    /// Generate a `MidiRole` reachable from the spec parser:
+    /// `Clock` or `Click(MidiClickConfig)` with arbitrary
     /// note/vel/ch and an optional accent.
     ///
     /// `accent.every` spans the full `NonZeroU32` domain — the
@@ -921,7 +921,7 @@ mod tests {
     /// Display via `Display for NonZeroU32`), so the entire domain
     /// is safe to sample. Per CLAUDE.md: don't bound to "keep
     /// things small," only to avoid documented hazards.
-    fn arb_mode() -> impl Strategy<Value = ChannelMode> {
+    fn arb_mode() -> impl Strategy<Value = MidiRole> {
         let click = (
             0u8..=127,
             1u8..=127,
@@ -938,14 +938,14 @@ mod tests {
                     note: U7(an),
                     vel: U7(av),
                 });
-                ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
+                MidiRole::Click(MidiClickConfig {
                     note: U7(note),
                     vel: U7(vel),
                     ch: U4(ch),
                     accent,
-                }))
+                })
             });
-        prop_oneof![Just(ChannelMode::MidiClock), click]
+        prop_oneof![Just(MidiRole::Clock), click]
     }
 
     /// Full `NonZeroU16` domain for `bars` — same justification as
@@ -1026,7 +1026,7 @@ mod tests {
     #[test]
     fn parse_default_mode_is_clock() {
         let spec = ChannelSpec::parse("dev=midi,grid=t4", &[]).unwrap();
-        assert_eq!(spec.mode, ChannelMode::MidiClock);
+        assert_eq!(spec.mode, MidiRole::Clock);
     }
 
     #[test]
@@ -1035,7 +1035,7 @@ mod tests {
                  accent-every=4,accent-note=38,accent-vel=120";
         let spec = ChannelSpec::parse(s, &[]).expect("parse");
         let cfg = match spec.mode {
-            ChannelMode::Click(ClickConfig::Midi(c)) => c,
+            MidiRole::Click(c) => c,
             other => panic!("expected Click(Midi), got {:?}", other),
         };
         assert_eq!(cfg.note, U7(37));
@@ -1052,7 +1052,7 @@ mod tests {
         let spec = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=76,vel=100", &[])
             .unwrap();
         let cfg = match spec.mode {
-            ChannelMode::Click(ClickConfig::Midi(c)) => c,
+            MidiRole::Click(c) => c,
             _ => panic!(),
         };
         assert_eq!(cfg.ch, U4(9));
@@ -1063,7 +1063,7 @@ mod tests {
         let s = "dev=midi,mode=click,grid=t4,note=37,vel=70,accent-every=4,accent-vel=120";
         let spec = ChannelSpec::parse(s, &[]).unwrap();
         let cfg = match spec.mode {
-            ChannelMode::Click(ClickConfig::Midi(c)) => c,
+            MidiRole::Click(c) => c,
             _ => panic!(),
         };
         let accent = cfg.accent.unwrap();
@@ -1178,7 +1178,7 @@ mod tests {
     fn into_channel_bars_round_trips_via_nonzero() {
         let spec = ChannelSpec::parse("dev=midi,grid=t1,bars=4", &[]).unwrap();
         let ch = spec.into_channel().unwrap();
-        assert_eq!(ch.bar_multiplier, NonZeroU16::new(4));
+        assert_eq!(ch.common().bar_multiplier, NonZeroU16::new(4));
     }
 
     #[test]
@@ -1187,9 +1187,9 @@ mod tests {
             ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=10", &[])
                 .unwrap();
         let ch = spec.into_channel().unwrap();
-        match ch.mode {
-            ChannelMode::Click(ClickConfig::Midi(cfg)) => assert_eq!(cfg.ch, U4(9)),
-            _ => panic!("expected Click(Midi)"),
+        match ch {
+            Channel::Midi { role: MidiRole::Click(cfg), .. } => assert_eq!(cfg.ch, U4(9)),
+            _ => panic!("expected Channel::Midi {{ role: Click(_) }}"),
         }
     }
 
@@ -1198,8 +1198,8 @@ mod tests {
         let spec =
             ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80", &[]).unwrap();
         let ch = spec.into_channel().unwrap();
-        match ch.mode {
-            ChannelMode::Click(ClickConfig::Midi(cfg)) => assert!(cfg.accent.is_none()),
+        match ch {
+            Channel::Midi { role: MidiRole::Click(cfg), .. } => assert!(cfg.accent.is_none()),
             _ => panic!(),
         }
     }

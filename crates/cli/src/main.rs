@@ -908,7 +908,7 @@ mod sync_trace {
 
 #[cfg(feature = "core")]
 pub mod channel_trace {
-    use agogo_core::channel::{Channel, ChannelMode, tick_stream};
+    use agogo_core::channel::{ChannelCommon, tick_stream};
     use agogo_core::fxp::{Extended, ExtendedFloat, F64F06, Micro, Tempo};
     use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::grid::Grid;
@@ -983,8 +983,9 @@ pub mod channel_trace {
             }
         };
         let delay = ms_to_micro("--delay", args.delay)?;
-        let channel = Channel {
-            mode: ChannelMode::MidiClock,
+        // channel_trace operates only on the scheduler — it doesn't
+        // construct full Channel variants, just the common field set.
+        let common = ChannelCommon {
             divider: grid,
             shuffle: SwingConfig {
                 resolution: TBase::T16,
@@ -1013,7 +1014,7 @@ pub mod channel_trace {
             let start = u64::from(b)
                 .checked_mul(frames_u64)
                 .expect("checked above");
-            for ev in tick_stream(&channel, &stc, start, args.frames) {
+            for ev in tick_stream(&common, &stc, start, args.frames) {
                 rows.push(TraceRow {
                     buffer_index: b,
                     sample_index: ev.sample_index,
@@ -1026,9 +1027,9 @@ pub mod channel_trace {
 }
 
 pub mod midi_trace {
-    use agogo_core::channel::{Channel, ChannelMode, scheduler::tick_stream};
+    use agogo_core::channel::{ChannelCommon, MidiRole, scheduler::tick_stream};
     use agogo_core::fxp::{Micro, Tempo};
-    use agogo_core::out::midi::{MidiRtByte, TestSink, render_channel_block};
+    use agogo_core::out::midi::{MidiRtByte, TestSink, render_midi_channel};
     use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
@@ -1087,8 +1088,9 @@ pub mod midi_trace {
             }
         }
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
-        let channel = Channel {
-            mode: ChannelMode::MidiClock,
+        // midi_trace dispatches the MIDI clock renderer directly —
+        // no need to wrap in a full Channel::Midi variant.
+        let common = ChannelCommon {
             divider: grid,
             shuffle: SwingConfig {
                 resolution: TBase::T16,
@@ -1098,6 +1100,7 @@ pub mod midi_trace {
             offset: Micro::ZERO,
             bar_multiplier: None,
         };
+        let role = MidiRole::Clock;
         // Overflow pre-flight matches channel_trace's shape.
         let frames_u64 = u64::try_from(args.frames)
             .map_err(|_| format!("trace range exceeds u64: --frames {}", args.frames))?;
@@ -1128,8 +1131,16 @@ pub mod midi_trace {
                 (_, true) => Some(MidiRtByte::Stop),
                 _ => None,
             };
-            let evs = tick_stream(&channel, &stc, start_sample, args.frames);
-            render_channel_block(&channel, &evs, transport, start_sample, None, &sink);
+            let evs = tick_stream(&common, &stc, start_sample, args.frames);
+            render_midi_channel(
+                &common,
+                &role,
+                &evs,
+                transport,
+                start_sample,
+                None,
+                &sink,
+            );
         }
         Ok(sink
             .records()
@@ -1332,7 +1343,7 @@ pub mod demo {
     //! Plan 14's `agogo run` generalises to N channels via
     //! `Machine`.
 
-    use agogo_core::channel::{Channel, ChannelMode};
+    use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
     use agogo_core::fxp::{Micro, S48, SampleRate, Tempo};
     use agogo_core::host::{AudioHost, Config};
     use agogo_core::machine::{Machine, TransportPolicy};
@@ -1462,16 +1473,18 @@ pub mod demo {
         // Machine with `TransportPolicy::Scripted { empty }` so the
         // emitted byte stream stays byte-identical to Plan 13's
         // (no Start / Stop / Continue, just clock).
-        let channel = Channel {
-            mode: ChannelMode::MidiClock,
-            divider: grid,
-            shuffle: SwingConfig {
-                resolution: TBase::T16,
-                amount: 0,
+        let channel = Channel::Midi {
+            common: ChannelCommon {
+                divider: grid,
+                shuffle: SwingConfig {
+                    resolution: TBase::T16,
+                    amount: 0,
+                },
+                delay: Micro::ZERO,
+                offset: Micro::ZERO,
+                bar_multiplier: None,
             },
-            delay: Micro::ZERO,
-            offset: Micro::ZERO,
-            bar_multiplier: None,
+            role: MidiRole::Clock,
         };
         let machine = Machine::<S48>::new(
             vec![channel],

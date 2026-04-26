@@ -28,7 +28,7 @@ use crate::channel::scheduler::tick_stream_into;
 use crate::channel::{Channel, ScheduledEvent};
 use crate::fxp::{SampleTime, Tempo};
 use crate::host::AudioIo;
-use crate::out::midi::{MidiRtByte, MidiSink, render_channel_block};
+use crate::out::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::sync::PhaseSource;
 use crate::time::conn::SampleTickConn;
 
@@ -72,7 +72,7 @@ pub struct Machine<R: SampleTime> {
     bar_counters: Vec<u32>,
     /// Per-channel emitted-click counter for `MidiClickAccent`.
     /// Index parallels `channels`. Slot is meaningful only for
-    /// `ChannelMode::Click(_)` channels. Threaded into
+    /// `Channel::Midi { role: MidiRole::Click(_) }` channels. Threaded into
     /// [`render_midi_click_block`] via `render_channel_block`'s
     /// `Option<&mut u32>` parameter; advanced once per emitted
     /// Note On. Reset to 0 when transport stops.
@@ -323,10 +323,11 @@ impl<R: SampleTime> Machine<R> {
         //    independent so we can iterate them without cross-talk;
         //    `events_pool` is reused (cleared) between channels.
         for (idx, ch) in self.channels.iter().enumerate() {
+            let common = ch.common();
             self.events_pool.clear();
             tick_stream_into(
                 &mut self.events_pool,
-                ch,
+                common,
                 &self.stc,
                 io.buffer_start_sample,
                 io.frames,
@@ -337,7 +338,7 @@ impl<R: SampleTime> Machine<R> {
             // bar counter once per pre-filter event. Filter runs
             // before render dispatch so the renderer (clock or
             // click) sees only the kept ticks.
-            if let Some(m) = ch.bar_multiplier {
+            if let Some(m) = common.bar_multiplier {
                 let counter = &mut self.bar_counters[idx];
                 let m = m.get() as u32;
                 self.events_pool.retain(|_| {
@@ -346,14 +347,30 @@ impl<R: SampleTime> Machine<R> {
                     keep
                 });
             }
-            render_channel_block(
-                ch,
-                &self.events_pool,
-                None, // transport byte already emitted globally
-                io.buffer_start_sample,
-                Some(&mut self.click_counters[idx]),
-                sink,
-            );
+            // Plan 21 (audit P3) dispatches on the outer Channel
+            // variant so the typed `render_midi_channel` only ever
+            // sees MIDI roles. `Din` / `Cv` channels have no
+            // renderer in v0.1 — same effective behaviour as the
+            // pre-P3 silent no-op, but now the lack-of-renderer is
+            // visible at the dispatch site rather than buried in a
+            // catch-all match arm inside the renderer.
+            match ch {
+                Channel::Midi { common: midi_common, role } => {
+                    render_midi_channel(
+                        midi_common,
+                        role,
+                        &self.events_pool,
+                        None, // transport byte already emitted globally
+                        io.buffer_start_sample,
+                        Some(&mut self.click_counters[idx]),
+                        sink,
+                    );
+                }
+                Channel::Din { .. } | Channel::Cv { .. } => {
+                    // No renderer for these targets in v0.1; the
+                    // sink is MIDI-only.
+                }
+            }
         }
     }
 }
@@ -361,7 +378,7 @@ impl<R: SampleTime> Machine<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channel::ChannelMode;
+    use crate::channel::{ChannelCommon, MidiRole};
     use crate::fxp::{Micro, S48};
     use crate::out::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
     use crate::time::grid::Grid;
@@ -371,16 +388,18 @@ mod tests {
     use proptest::prelude::*;
 
     fn zero_channel(divider: Grid) -> Channel {
-        Channel {
-            mode: ChannelMode::MidiClock,
-            divider,
-            shuffle: SwingConfig {
-                resolution: TBase::T16,
-                amount: 0,
+        Channel::Midi {
+            common: ChannelCommon {
+                divider,
+                shuffle: SwingConfig {
+                    resolution: TBase::T16,
+                    amount: 0,
+                },
+                delay: Micro::ZERO,
+                offset: Micro::ZERO,
+                bar_multiplier: None,
             },
-            delay: Micro::ZERO,
-            offset: Micro::ZERO,
-            bar_multiplier: None,
+            role: MidiRole::Clock,
         }
     }
 
@@ -711,7 +730,7 @@ mod tests {
 
     // ── Plan 2026-04-25-03: bar_multiplier + click counter tests ──
 
-    use crate::channel::mode::{ClickConfig, MidiClickAccent, MidiClickConfig};
+    use crate::channel::role::{MidiClickAccent, MidiClickConfig};
     use crate::midi::{U4, U7};
     use crate::out::midi::{MIDI_NOTE_OFF, MIDI_NOTE_ON};
     use core::num::{NonZeroU16, NonZeroU32};
@@ -721,16 +740,18 @@ mod tests {
         cfg: MidiClickConfig,
         bar_multiplier: Option<NonZeroU16>,
     ) -> Channel {
-        Channel {
-            mode: ChannelMode::Click(ClickConfig::Midi(cfg)),
-            divider,
-            shuffle: SwingConfig {
-                resolution: TBase::T16,
-                amount: 0,
+        Channel::Midi {
+            common: ChannelCommon {
+                divider,
+                shuffle: SwingConfig {
+                    resolution: TBase::T16,
+                    amount: 0,
+                },
+                delay: Micro::ZERO,
+                offset: Micro::ZERO,
+                bar_multiplier,
             },
-            delay: Micro::ZERO,
-            offset: Micro::ZERO,
-            bar_multiplier,
+            role: MidiRole::Click(cfg),
         }
     }
 
@@ -819,22 +840,24 @@ mod tests {
             let sr: u32 = 48_000;
             let mch: U4 = U4(9);
 
-            let make_mode = || {
+            let make_role = || {
                 if mode_is_click {
-                    ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
+                    MidiRole::Click(MidiClickConfig {
                         note: U7(76), vel: U7(100), ch: mch, accent: None,
-                    }))
+                    })
                 } else {
-                    ChannelMode::MidiClock
+                    MidiRole::Clock
                 }
             };
-            let mk_channel = |bm: Option<NonZeroU16>| Channel {
-                mode: make_mode(),
-                divider,
-                shuffle: SwingConfig { resolution: TBase::T16, amount: 0 },
-                delay: Micro::ZERO,
-                offset: Micro::ZERO,
-                bar_multiplier: bm,
+            let mk_channel = |bm: Option<NonZeroU16>| Channel::Midi {
+                common: ChannelCommon {
+                    divider,
+                    shuffle: SwingConfig { resolution: TBase::T16, amount: 0 },
+                    delay: Micro::ZERO,
+                    offset: Micro::ZERO,
+                    bar_multiplier: bm,
+                },
+                role: make_role(),
             };
 
             let mut m_un = Machine::<S48>::new(
