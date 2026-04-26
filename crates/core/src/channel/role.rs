@@ -116,8 +116,9 @@ pub enum DinRole {
 // ── CV / analog target ──────────────────────────────────────────────
 
 /// Analog / CV target role. Stub family — rendering lands in v0.2+
-/// (`out/audio.rs` for both variants; `Pulse` is a single-sample
-/// gate, `Lfo` is a sample-rate continuous waveform).
+/// in a future audio output module (no `out/audio.rs` exists in the
+/// repo today). `Pulse` is a single-sample gate; `Lfo` is a sample-
+/// rate continuous waveform.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum CvRole {
     Pulse,

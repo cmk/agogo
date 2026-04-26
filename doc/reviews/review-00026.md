@@ -211,3 +211,87 @@ The `Channel::Din { .. } | Channel::Cv { .. } => {}` arm in `Machine::on_buffer`
 - The plan's Verification table names `into_channel_clock_returns_midi_variant` and `into_channel_click_returns_midi_variant` as spot checks. Neither exists by that name. The coverage is real but the test names don't match the spec. This creates a minor audit-trail gap: a future reviewer checking "was this spot check implemented?" would not find it by name. Consider either adding two targeted tests with the plan-spec names or updating the plan doc to use the actual test names. Low priority — the compiler enforces what these tests would assert, so this is documentation hygiene, not a correctness gap.
 
 - `ChannelCommon` does not derive `PartialEq`. The role enums (`MidiRole`, `DinRole`, `CvRole`) and their payload types do. This means `Channel` itself can't derive `PartialEq`, which is fine for now since `Machine` holds channels in a `Vec` and equality is never compared. If a future test needs to assert `ch_a == ch_b`, the missing derive will be a build error rather than a silent surprise. Acceptable for v0.1; worth noting for P4.
+
+<!-- gh-id: 3143358873 -->
+### Copilot on [`doc/plans/plan-2026-04-26-02.md:94`](https://github.com/cmk/agogo/pull/26#discussion_r3143358873) (2026-04-26 10:45 UTC)
+
+This plan doc's code sketch is now out of sync with the implementation: it imports `crate::channel::mode::MidiClickConfig` even though `channel/mode.rs` is deleted in this PR (the type moved under `channel::role`). Also, the sketch references `out/audio.rs`, but that module/file does not exist in the repo today; clarify that it's a future location or update the reference so readers don't go looking for a non-existent file.
+```suggestion
+// `MidiClickConfig` is defined in this module below.
+```
+
+<!-- gh-id: 4176826851 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-26 10:45 UTC](https://github.com/cmk/agogo/pull/26#pullrequestreview-4176826851))
+
+## Pull request overview
+
+Refactors the core “channel routing + role” model to make routing targets explicit in the type system, eliminating the previous “pass a non‑MIDI channel to the MIDI renderer and silently no-op” behavior by construction.
+
+**Changes:**
+- Replaces the flat `ChannelMode` with `Channel::Midi|Din|Cv` and per-target role enums (`MidiRole`, `DinRole`, `CvRole`) plus shared `ChannelCommon`.
+- Updates scheduler/transform to operate on `&ChannelCommon`, and splits MIDI rendering into `render_midi_channel(&ChannelCommon, &MidiRole, ...)`.
+- Migrates call sites and fixtures (core, CLI tracing, host integration tests) to the new shapes and deletes `channel/mode.rs`.
+
+### Reviewed changes
+
+Copilot reviewed 12 out of 13 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00026.md | Adds review record for the P3 refactor. |
+| doc/plans/plan-2026-04-26-02.md | Adds plan doc for the P3 refactor (now slightly out of sync with implementation). |
+| crates/core/src/channel/role.rs | Introduces `ChannelCommon` + per-target role enums and configs. |
+| crates/core/src/channel/transform.rs | Makes `Channel` sum-typed and shifts transform pipeline to `&ChannelCommon`. |
+| crates/core/src/channel/scheduler.rs | Updates tick scheduling APIs to consume `&ChannelCommon`. |
+| crates/core/src/out/midi.rs | Deletes `render_channel_block`; adds `render_midi_channel` and updates tests accordingly. |
+| crates/core/src/machine.rs | Moves per-channel dispatch to `Machine::on_buffer` via `match Channel::{Midi,Din,Cv}`. |
+| crates/core/src/machine/spec.rs | Changes `ChannelSpec.mode` to `MidiRole` and emits `Channel::Midi` from `into_channel`. |
+| crates/core/src/channel.rs | Removes `mode` module export; re-exports role/common types. |
+| crates/cli/src/main.rs | Updates trace/demo code to use `ChannelCommon` + `MidiRole` where appropriate. |
+| crates/host-link/tests/bidirectional.rs | Migrates integration fixture to `Channel::Midi` and uses `common_mut()` for offset. |
+| crates/host-cpal/src/cpal/callback.rs | Migrates test fixture to `Channel::Midi` with embedded `ChannelCommon`. |
+| crates/core/src/channel/mode.rs | Deleted (migration completion). |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3143358882 -->
+### Copilot on [`crates/core/src/channel/role.rs:120`](https://github.com/cmk/agogo/pull/26#discussion_r3143358882) (2026-04-26 10:45 UTC)
+
+The doc comment for `CvRole` points readers to `out/audio.rs`, but `crates/core/src/out/` currently contains only `midi.rs` (no `audio.rs`). This reference is misleading; either update it to the correct planned location/name or reword it as a future module that does not exist yet.
+```suggestion
+/// in a future output module for both variants; `Pulse` is a
+/// single-sample gate, `Lfo` is a sample-rate continuous waveform.
+```
+
+<!-- gh-id: 3143358887 -->
+### Copilot on [`crates/core/src/machine.rs:78`](https://github.com/cmk/agogo/pull/26#discussion_r3143358887) (2026-04-26 10:45 UTC)
+
+This field doc still says the click counter is threaded into `render_midi_click_block` via `render_channel_block`, but `render_channel_block` has been deleted in this PR (now routes through `render_midi_channel`). Update the comment to match the current call chain so it doesn't point to a non-existent API.
+```suggestion
+    /// `Channel::Midi { role: MidiRole::Click(_) }` channels. Threaded through
+    /// [`render_midi_channel`] into the click-rendering path via its
+    /// `Option<&mut u32>` counter parameter; advanced once per
+    /// emitted Note On. Reset to 0 when transport stops.
+```
+
+<!-- gh-id: 3143363414 -->
+#### ↳ cmk ([2026-04-26 10:50 UTC](https://github.com/cmk/agogo/pull/26#discussion_r3143363414))
+
+Fixed in d938f22 — replaced the stale `use crate::channel::mode::{MidiClickConfig};` line in the plan's T1 sketch with a comment noting that the type is defined in the same role.rs module (mode.rs is deleted in T6). Same commit also fixes the `out/audio.rs` reference in the actual role.rs CvRole doc.
+
+<!-- gh-id: 3143363545 -->
+#### ↳ cmk ([2026-04-26 10:50 UTC](https://github.com/cmk/agogo/pull/26#discussion_r3143363545))
+
+Fixed in d938f22 — reworded the CvRole doc as 'a future audio output module (no out/audio.rs exists in the repo today)' so readers know it's a planned location, not an extant file.
+
+<!-- gh-id: 3143363854 -->
+#### ↳ cmk ([2026-04-26 10:50 UTC](https://github.com/cmk/agogo/pull/26#discussion_r3143363854))
+
+Fixed in d938f22 — updated the click_counters doc to point at `render_midi_channel` instead of the deleted `render_channel_block`, with the audit-P3 / Plan 21 reference inline.
