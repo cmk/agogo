@@ -22,7 +22,7 @@ use agogo_core::fxp::{
     S44, S48, S88, S96, S176, S192, SampleRate, SampleTime, Tempo, f64_bpm_to_tempo,
 };
 use agogo_core::host::{AudioHost, AudioIo, Config};
-use agogo_core::machine::{ChannelSpec, Machine, MachineStopHandle, TransportPolicy};
+use agogo_core::machine::{Machine, MachineStopHandle, TransportPolicy};
 use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
 use agogo_core::time::tick::PPQN;
 use agogo_host_cpal::CpalHost;
@@ -101,28 +101,40 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     // argv boundary: --bpm dies here; downstream sees only Tempo.
     let bpm: Tempo = f64_bpm_to_tempo(args.bpm);
 
-    // Parse all --ch specs eagerly so a malformed entry fails
-    // before any device opens.
-    let channels: Vec<Channel> = args
-        .ch
+    // Parse all --ch specs eagerly (in order, so variable refs
+    // resolve) before any device opens.
+    let named = agogo_core::machine::parse_channels(&args.ch)
+        .map_err(|e| format!("--ch: {e}"))?;
+
+    // Extract the first MIDI port name before consuming specs.
+    let midi_port_request = named
         .iter()
-        .map(|s| {
-            ChannelSpec::parse(s)
-                .and_then(ChannelSpec::into_channel)
-                .map_err(|e| format!("--ch `{s}`: {e}"))
+        .find_map(|(_, spec)| {
+            if matches!(spec.dev, agogo_core::machine::ChannelDev::Midi) {
+                Some(spec.out.clone().unwrap_or_else(|| "default".to_string()))
+            } else {
+                None
+            }
         })
+        .ok_or_else(|| {
+            "no `dev=midi` channels among --ch specs (v0.1 only routes MIDI; \
+             dev=audio is reserved for v0.4)"
+                .to_string()
+        })?;
+
+    let channels: Vec<Channel> = named
+        .into_iter()
+        .map(|(_, spec)| spec.into_channel().map_err(|e| format!("--ch: {e}")))
         .collect::<Result<_, _>>()?;
 
-    // Static rate dispatch. Each arm monomorphises the entire
-    // pipeline (Machine, PhaseSource, CallbackState) at its own
-    // rate. `SampleTime::HZ` is the constant rate identifier.
+    // Static rate dispatch.
     match args.sr {
-        rate if rate == S44::HZ => run_with_rate::<S44>(args, bpm, channels),
-        rate if rate == S48::HZ => run_with_rate::<S48>(args, bpm, channels),
-        rate if rate == S88::HZ => run_with_rate::<S88>(args, bpm, channels),
-        rate if rate == S96::HZ => run_with_rate::<S96>(args, bpm, channels),
-        rate if rate == S176::HZ => run_with_rate::<S176>(args, bpm, channels),
-        rate if rate == S192::HZ => run_with_rate::<S192>(args, bpm, channels),
+        rate if rate == S44::HZ => run_with_rate::<S44>(args, bpm, channels, midi_port_request),
+        rate if rate == S48::HZ => run_with_rate::<S48>(args, bpm, channels, midi_port_request),
+        rate if rate == S88::HZ => run_with_rate::<S88>(args, bpm, channels, midi_port_request),
+        rate if rate == S96::HZ => run_with_rate::<S96>(args, bpm, channels, midi_port_request),
+        rate if rate == S176::HZ => run_with_rate::<S176>(args, bpm, channels, midi_port_request),
+        rate if rate == S192::HZ => run_with_rate::<S192>(args, bpm, channels, midi_port_request),
         other => Err(format!(
             "--sr {other} not supported (allowed: 44100, 48000, 88200, 96000, \
              176400, 192000)"
@@ -139,30 +151,8 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     args: &RunArgs,
     bpm: Tempo,
     channels: Vec<Channel>,
+    midi_port_request: String,
 ) -> Result<(), String> {
-    // Choose first dev=midi spec's port name (or "default") as the
-    // single MIDI sink. Plan 14 v0.1 supports one port shared
-    // across channels; multi-port routing is v0.2 (§Deferred).
-    let midi_port_request = args
-        .ch
-        .iter()
-        .find_map(|s| {
-            // Re-parse to read `dev` / `out`. Cheap — already
-            // validated in `run`. None on parse failure since the
-            // earlier pass would have caught it.
-            ChannelSpec::parse(s).ok().and_then(|spec| {
-                if matches!(spec.dev, agogo_core::machine::ChannelDev::Midi) {
-                    Some(spec.out.unwrap_or_else(|| "default".to_string()))
-                } else {
-                    None
-                }
-            })
-        })
-        .ok_or_else(|| {
-            "no `dev=midi` channels among --ch specs (v0.1 only routes MIDI; \
-             dev=audio is reserved for v0.4)"
-                .to_string()
-        })?;
 
     let midi_port_name = if midi_port_request == "default" {
         MidirSink::list_output_ports()
