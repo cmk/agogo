@@ -26,14 +26,8 @@ pub enum DslErrorKind {
     },
     /// Invalid grid atom (e.g., `T3`, `T1t`).
     InvalidAtom(String),
-    /// Invalid swing resolution (not a valid TBase).
-    InvalidSwingResolution(String),
-    /// Swing amount out of i8 range.
-    SwingAmountOutOfRange(i64),
-    /// Duplicate modifier (e.g., two `~` on the same track).
-    DuplicateModifier(&'static str),
-    /// Offset value out of i32 range.
-    OffsetOutOfRange(i64),
+    /// Unknown variable name — not in the environment.
+    UnknownVariable(String),
     /// Unmatched parenthesis.
     UnmatchedParen,
     /// Nesting depth exceeded (max 32).
@@ -64,18 +58,7 @@ impl std::fmt::Display for DslErrorKind {
                 write!(f, "expected {expected}, found {found}")
             }
             Self::InvalidAtom(s) => write!(f, "invalid grid atom: {s}"),
-            Self::InvalidSwingResolution(s) => {
-                write!(f, "invalid swing resolution: {s}")
-            }
-            Self::SwingAmountOutOfRange(n) => {
-                write!(f, "swing amount {n} out of i8 range")
-            }
-            Self::DuplicateModifier(kind) => {
-                write!(f, "duplicate {kind} modifier")
-            }
-            Self::OffsetOutOfRange(n) => {
-                write!(f, "offset {n} out of i32 range")
-            }
+            Self::UnknownVariable(s) => write!(f, "unknown variable: {s}"),
             Self::UnmatchedParen => write!(f, "unmatched parenthesis"),
             Self::NestingTooDeep => write!(f, "nesting depth exceeds 32"),
         }
