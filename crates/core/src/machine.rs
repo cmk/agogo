@@ -72,10 +72,11 @@ pub struct Machine<R: SampleTime> {
     bar_counters: Vec<u32>,
     /// Per-channel emitted-click counter for `MidiClickAccent`.
     /// Index parallels `channels`. Slot is meaningful only for
-    /// `Channel::Midi { role: MidiRole::Click(_) }` channels. Threaded into
-    /// [`render_midi_click_block`] via `render_channel_block`'s
-    /// `Option<&mut u32>` parameter; advanced once per emitted
-    /// Note On. Reset to 0 when transport stops.
+    /// `Channel::Midi { role: MidiRole::Click(_) }` channels.
+    /// Threaded through [`render_midi_channel`] (audit P3, Plan 21)
+    /// into the click-rendering path via its `Option<&mut u32>`
+    /// counter parameter; advanced once per emitted Note On. Reset
+    /// to 0 when transport stops.
     click_counters: Vec<u32>,
     /// Cross-thread stop signal. `MachineStopHandle::request_stop`
     /// flips this; the next [`Machine::on_buffer`] reads it and
