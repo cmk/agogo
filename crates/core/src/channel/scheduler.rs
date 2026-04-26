@@ -11,7 +11,7 @@
 //! parameter is omitted rather than kept unused; documented in the
 //! sprint's Review section.
 
-use crate::channel::transform::{Channel, MAX_SHIFT, ScheduledEvent, micro_to_samples};
+use crate::channel::transform::{Channel, MAX_DELAY, ScheduledEvent, micro_to_samples};
 use crate::time::conn::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
@@ -78,19 +78,19 @@ pub fn tick_stream_into(
     let buffer_end = buffer_start_sample.saturating_add(frames as u64);
 
     // Inverse of the transform's sample offset: event.sample_index =
-    // stc.inner(swung_tick) + shift_samples + offset_samples. For an
+    // stc.inner(swung_tick) + delay_samples + offset_samples. For an
     // event to land in [start, end), the swung_tick's natural sample
     // must land in [start - delta, end - delta). Same
     // `F12F06 ∘ pico_to_samples` composition as `transform`,
     // routed through `micro_to_samples` so the two stages are
     // impossible to drift.
-    let shift_clamped = Micro(channel.shift.0.clamp(0, MAX_SHIFT.0));
-    let shift_samples: i64 = micro_to_samples(shift_clamped, stc.sr());
+    let delay_clamped = Micro(channel.delay.0.clamp(0, MAX_DELAY.0));
+    let delay_samples: i64 = micro_to_samples(delay_clamped, stc.sr());
     let offset_samples: i64 = micro_to_samples(channel.offset, stc.sr());
     // Promote to i128 so `buffer_start_sample - delta` can't wrap —
     // `buffer_start_sample as i64` would lose the high bit for streams
     // past ~6×10¹² seconds and produce spurious bounds.
-    let delta: i128 = i128::from(shift_samples) + i128::from(offset_samples);
+    let delta: i128 = i128::from(delay_samples) + i128::from(offset_samples);
     let swung_lo_signed = i128::from(buffer_start_sample) - delta;
     let swung_hi_signed = i128::from(buffer_end) - delta;
     let swung_lo = swung_lo_signed.clamp(0, i128::from(u64::MAX)) as u64;
@@ -113,7 +113,7 @@ pub fn tick_stream_into(
     }
 
     // Inlined `transform` pipeline: divider → shuffle → Tick→Sample
-    // → shift → offset, with the window filter applied before
+    // → delay → offset, with the window filter applied before
     // push. Duplicated from `transform` so each accepted event goes
     // straight into `buf` — no intermediate Vec, no heap allocation
     // when `buf` is pre-sized. Change either path's arithmetic and
@@ -121,18 +121,18 @@ pub fn tick_stream_into(
     // `tick_stream_into_matches_transform_filtered` proptests both
     // trip.
     let divisor = channel.divider.tick_count();
-    let shift_fwd = shift_samples.max(0) as u64;
+    let delay_fwd = delay_samples.max(0) as u64;
     for t in (lo_tick..=hi_tick).map(Tick) {
         if t.0 % divisor != 0 {
             continue;
         }
         let swung = swing::effective_tick(&channel.shuffle, t);
         let base = stc.inner(swung);
-        let with_shift = base.saturating_add(shift_fwd);
+        let with_delay = base.saturating_add(delay_fwd);
         let final_sample = if offset_samples >= 0 {
-            with_shift.saturating_add(offset_samples as u64)
+            with_delay.saturating_add(offset_samples as u64)
         } else {
-            with_shift.saturating_sub(offset_samples.unsigned_abs())
+            with_delay.saturating_sub(offset_samples.unsigned_abs())
         };
         if final_sample >= buffer_start_sample && final_sample < buffer_end {
             buf.push(ScheduledEvent {
@@ -165,7 +165,7 @@ mod tests {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
         }
@@ -240,7 +240,7 @@ mod tests {
         #[test]
         fn scheduler_events_in_window(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
-            shift_us in 0_i64..=MAX_SHIFT.0,
+            delay_us in 0_i64..=MAX_DELAY.0,
             offset_us in -5_000_i64..=5_000,
             buffer_start in 0u64..=1_000_000,
             frames in 1usize..=8_192,
@@ -249,7 +249,7 @@ mod tests {
                 mode: ChannelMode::MidiClock,
                 divider,
                 shuffle,
-                shift: Micro(shift_us),
+                delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
             };
@@ -284,7 +284,7 @@ mod tests {
         #[test]
         fn tick_stream_into_matches_transform_filtered(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
-            shift_us in 0_i64..=MAX_SHIFT.0,
+            delay_us in 0_i64..=MAX_DELAY.0,
             offset_us in -5_000_i64..=5_000,
             buffer_start in 0u64..=1_000_000,
             frames in 1usize..=8_192,
@@ -295,7 +295,7 @@ mod tests {
                 mode: ChannelMode::MidiClock,
                 divider,
                 shuffle,
-                shift: Micro(shift_us),
+                delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
             };
@@ -328,7 +328,7 @@ mod tests {
         #[test]
         fn tick_stream_into_no_realloc(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
-            shift_us in 0_i64..=MAX_SHIFT.0,
+            delay_us in 0_i64..=MAX_DELAY.0,
             offset_us in -5_000_i64..=5_000,
             buffer_start in 0u64..=1_000_000,
             frames in 1usize..=8_192,
@@ -337,7 +337,7 @@ mod tests {
                 mode: ChannelMode::MidiClock,
                 divider,
                 shuffle,
-                shift: Micro(shift_us),
+                delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
             };
@@ -364,7 +364,7 @@ mod tests {
         #[test]
         fn scheduler_block_equivalence(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
-            shift_us in 0_i64..=MAX_SHIFT.0,
+            delay_us in 0_i64..=MAX_DELAY.0,
             offset_us in -5_000_i64..=5_000,
             buf_size in 64usize..=2_048,
             n_buffers in 1usize..=16,
@@ -373,7 +373,7 @@ mod tests {
                 mode: ChannelMode::MidiClock,
                 divider,
                 shuffle,
-                shift: Micro(shift_us),
+                delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
             };

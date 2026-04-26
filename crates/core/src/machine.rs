@@ -39,7 +39,7 @@ pub use spec::{ChannelDev, ChannelSpec, ChannelSpecError};
 /// thereafter except via the [`MachineStopHandle`].
 pub struct Machine<R: SampleTime> {
     /// All channels share one PhaseSource and one tick→sample
-    /// conversion. Per-channel divider/swing/shift live inside each
+    /// conversion. Per-channel divider/swing/delay live inside each
     /// [`Channel`].
     pub channels: Vec<Channel>,
     /// Sample-rate-typed phase source. `R: SampleTime` binds the
@@ -329,7 +329,7 @@ mod tests {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
         }

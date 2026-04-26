@@ -68,11 +68,10 @@ pub struct RunArgs {
     #[bpaf(long, argument("DEVICE"), fallback("default".to_string()))]
     pub audio_in: String,
     /// Per-channel spec, repeatable. One `--ch` per channel.
-    /// Format: `key=val[,key=val]*`. Required keys: `div`, `dev`.
-    /// Optional: `id`, `out`, `swing` (i8 tick offset),
-    /// `swing-res` (binary resolution, default `t16`), `shift-ms`,
-    /// `offset-ms`, `snap-quantum-us`. Quote values containing
-    /// spaces or commas: `--ch "out=IAC Bus 1,div=t32t,dev=midi"`.
+    /// Format: `key=val[,key=val]*`. Required keys: `grid`, `dev`.
+    /// Optional: `id`, `out`, `delay` (latency compensation in ms),
+    /// `snap-quantum-us`. Quote values containing spaces or commas:
+    /// `--ch "out=IAC Bus 1,grid=t32t,dev=midi"`.
     #[bpaf(long, argument("SPEC"), many)]
     pub ch: Vec<String>,
     /// Link quantum in beats. Required when `--source link`;
@@ -95,7 +94,7 @@ pub struct RunArgs {
 pub fn run(args: &RunArgs) -> Result<(), String> {
     if args.ch.is_empty() {
         return Err("at least one --ch <spec> is required (try `--ch \
-                    dev=midi,div=t32t,out=default`)"
+                    dev=midi,grid=t32t,out=default`)"
             .to_string());
     }
 
@@ -394,7 +393,7 @@ mod tests {
     /// rejected at parse time.
     #[test]
     fn run_rejects_dev_audio() {
-        let args = args_with(vec!["dev=audio,div=t32t"], 48_000);
+        let args = args_with(vec!["dev=audio,grid=t32t"], 48_000);
         let err = run(&args).unwrap_err();
         assert!(
             err.contains("dev=audio") && err.contains("v0.4"),
@@ -406,7 +405,7 @@ mod tests {
     /// error before any device opens, with the allowlist enumerated.
     #[test]
     fn run_rejects_unsupported_rate() {
-        let args = args_with(vec!["dev=midi,div=t32t,out=default"], 22_050);
+        let args = args_with(vec!["dev=midi,grid=t32t,out=default"], 22_050);
         let err = run(&args).unwrap_err();
         assert!(
             err.contains("22050") && err.contains("44100"),
@@ -418,7 +417,7 @@ mod tests {
     /// time with the offending key.
     #[test]
     fn run_surfaces_channel_spec_parse_errors() {
-        let args = args_with(vec!["dev=midi,div=t32t,unknown=x"], 48_000);
+        let args = args_with(vec!["dev=midi,grid=t32t,unknown=x"], 48_000);
         let err = run(&args).unwrap_err();
         assert!(
             err.contains("unknown") && err.contains("--ch"),
