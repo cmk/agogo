@@ -166,13 +166,20 @@ pub fn render_midi_click_block(
     counter: &mut u32,
     sink: &dyn MidiSink,
 ) {
+    let ch_byte: u8 = cfg.ch.into();
     for ev in events {
         let (n, v) = match cfg.accent {
             Some(a) if *counter % a.every.get() == 0 => (a.note, a.vel),
             _ => (cfg.note, cfg.vel),
         };
-        sink.send_at(&[MIDI_NOTE_ON | cfg.ch, n, v], ev.sample_index);
-        sink.send_at(&[MIDI_NOTE_OFF | cfg.ch, n, 0], ev.sample_index);
+        sink.send_at(
+            &[MIDI_NOTE_ON | ch_byte, n.into(), v.into()],
+            ev.sample_index,
+        );
+        sink.send_at(
+            &[MIDI_NOTE_OFF | ch_byte, n.into(), 0],
+            ev.sample_index,
+        );
         *counter = counter.wrapping_add(1);
     }
 }
@@ -427,6 +434,7 @@ mod tests {
 
     use crate::channel::{Channel, ChannelMode, scheduler::tick_stream};
     use crate::fxp::{Micro, Tempo};
+    use crate::midi::U7;
     use crate::time::conn::SampleTickConn;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
@@ -474,7 +482,7 @@ mod tests {
                 ChannelMode::Din,
                 ChannelMode::AnalogPulse,
                 ChannelMode::AnalogLfo,
-                ChannelMode::MidiCc { cc: 74, range: (0, 127) },
+                ChannelMode::MidiCc { cc: U7(74), range: (U7(0), U7(127)) },
             ]),
             samples in prop::collection::vec(any::<u64>(), 0..16),
             transport in prop::option::of(prop::sample::select(&[
@@ -523,13 +531,14 @@ mod tests {
     // ── render_midi_click_block ───────────────────────────────────
 
     use crate::channel::mode::{ClickConfig, MidiClickAccent, MidiClickConfig};
+    use crate::midi::U4;
     use core::num::NonZeroU32;
 
     fn click_cfg(note: u8, vel: u8, ch: u8, accent: Option<MidiClickAccent>) -> MidiClickConfig {
         MidiClickConfig {
-            note,
-            vel,
-            ch,
+            note: U7::new(note).expect("test value: note in 0..=127"),
+            vel: U7::new(vel).expect("test value: vel in 0..=127"),
+            ch: U4::new(ch).expect("test value: ch in 0..=15"),
             accent,
         }
     }
@@ -560,8 +569,8 @@ mod tests {
         // accent=4: counter 0,4,8,... use accent values; others use base.
         let accent = MidiClickAccent {
             every: NonZeroU32::new(4).unwrap(),
-            note: 38,
-            vel: 120,
+            note: U7(38),
+            vel: U7(120),
         };
         let cfg = click_cfg(37, 70, 9, Some(accent));
         // 5 events covers counter 0..4 — one full accent period plus one.
@@ -618,8 +627,8 @@ mod tests {
         ) {
             let accent = MidiClickAccent {
                 every: NonZeroU32::new(every).unwrap(),
-                note: accent_note,
-                vel: accent_vel,
+                note: U7(accent_note),
+                vel: U7(accent_vel),
             };
             let cfg = click_cfg(note, vel, ch, Some(accent));
             let all_evs: Vec<ScheduledEvent> =
@@ -723,8 +732,8 @@ mod tests {
         ) {
             let accent = MidiClickAccent {
                 every: NonZeroU32::new(n).unwrap(),
-                note: 38,
-                vel: 120,
+                note: U7(38),
+                vel: U7(120),
             };
             let cfg = click_cfg(37, 70, 9, Some(accent));
             let evs: Vec<ScheduledEvent> = (0..event_count as u64).map(ev).collect();
