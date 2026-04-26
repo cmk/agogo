@@ -5,7 +5,9 @@
 //!
 //! Required keys: `dev`. Optional keys: `grid` (DSL expression,
 //! default `T4`), `id`, `out`, `swing` (`[TBase:]i8`, default
-//! `T8:0`), `offset` (signed `i32` ticks), `delay` (ms),
+//! `T8:0`), `offset` (signed `i32` ticks — **note:** non-zero
+//! values are currently rejected until the tempo-dependent
+//! Tick→Micro conversion is wired), `delay` (ms),
 //! `snap-quantum-us`. Unknown keys are hard errors so typos are
 //! caught early.
 //!

@@ -262,3 +262,91 @@ Fixed — removed `InvalidAtom` from `DslErrorKind`. The parser now falls back t
 #### ↳ cmk ([2026-04-26 04:37 UTC](https://github.com/cmk/agogo/pull/20#discussion_r3142986663))
 
 Fixed — "five" → "six".
+
+<!-- gh-id: 3142994586 -->
+### Copilot on [`crates/cli/src/run.rs:108`](https://github.com/cmk/agogo/pull/20#discussion_r3142994586) (2026-04-26 04:46 UTC)
+
+`parse_channels(&args.ch)` failures are still surfaced as `--ch: {e}`, but `ChannelSpecError` doesn’t include which `--ch` entry (index/text/id) caused the failure. This makes it hard to locate malformed specs or unknown-variable errors when multiple channels are provided. Consider attaching per-entry context (index and/or original spec string, or the parsed/auto-assigned id when available) when returning/formatting the error.
+```suggestion
+    let named = match agogo_core::machine::parse_channels(&args.ch) {
+        Ok(named) => named,
+        Err(e) => {
+            let failing_entry = (0..args.ch.len()).find_map(|idx| {
+                agogo_core::machine::parse_channels(&args.ch[..=idx])
+                    .err()
+                    .map(|_| (idx, args.ch[idx].as_str()))
+            });
+
+            match failing_entry {
+                Some((idx, spec)) => return Err(format!("--ch[{idx}] `{spec}`: {e}")),
+                None => return Err(format!("--ch: {e}")),
+            }
+        }
+    };
+```
+
+<!-- gh-id: 4176533202 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-26 04:46 UTC](https://github.com/cmk/agogo/pull/20#pullrequestreview-4176533202))
+
+## Pull request overview
+
+Copilot reviewed 12 out of 12 changed files in this pull request and generated 4 comments.
+
+
+
+
+
+<!-- gh-id: 3142994597 -->
+### Copilot on [`crates/core/src/machine/spec.rs:10`](https://github.com/cmk/agogo/pull/20#discussion_r3142994597) (2026-04-26 04:46 UTC)
+
+The module docs list `offset` as a supported key, but `into_channel` currently rejects any non-zero `offset_ticks` (tempo-dependent Tick→Micro conversion not implemented). This is likely to surprise users who see `offset=` advertised and then get a runtime error. Consider documenting this limitation in the header comment (and/or in the `offset` key docs) until the conversion path is implemented.
+
+<!-- gh-id: 3142994607 -->
+### Copilot on [`doc/plans/plan-2026-04-25-02.md:59`](https://github.com/cmk/agogo/pull/20#discussion_r3142994607) (2026-04-26 04:46 UTC)
+
+The CLI example includes `offset=20`, but the current implementation rejects any non-zero `offset` until tempo-dependent Tick→Micro conversion is implemented. Consider adding a note here (or adjusting the example) so the plan/record matches current behavior.
+
+<!-- gh-id: 3142994612 -->
+### Copilot on [`crates/core/src/dsl.rs:301`](https://github.com/cmk/agogo/pull/20#discussion_r3142994612) (2026-04-26 04:46 UTC)
+
+In `display_parse_round_trip`, the `(Err(_), Err(_)) => {}` branch treats “both failed” as success. Since `arb_expr()` only generates valid operators/leaves and the test provides `x` in the env, eval/parse are expected to succeed; allowing both to error can mask regressions where `Display` emits invalid syntax or the parser becomes overly strict. Consider asserting both results are `Ok` (or at least asserting matching `DslErrorKind`/span) so the property reliably fails on regressions.
+```suggestion
+                (Ok(e), Err(err)) => {
+                    return Err(TestCaseError::fail(format!(
+                        "round-trip parse failed for displayed expression {displayed:?}; \
+                         eval succeeded with {e:?}, parse error: {err}"
+                    )));
+                }
+                (Err(err), Ok(r)) => {
+                    return Err(TestCaseError::fail(format!(
+                        "evaluation failed for original expression rendered as {displayed:?}; \
+                         eval error: {err}, reparsed to {r:?}"
+                    )));
+                }
+                (Err(err_expected), Err(err_reparsed)) => {
+                    return Err(TestCaseError::fail(format!(
+                        "expected display/eval round-trip to succeed for {displayed:?}, \
+                         but both sides failed: eval error: {err_expected}; parse error: {err_reparsed}"
+                    )));
+                }
+```
+
+<!-- gh-id: 3143027004 -->
+#### ↳ cmk ([2026-04-26 05:24 UTC](https://github.com/cmk/agogo/pull/20#discussion_r3143027004))
+
+Fixed — adopted the incremental re-parse approach to locate the failing entry. Error now includes index and spec text: `--ch[{idx}] \`{spec}\`: {e}`.
+
+<!-- gh-id: 3143027117 -->
+#### ↳ cmk ([2026-04-26 05:24 UTC](https://github.com/cmk/agogo/pull/20#discussion_r3143027117))
+
+Fixed — module docs now note that non-zero offset is rejected until the tempo-dependent Tick→Micro conversion is wired.
+
+<!-- gh-id: 3143027282 -->
+#### ↳ cmk ([2026-04-26 05:24 UTC](https://github.com/cmk/agogo/pull/20#discussion_r3143027282))
+
+Fixed — removed `offset=20` from the plan example.
+
+<!-- gh-id: 3143027397 -->
+#### ↳ cmk ([2026-04-26 05:25 UTC](https://github.com/cmk/agogo/pull/20#discussion_r3143027397))
+
+Fixed — the (Err, Err) branch now fails with both error messages instead of silently passing. Since arb_expr only generates valid trees with "x" in the env, both sides should always succeed; mutual failure indicates a regression.

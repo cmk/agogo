@@ -288,7 +288,6 @@ mod tests {
             let reparsed = parse(&displayed, &env);
             match (expected, reparsed) {
                 (Ok(e), Ok(r)) => prop_assert_eq!(r, e),
-                (Err(_), Err(_)) => {} // both fail = consistent
                 (Ok(e), Err(err)) => {
                     return Err(TestCaseError::fail(format!(
                         "eval OK ({e:?}) but reparse failed: {err}"
@@ -297,6 +296,12 @@ mod tests {
                 (Err(err), Ok(r)) => {
                     return Err(TestCaseError::fail(format!(
                         "eval failed ({err}) but reparse OK: {r:?}"
+                    )));
+                }
+                (Err(err_eval), Err(err_parse)) => {
+                    return Err(TestCaseError::fail(format!(
+                        "both eval and reparse failed for {displayed:?}: \
+                         eval: {err_eval}; parse: {err_parse}"
                     )));
                 }
             }

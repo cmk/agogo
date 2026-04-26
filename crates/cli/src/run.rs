@@ -103,8 +103,21 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     // Parse all --ch specs eagerly (in order, so variable refs
     // resolve) before any device opens.
-    let named = agogo_core::machine::parse_channels(&args.ch)
-        .map_err(|e| format!("--ch: {e}"))?;
+    let named = match agogo_core::machine::parse_channels(&args.ch) {
+        Ok(named) => named,
+        Err(e) => {
+            let failing_entry = (0..args.ch.len()).find_map(|idx| {
+                agogo_core::machine::parse_channels(&args.ch[..=idx])
+                    .err()
+                    .map(|_| (idx, args.ch[idx].as_str()))
+            });
+
+            match failing_entry {
+                Some((idx, spec)) => return Err(format!("--ch[{idx}] `{spec}`: {e}")),
+                None => return Err(format!("--ch: {e}")),
+            }
+        }
+    };
 
     // Extract the first MIDI port name before consuming specs.
     let midi_port_request = named
