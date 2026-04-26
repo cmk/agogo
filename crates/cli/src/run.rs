@@ -123,11 +123,14 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     // Audit P4 (Plan 22): every spec is implicitly MIDI-targeted —
     // `dev=audio` is rejected at parse time, so by here the only
     // routing target is MIDI. The pre-P4 dev-filter collapses to
-    // "first spec's `out`."
+    // "first spec's `out`." Returns `Err` if `named` is somehow empty
+    // (the `args.ch.is_empty()` guard at line 95 makes this
+    // structurally unreachable today, but `?` keeps the function
+    // graceful if a future caller path bypasses that guard).
     let midi_port_request = named
         .first()
-        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()))
-        .expect("at least one --ch spec required (checked above)");
+        .ok_or_else(|| "at least one --ch spec is required".to_string())
+        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()))?;
 
     let channels: Vec<Channel> = named
         .into_iter()
