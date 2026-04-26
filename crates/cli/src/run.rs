@@ -120,20 +120,14 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     };
 
     // Extract the first MIDI port name before consuming specs.
+    // Audit P4 (Plan 22): every spec is implicitly MIDI-targeted —
+    // `dev=audio` is rejected at parse time, so by here the only
+    // routing target is MIDI. The pre-P4 dev-filter collapses to
+    // "first spec's `out`."
     let midi_port_request = named
-        .iter()
-        .find_map(|(_, spec)| {
-            if matches!(spec.dev, agogo_core::machine::ChannelDev::Midi) {
-                Some(spec.out.clone().unwrap_or_else(|| "default".to_string()))
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| {
-            "no `dev=midi` channels among --ch specs (v0.1 only routes MIDI; \
-             dev=audio is reserved for v0.4)"
-                .to_string()
-        })?;
+        .first()
+        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()))
+        .expect("at least one --ch spec required (checked above)");
 
     let channels: Vec<Channel> = named
         .into_iter()
@@ -404,6 +398,29 @@ mod tests {
         assert!(
             err.contains("dev=audio") && err.contains("v0.4"),
             "expected dev=audio v0.4 message, got: {err}"
+        );
+    }
+
+    /// Plan 22 (audit P4): post-field-removal, every spec is
+    /// implicitly MIDI-targeted. Verify the minimal MIDI spec
+    /// reaches the rate-dispatch gate (the next thing that can
+    /// fail in `run`'s pre-flight, intentionally tripped here by
+    /// using an unsupported rate so the test doesn't try to open
+    /// real hardware). The error originating from rate dispatch
+    /// — not from a dev/spec rejection — confirms parse cleared.
+    #[test]
+    fn run_accepts_minimal_midi_spec_through_to_rate_dispatch() {
+        let args = args_with(vec!["dev=midi,grid=t32t,out=default"], 22_050);
+        let err = run(&args).unwrap_err();
+        // Parse succeeded — the failure must come from the
+        // SampleTime allowlist, not from spec/dev rejection.
+        assert!(
+            err.contains("22050"),
+            "expected rate-dispatch error indicating parse cleared, got: {err}"
+        );
+        assert!(
+            !err.contains("dev=") && !err.contains("MissingKey"),
+            "expected no dev/parse error, got: {err}"
         );
     }
 
