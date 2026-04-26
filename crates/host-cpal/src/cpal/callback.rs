@@ -87,6 +87,7 @@ mod tests {
             delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
+            bar_multiplier: None,
         };
         let machine = Machine::<S48>::new(
             vec![channel],

@@ -4,11 +4,17 @@
 //! separate; values may be quoted `"..."` to embed spaces or commas.
 //!
 //! Required keys: `dev`. Optional keys: `grid` (DSL expression,
-//! default `T4`), `id`, `out`, `swing` (`[TBase:]i8`, default
-//! `T8:0`), `offset` (signed `i32` ticks — **note:** non-zero
-//! values are currently rejected until the tempo-dependent
-//! Tick→Micro conversion is wired), `delay` (ms),
-//! `snap-quantum-us`. Unknown keys are hard errors so typos are
+//! default `T4`), `id`, `out`, `mode` (`clock`|`click`, default
+//! `clock` — see Plan 2026-04-25-03), `swing` (`[TBase:]i8`,
+//! default `T8:0`), `offset` (signed `i32` ticks — **note:**
+//! non-zero values are currently rejected until the
+//! tempo-dependent Tick→Micro conversion is wired), `delay` (ms),
+//! `snap-quantum-us`, `bars` (divider-agnostic period multiplier:
+//! keep every `N`-th scheduled event; `grid=t1` is the idiomatic
+//! "bars" case — see Plan 2026-04-25-03). `mode=click` adds:
+//! `note`, `vel` (required), `mch` (default 10), `accent-every`
+//! (optional; if set, requires `accent-vel` and optionally
+//! `accent-note`). Unknown keys are hard errors so typos are
 //! caught early.
 //!
 //! The `grid` value is parsed via `dsl::parse` with a channel
@@ -21,8 +27,10 @@
 //! `f64` field (`delay_ms`) crosses via the `F64F06` Conn per CLAUDE.md
 //! float exception 4.
 
+use core::num::{NonZeroU16, NonZeroU32};
 use std::fmt::{self, Display};
 
+use crate::channel::mode::{ClickConfig, MidiClickAccent, MidiClickConfig};
 use crate::channel::transform::MAX_DELAY;
 use crate::channel::{Channel, ChannelMode};
 use crate::dsl;
@@ -42,6 +50,12 @@ pub struct ChannelSpec {
     pub out: Option<String>,
     /// Grid — resolved from a DSL expression at parse time.
     pub grid: Grid,
+    /// Per-channel output role. Default `ChannelMode::MidiClock`;
+    /// `mode=click` produces
+    /// `ChannelMode::Click(ClickConfig::Midi(_))`. Reusing the
+    /// runtime enum keeps spec/runtime in sync without a parallel
+    /// type hierarchy.
+    pub mode: ChannelMode,
     /// Swing configuration. Default: `T8:0` (no swing at eighth-note
     /// resolution).
     pub swing: SwingConfig,
@@ -52,6 +66,11 @@ pub struct ChannelSpec {
     pub delay_ms: f64, // argv boundary
     /// Optional quantum snap, in microseconds (Link-aware channels).
     pub snap_to_quantum_micro: Option<i64>,
+    /// Per-channel `bar_multiplier`. Plan 2026-04-25-03: emit every
+    /// `N`-th `tick_stream` event; divider-agnostic ("bars" reflects
+    /// the most idiomatic `grid=t1` case but the mechanism applies
+    /// to any grid).
+    pub bars: Option<NonZeroU16>,
 }
 
 /// Output device kind for a channel.
@@ -106,6 +125,19 @@ impl ChannelSpec {
         let mut delay_ms: f64 = 0.0; // argv boundary
         let mut snap_to_quantum_micro: Option<i64> = None;
 
+        // Plan 2026-04-25-03 keys. Defer mode/click validation until
+        // after the loop: cross-key constraints (mode=click requires
+        // note+vel; clock rejects click keys) are easier to enforce
+        // in one pass at the end.
+        let mut mode_kw: Option<&'static str> = None; // "clock" | "click"
+        let mut note: Option<u8> = None;
+        let mut vel: Option<u8> = None;
+        let mut mch_one_based: Option<u8> = None;
+        let mut accent_every: Option<u32> = None;
+        let mut accent_note: Option<u8> = None;
+        let mut accent_vel: Option<u8> = None;
+        let mut bars: Option<NonZeroU16> = None;
+
         for (k, v) in pairs {
             match k.as_str() {
                 "id" => id = Some(v),
@@ -121,6 +153,98 @@ impl ChannelSpec {
                 "out" => out = Some(v),
                 "grid" => {
                     grid_str = Some(v);
+                }
+                "mode" => {
+                    mode_kw = Some(match v.as_str() {
+                        "clock" => "clock",
+                        "click" => "click",
+                        other => {
+                            return Err(ChannelSpecError::BadValue(
+                                "mode",
+                                format!("expected `clock` or `click`, got `{other}`"),
+                            ));
+                        }
+                    });
+                }
+                "note" => {
+                    let n = v
+                        .parse::<u8>()
+                        .map_err(|e| ChannelSpecError::BadValue("note", e.to_string()))?;
+                    if n > 127 {
+                        return Err(ChannelSpecError::BadValue(
+                            "note",
+                            format!("must be 0..=127, got {n}"),
+                        ));
+                    }
+                    note = Some(n);
+                }
+                "vel" => {
+                    let n = v
+                        .parse::<u8>()
+                        .map_err(|e| ChannelSpecError::BadValue("vel", e.to_string()))?;
+                    if n == 0 || n > 127 {
+                        return Err(ChannelSpecError::BadValue(
+                            "vel",
+                            format!("must be 1..=127 (vel=0 is Note Off), got {n}"),
+                        ));
+                    }
+                    vel = Some(n);
+                }
+                "mch" => {
+                    let n = v
+                        .parse::<u8>()
+                        .map_err(|e| ChannelSpecError::BadValue("mch", e.to_string()))?;
+                    if !(1..=16).contains(&n) {
+                        return Err(ChannelSpecError::BadValue(
+                            "mch",
+                            format!("must be 1..=16 (user-facing), got {n}"),
+                        ));
+                    }
+                    mch_one_based = Some(n);
+                }
+                "accent-every" => {
+                    let n = v
+                        .parse::<u32>()
+                        .map_err(|e| ChannelSpecError::BadValue("accent-every", e.to_string()))?;
+                    if n == 0 {
+                        return Err(ChannelSpecError::BadValue(
+                            "accent-every",
+                            "must be > 0".into(),
+                        ));
+                    }
+                    accent_every = Some(n);
+                }
+                "accent-note" => {
+                    let n = v
+                        .parse::<u8>()
+                        .map_err(|e| ChannelSpecError::BadValue("accent-note", e.to_string()))?;
+                    if n > 127 {
+                        return Err(ChannelSpecError::BadValue(
+                            "accent-note",
+                            format!("must be 0..=127, got {n}"),
+                        ));
+                    }
+                    accent_note = Some(n);
+                }
+                "accent-vel" => {
+                    let n = v
+                        .parse::<u8>()
+                        .map_err(|e| ChannelSpecError::BadValue("accent-vel", e.to_string()))?;
+                    if n == 0 || n > 127 {
+                        return Err(ChannelSpecError::BadValue(
+                            "accent-vel",
+                            format!("must be 1..=127 (vel=0 is Note Off), got {n}"),
+                        ));
+                    }
+                    accent_vel = Some(n);
+                }
+                "bars" => {
+                    let n = v
+                        .parse::<u16>()
+                        .map_err(|e| ChannelSpecError::BadValue("bars", e.to_string()))?;
+                    bars = Some(NonZeroU16::new(n).ok_or_else(|| {
+                        ChannelSpecError::BadValue("bars", "must be > 0".into())
+                    })?);
                 }
                 "swing" => {
                     swing = parse_swing(&v)?;
@@ -158,24 +282,102 @@ impl ChannelSpec {
         let grid = dsl::parse(grid_expr, env)
             .map_err(|e| ChannelSpecError::BadValue("grid", e.to_string()))?;
 
+        // Cross-key validation: assemble `mode` from the per-key
+        // values according to the mode= keyword. Defaults to
+        // ChannelMode::MidiClock if mode= absent.
+        let mode = match mode_kw.unwrap_or("clock") {
+            "clock" => {
+                // Reject click-only keys when mode is clock — they're
+                // silently ignored otherwise, which hides typos.
+                // Each first element is a string literal (`&'static
+                // str`), which `BadValue`'s first param requires.
+                const CLICK_ONLY_KEYS: &[&str] = &[
+                    "note",
+                    "vel",
+                    "mch",
+                    "accent-every",
+                    "accent-note",
+                    "accent-vel",
+                ];
+                let presence = [
+                    note.is_some(),
+                    vel.is_some(),
+                    mch_one_based.is_some(),
+                    accent_every.is_some(),
+                    accent_note.is_some(),
+                    accent_vel.is_some(),
+                ];
+                for (i, &key) in CLICK_ONLY_KEYS.iter().enumerate() {
+                    if presence[i] {
+                        return Err(ChannelSpecError::BadValue(
+                            key,
+                            "only valid with mode=click".into(),
+                        ));
+                    }
+                }
+                ChannelMode::MidiClock
+            }
+            "click" => {
+                let note = note.ok_or(ChannelSpecError::MissingKey("note"))?;
+                let vel = vel.ok_or(ChannelSpecError::MissingKey("vel"))?;
+                let mch = mch_one_based.unwrap_or(10); // GM drum default
+                let accent = match accent_every {
+                    Some(e) => {
+                        let av =
+                            accent_vel.ok_or(ChannelSpecError::MissingKey("accent-vel"))?;
+                        let an = accent_note.unwrap_or(note);
+                        Some(MidiClickAccent {
+                            // SAFETY: e > 0 enforced at parse time.
+                            every: NonZeroU32::new(e).expect("accent-every > 0"),
+                            note: an,
+                            vel: av,
+                        })
+                    }
+                    None => {
+                        // accent-vel and accent-note alone (without
+                        // accent-every) are dead config — call them
+                        // out to catch typos.
+                        if accent_vel.is_some() || accent_note.is_some() {
+                            return Err(ChannelSpecError::BadValue(
+                                "accent-every",
+                                "required when accent-vel or accent-note is set".into(),
+                            ));
+                        }
+                        None
+                    }
+                };
+                ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
+                    note,
+                    vel,
+                    ch: mch - 1,
+                    accent,
+                }))
+            }
+            _ => unreachable!("mode_kw is constrained to clock|click at parse"),
+        };
+
         Ok(Self {
             id,
             dev: dev.ok_or(ChannelSpecError::MissingKey("dev"))?,
             out,
             grid,
+            mode,
             swing,
             offset_ticks,
             delay_ms,
             snap_to_quantum_micro,
+            bars,
         })
     }
 
     /// Convert the parsed spec into the runtime [`Channel`] type.
     pub fn into_channel(self) -> Result<Channel, ChannelSpecError> {
-        let mode = match self.dev {
-            ChannelDev::Midi => ChannelMode::MidiClock,
-            ChannelDev::Audio => return Err(ChannelSpecError::AudioDeferred),
-        };
+        // dev=audio is reserved for v0.4. The mode/click validation
+        // already happened in `parse`, so by here `self.mode` is the
+        // ready-to-use ChannelMode (MidiClock or Click(...)).
+        if matches!(self.dev, ChannelDev::Audio) {
+            return Err(ChannelSpecError::AudioDeferred);
+        }
         // argv boundary: delay (ms) crosses into Micro via F64F06.
         let delay = match micro_from_ms(self.delay_ms) {
             Some(m) => Micro(m.0.clamp(0, MAX_DELAY.0)),
@@ -202,7 +404,7 @@ impl ChannelSpec {
         }
 
         Ok(Channel {
-            mode,
+            mode: self.mode,
             divider: self.grid,
             shuffle: self.swing,
             delay,
@@ -210,6 +412,7 @@ impl ChannelSpec {
             snap_to_quantum: self
                 .snap_to_quantum_micro
                 .map(|m| crate::fxp::Quantum(Micro(m))),
+            bar_multiplier: self.bars,
         })
     }
 }
@@ -300,6 +503,35 @@ impl Display for ChannelSpec {
         if let Some(out) = &self.out {
             write!(f, ",out={}", quote_if_needed(out))?;
         }
+        // mode + click keys: emit only when non-default (MidiClock
+        // is the implicit default, so it's omitted).
+        match &self.mode {
+            ChannelMode::MidiClock => {}
+            ChannelMode::Click(ClickConfig::Midi(cfg)) => {
+                write!(
+                    f,
+                    ",mode=click,note={},vel={},mch={}",
+                    cfg.note,
+                    cfg.vel,
+                    cfg.ch + 1, // user-facing 1-based
+                )?;
+                if let Some(a) = &cfg.accent {
+                    write!(f, ",accent-every={},accent-vel={}", a.every, a.vel)?;
+                    // `accent-note` defaults to `note` at parse;
+                    // emit it only when it differs so the round-trip
+                    // doesn't introduce a redundant key.
+                    if a.note != cfg.note {
+                        write!(f, ",accent-note={}", a.note)?;
+                    }
+                }
+            }
+            // Other ChannelMode variants aren't constructable through
+            // the parser today.
+            ChannelMode::Din
+            | ChannelMode::AnalogPulse
+            | ChannelMode::AnalogLfo
+            | ChannelMode::MidiCc { .. } => {}
+        }
         if self.swing.amount != 0 || self.swing.resolution != TBase::T8 {
             if self.swing.resolution == TBase::T8 {
                 write!(f, ",swing={}", self.swing.amount)?;
@@ -315,6 +547,9 @@ impl Display for ChannelSpec {
         }
         if let Some(q) = self.snap_to_quantum_micro {
             write!(f, ",snap-quantum-us={}", q)?;
+        }
+        if let Some(b) = self.bars {
+            write!(f, ",bars={}", b)?;
         }
         Ok(())
     }
@@ -656,6 +891,52 @@ mod tests {
         prop::sample::select(TBase::ALL.as_slice())
     }
 
+    /// Generate a `ChannelMode` reachable from the spec parser:
+    /// `MidiClock` or `Click(ClickConfig::Midi(_))` with arbitrary
+    /// note/vel/ch and an optional accent.
+    ///
+    /// `accent.every` spans the full `NonZeroU32` domain — the
+    /// round-trip property is u32-shape-preserving (parse-as-u32,
+    /// Display via `Display for NonZeroU32`), so the entire domain
+    /// is safe to sample. Per CLAUDE.md: don't bound to "keep
+    /// things small," only to avoid documented hazards.
+    fn arb_mode() -> impl Strategy<Value = ChannelMode> {
+        let click = (
+            0u8..=127,
+            1u8..=127,
+            0u8..=15,
+            prop::option::of((
+                any::<u32>().prop_filter("every > 0", |&n| n > 0),
+                0u8..=127,
+                1u8..=127,
+            )),
+        )
+            .prop_map(|(note, vel, ch, accent_triple)| {
+                let accent = accent_triple.map(|(every, an, av)| MidiClickAccent {
+                    every: NonZeroU32::new(every).unwrap(),
+                    note: an,
+                    vel: av,
+                });
+                ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
+                    note,
+                    vel,
+                    ch,
+                    accent,
+                }))
+            });
+        prop_oneof![Just(ChannelMode::MidiClock), click]
+    }
+
+    /// Full `NonZeroU16` domain for `bars` — same justification as
+    /// `arb_mode`'s `every`: parser is u16-shape-preserving, no
+    /// arithmetic hazards in the round-trip path.
+    fn arb_bars() -> impl Strategy<Value = Option<NonZeroU16>> {
+        prop::option::of(
+            any::<u16>().prop_filter("bars > 0", |&n| n > 0)
+                .prop_map(|n| NonZeroU16::new(n).unwrap()),
+        )
+    }
+
     fn arb_spec() -> impl Strategy<Value = ChannelSpec> {
         (
             arb_dev(),
@@ -667,14 +948,29 @@ mod tests {
             any::<i32>(),
             (0u32..=300).prop_map(|n| n as f64),
             prop::option::of(any::<i32>().prop_map(|n| n as i64)),
+            arb_mode(),
+            arb_bars(),
         )
             .prop_map(
-                |(dev, grid, id, out, swing_res, swing_amt, offset_ticks, delay_ms, snap)| {
+                |(
+                    dev,
+                    grid,
+                    id,
+                    out,
+                    swing_res,
+                    swing_amt,
+                    offset_ticks,
+                    delay_ms,
+                    snap,
+                    mode,
+                    bars,
+                )| {
                     ChannelSpec {
                         id,
                         dev,
                         out,
                         grid,
+                        mode,
                         swing: SwingConfig {
                             resolution: swing_res,
                             amount: swing_amt,
@@ -682,18 +978,208 @@ mod tests {
                         offset_ticks,
                         delay_ms,
                         snap_to_quantum_micro: snap,
+                        bars,
                     }
                 },
             )
     }
 
     proptest! {
+        /// Plan 14 property `spec_round_trip`: the `Display` impl
+        /// emits parser-stable output, so `parse(spec.to_string())`
+        /// recovers the same spec for every value the strategy
+        /// generates. Plan 2026-04-25-03 extends the strategy with
+        /// `mode=click` (note/vel/mch/accent-*) and `bars` so
+        /// round-trip pins both the existing and new keys.
         #[test]
         fn spec_round_trip(spec in arb_spec()) {
             let s = spec.to_string();
             let parsed = ChannelSpec::parse(&s, &[])
                 .map_err(|e| TestCaseError::fail(format!("parse `{}`: {}", s, e)))?;
             prop_assert_eq!(parsed, spec);
+        }
+    }
+
+    // ── Plan 2026-04-25-03: mode=click + bars spot checks ──────
+
+    #[test]
+    fn parse_default_mode_is_clock() {
+        let spec = ChannelSpec::parse("dev=midi,grid=t4", &[]).unwrap();
+        assert_eq!(spec.mode, ChannelMode::MidiClock);
+    }
+
+    #[test]
+    fn parse_full_click_spec() {
+        let s = "dev=midi,mode=click,grid=t4,note=37,vel=80,mch=10,\
+                 accent-every=4,accent-note=38,accent-vel=120";
+        let spec = ChannelSpec::parse(s, &[]).expect("parse");
+        let cfg = match spec.mode {
+            ChannelMode::Click(ClickConfig::Midi(c)) => c,
+            other => panic!("expected Click(Midi), got {:?}", other),
+        };
+        assert_eq!(cfg.note, 37);
+        assert_eq!(cfg.vel, 80);
+        assert_eq!(cfg.ch, 9, "mch=10 → ch=9 (zero-based)");
+        let accent = cfg.accent.expect("accent set");
+        assert_eq!(accent.every.get(), 4);
+        assert_eq!(accent.note, 38);
+        assert_eq!(accent.vel, 120);
+    }
+
+    #[test]
+    fn parse_click_defaults_mch_to_10() {
+        let spec = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=76,vel=100", &[])
+            .unwrap();
+        let cfg = match spec.mode {
+            ChannelMode::Click(ClickConfig::Midi(c)) => c,
+            _ => panic!(),
+        };
+        assert_eq!(cfg.ch, 9);
+    }
+
+    #[test]
+    fn parse_click_accent_note_defaults_to_note() {
+        let s = "dev=midi,mode=click,grid=t4,note=37,vel=70,accent-every=4,accent-vel=120";
+        let spec = ChannelSpec::parse(s, &[]).unwrap();
+        let cfg = match spec.mode {
+            ChannelMode::Click(ClickConfig::Midi(c)) => c,
+            _ => panic!(),
+        };
+        let accent = cfg.accent.unwrap();
+        assert_eq!(accent.note, 37, "accent-note absent → defaults to note");
+    }
+
+    #[test]
+    fn parse_rejects_clock_with_click_keys() {
+        let err = ChannelSpec::parse("dev=midi,grid=t4,note=42", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, msg) => {
+                assert_eq!(key, "note");
+                assert!(msg.contains("mode=click"), "got: {msg}");
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_click_missing_note() {
+        let err = ChannelSpec::parse("dev=midi,mode=click,grid=t4,vel=80", &[]).unwrap_err();
+        assert_eq!(err, ChannelSpecError::MissingKey("note"));
+    }
+
+    #[test]
+    fn parse_rejects_click_missing_vel() {
+        let err = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37", &[]).unwrap_err();
+        assert_eq!(err, ChannelSpecError::MissingKey("vel"));
+    }
+
+    #[test]
+    fn parse_rejects_vel_zero() {
+        let err =
+            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=0", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "vel"),
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_note_above_127() {
+        let err =
+            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=200,vel=80", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "note"),
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_mch_zero_or_above_16() {
+        let err =
+            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=0", &[])
+                .unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "mch"),
+            _ => panic!("expected BadValue"),
+        }
+        let err =
+            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=17", &[])
+                .unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "mch"),
+            _ => panic!("expected BadValue"),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_accent_every_zero() {
+        let s = "dev=midi,mode=click,grid=t4,note=37,vel=80,accent-every=0,accent-vel=120";
+        let err = ChannelSpec::parse(s, &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "accent-every"),
+            _ => panic!("expected BadValue"),
+        }
+    }
+
+    #[test]
+    fn parse_requires_accent_vel_when_accent_every_set() {
+        let s = "dev=midi,mode=click,grid=t4,note=37,vel=80,accent-every=4";
+        let err = ChannelSpec::parse(s, &[]).unwrap_err();
+        assert_eq!(err, ChannelSpecError::MissingKey("accent-vel"));
+    }
+
+    #[test]
+    fn parse_accepts_bars_on_any_divider() {
+        let spec = ChannelSpec::parse("dev=midi,grid=t8,bars=3", &[]).unwrap();
+        assert_eq!(spec.bars, NonZeroU16::new(3));
+        assert_eq!(spec.grid, Grid::T8);
+    }
+
+    #[test]
+    fn parse_rejects_bars_zero() {
+        let err = ChannelSpec::parse("dev=midi,grid=t1,bars=0", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "bars"),
+            _ => panic!("expected BadValue"),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_bars_above_u16_max() {
+        let err = ChannelSpec::parse("dev=midi,grid=t1,bars=70000", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "bars"),
+            _ => panic!("expected BadValue"),
+        }
+    }
+
+    #[test]
+    fn into_channel_bars_round_trips_via_nonzero() {
+        let spec = ChannelSpec::parse("dev=midi,grid=t1,bars=4", &[]).unwrap();
+        let ch = spec.into_channel().unwrap();
+        assert_eq!(ch.bar_multiplier, NonZeroU16::new(4));
+    }
+
+    #[test]
+    fn into_channel_click_maps_mch_to_zero_based() {
+        let spec =
+            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=10", &[])
+                .unwrap();
+        let ch = spec.into_channel().unwrap();
+        match ch.mode {
+            ChannelMode::Click(ClickConfig::Midi(cfg)) => assert_eq!(cfg.ch, 9),
+            _ => panic!("expected Click(Midi)"),
+        }
+    }
+
+    #[test]
+    fn into_channel_click_no_accent_when_accent_every_absent() {
+        let spec =
+            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80", &[]).unwrap();
+        let ch = spec.into_channel().unwrap();
+        match ch.mode {
+            ChannelMode::Click(ClickConfig::Midi(cfg)) => assert!(cfg.accent.is_none()),
+            _ => panic!(),
         }
     }
 }

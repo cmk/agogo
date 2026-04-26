@@ -208,6 +208,7 @@ fn quantum_snap_produces_positive_offset() {
         delay: Micro::ZERO,
         offset: Micro::ZERO,
         snap_to_quantum: Some(Quantum::from_bars(4)),
+        bar_multiplier: None,
     };
     agogo_session.arm_channel(&mut ch);
     agogo_session.enable(false);

@@ -18,6 +18,13 @@ pub const MIDI_CONTINUE: u8 = 0xFB;
 /// Stop playback.
 pub const MIDI_STOP: u8 = 0xFC;
 
+// ── Channel-voice status nibbles (MIDI 1.0 §Channel Voice) ──────────
+
+/// Note On status nibble. OR with channel `0..=15` for the full byte.
+pub const MIDI_NOTE_ON: u8 = 0x90;
+/// Note Off status nibble. OR with channel `0..=15`.
+pub const MIDI_NOTE_OFF: u8 = 0x80;
+
 // ── Core trait ──────────────────────────────────────────────────────
 
 /// Back-end-agnostic MIDI output sink.
@@ -139,23 +146,62 @@ pub fn render_buffer(
     render_clock_block(events, sink);
 }
 
+// ── MIDI Note (click) rendering ─────────────────────────────────────
+
+use crate::channel::mode::MidiClickConfig;
+
+/// Render a block of MIDI click events. Per scheduled tick: emits a
+/// 3-byte Note On followed by a same-sample 3-byte Note Off (vel=0).
+/// The same-sample Off keeps stateful synths from holding the note;
+/// percussive drum patches ignore the Off and run their own envelope
+/// to silence.
+///
+/// `counter` is read+advanced once per event. When `cfg.accent` is
+/// `Some(a)`, the renderer substitutes `a.note` / `a.vel` whenever
+/// `*counter % a.every.get() == 0`. Counter wraps on overflow
+/// (`saturating_add` would freeze accents at `u32::MAX`).
+pub fn render_midi_click_block(
+    events: &[ScheduledEvent],
+    cfg: &MidiClickConfig,
+    counter: &mut u32,
+    sink: &dyn MidiSink,
+) {
+    for ev in events {
+        let (n, v) = match cfg.accent {
+            Some(a) if *counter % a.every.get() == 0 => (a.note, a.vel),
+            _ => (cfg.note, cfg.vel),
+        };
+        sink.send_at(&[MIDI_NOTE_ON | cfg.ch, n, v], ev.sample_index);
+        sink.send_at(&[MIDI_NOTE_OFF | cfg.ch, n, 0], ev.sample_index);
+        *counter = counter.wrapping_add(1);
+    }
+}
+
 // ── Per-channel dispatch ────────────────────────────────────────────
 
-use crate::channel::{Channel, ChannelMode};
+use crate::channel::Channel;
+use crate::channel::mode::{ChannelMode, ClickConfig};
 
 /// Render one channel's block to the sink. Exhaustive match on
-/// [`ChannelMode`]; only `MidiClock` emits bytes in v0.1. The other
-/// variants' rendering paths (DIN bytes, CV pulses, analog LFO,
-/// MIDI CC) land in v0.2+ per the doc comments on
-/// [`ChannelMode`](crate::channel::ChannelMode).
+/// [`ChannelMode`]; `MidiClock` emits 0xF8 bytes (per Plan 12) and
+/// `Click(ClickConfig::Midi(_))` emits Note On / Note Off pairs (per
+/// Plan 2026-04-25-03). The other variants' rendering paths (DIN
+/// bytes, CV pulses, analog LFO, MIDI CC) land in v0.2+ per the doc
+/// comments on [`ChannelMode`](crate::channel::ChannelMode).
+///
+/// `click_counter` must be `Some(_)` when `ch.mode` is a `Click(_)`
+/// variant. `Machine` supplies a per-channel slot for every channel;
+/// non-`Machine` callers (the existing `MidiClock`-only render-path
+/// tests) pass `None`.
 pub fn render_channel_block(
     ch: &Channel,
     events: &[ScheduledEvent],
     transport: Option<MidiRtByte>,
     buffer_start_sample: u64,
+    click_counter: Option<&mut u32>,
     sink: &dyn MidiSink,
 ) {
-    match ch.mode {
+    match &ch.mode {
         ChannelMode::MidiClock => {
             render_buffer(events, transport, buffer_start_sample, sink);
         }
@@ -168,6 +214,11 @@ pub fn render_channel_block(
         | ChannelMode::AnalogPulse
         | ChannelMode::AnalogLfo
         | ChannelMode::MidiCc { .. } => {}
+        ChannelMode::Click(ClickConfig::Midi(cfg)) => {
+            let counter = click_counter
+                .expect("ChannelMode::Click(_) requires a counter slot from Machine");
+            render_midi_click_block(events, cfg, counter, sink);
+        }
     }
 }
 
@@ -396,6 +447,7 @@ mod tests {
             delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
+            bar_multiplier: None,
         }
     }
 
@@ -404,7 +456,7 @@ mod tests {
         let ch = zero_channel(ChannelMode::MidiClock, Grid::T4);
         let evs = [ev(0), ev(24_000)];
         let sink = TestSink::new();
-        render_channel_block(&ch, &evs, Some(MidiRtByte::Start), 0, &sink);
+        render_channel_block(&ch, &evs, Some(MidiRtByte::Start), 0, None, &sink);
         let recs = sink.records();
         assert_eq!(recs.len(), 3);
         assert_eq!(recs[0].bytes, vec![MIDI_START]);
@@ -435,7 +487,7 @@ mod tests {
             let ch = zero_channel(mode, Grid::T4);
             let evs: Vec<ScheduledEvent> = samples.into_iter().map(ev).collect();
             let sink = TestSink::new();
-            render_channel_block(&ch, &evs, transport, buffer_start, &sink);
+            render_channel_block(&ch, &evs, transport, buffer_start, None, &sink);
             prop_assert!(sink.is_empty());
         }
 
@@ -461,10 +513,279 @@ mod tests {
             let stc = stc_120_48k();
             let evs = tick_stream(&ch, &stc, buffer_start, frames);
             let sink = TestSink::new();
-            render_channel_block(&ch, &evs, None, buffer_start, &sink);
+            render_channel_block(&ch, &evs, None, buffer_start, None, &sink);
             let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();
             let expected: Vec<u64> = evs.iter().map(|e| e.sample_index).collect();
             prop_assert_eq!(emitted, expected);
         }
+    }
+
+    // ── render_midi_click_block ───────────────────────────────────
+
+    use crate::channel::mode::{ClickConfig, MidiClickAccent, MidiClickConfig};
+    use core::num::NonZeroU32;
+
+    fn click_cfg(note: u8, vel: u8, ch: u8, accent: Option<MidiClickAccent>) -> MidiClickConfig {
+        MidiClickConfig {
+            note,
+            vel,
+            ch,
+            accent,
+        }
+    }
+
+    #[test]
+    fn click_emits_note_on_then_note_off_per_event() {
+        let cfg = click_cfg(76, 100, 9, None);
+        let evs = [ev(0), ev(24_000)];
+        let sink = TestSink::new();
+        let mut counter = 0u32;
+        render_midi_click_block(&evs, &cfg, &mut counter, &sink);
+        let recs = sink.records();
+        assert_eq!(recs.len(), 4);
+        // (on, off, on, off)
+        assert_eq!(recs[0].at_sample, 0);
+        assert_eq!(recs[0].bytes, vec![MIDI_NOTE_ON | 9, 76, 100]);
+        assert_eq!(recs[1].at_sample, 0);
+        assert_eq!(recs[1].bytes, vec![MIDI_NOTE_OFF | 9, 76, 0]);
+        assert_eq!(recs[2].at_sample, 24_000);
+        assert_eq!(recs[2].bytes, vec![MIDI_NOTE_ON | 9, 76, 100]);
+        assert_eq!(recs[3].at_sample, 24_000);
+        assert_eq!(recs[3].bytes, vec![MIDI_NOTE_OFF | 9, 76, 0]);
+        assert_eq!(counter, 2);
+    }
+
+    #[test]
+    fn click_accent_lands_on_counter_zero_then_every_n() {
+        // accent=4: counter 0,4,8,... use accent values; others use base.
+        let accent = MidiClickAccent {
+            every: NonZeroU32::new(4).unwrap(),
+            note: 38,
+            vel: 120,
+        };
+        let cfg = click_cfg(37, 70, 9, Some(accent));
+        // 5 events covers counter 0..4 — one full accent period plus one.
+        let evs: Vec<ScheduledEvent> = (0..5).map(|i| ev(i * 1000)).collect();
+        let sink = TestSink::new();
+        let mut counter = 0u32;
+        render_midi_click_block(&evs, &cfg, &mut counter, &sink);
+        let recs = sink.records();
+        // 5 events × 2 records (on/off) = 10
+        assert_eq!(recs.len(), 10);
+        // Expected note/vel by counter index:
+        //   i=0: accent (38, 120)
+        //   i=1: base   (37, 70)
+        //   i=2: base   (37, 70)
+        //   i=3: base   (37, 70)
+        //   i=4: accent (38, 120)
+        let expected_notes = [38, 37, 37, 37, 38];
+        let expected_vels = [120, 70, 70, 70, 120];
+        for (i, (n, v)) in expected_notes.iter().zip(expected_vels.iter()).enumerate() {
+            assert_eq!(recs[i * 2].bytes, vec![MIDI_NOTE_ON | 9, *n, *v]);
+            assert_eq!(recs[i * 2 + 1].bytes, vec![MIDI_NOTE_OFF | 9, *n, 0]);
+        }
+        assert_eq!(counter, 5);
+    }
+
+    proptest! {
+        /// Plan 2026-04-25-03 property
+        /// `click_counter_advances_across_buffer_boundaries`: two
+        /// render calls with cumulative event counts m+n behave
+        /// identically to a single call with m+n events. The
+        /// counter is the only piece of state that crosses the
+        /// boundary, so equality of (sink records, counter) across
+        /// the two paths pins the persistence contract.
+        ///
+        /// Domain: full `NonZeroU32` for the accent period (the
+        /// renderer's `counter % every` is well-defined for any
+        /// non-zero u32; bounding would hide wrap behaviour at
+        /// large `every` per CLAUDE.md's coverage-faking rule).
+        /// Event counts capped at 64 each — proptest needs to
+        /// exercise the boundary repeatedly during shrink, not the
+        /// full 2^64 input space; a separate spot check at much
+        /// larger counts isn't useful since the counter wraps at
+        /// `u32::MAX`, far beyond any real audio buffer pipeline.
+        #[test]
+        fn click_counter_advances_across_buffer_boundaries(
+            sample_indices in prop::collection::vec(any::<u64>(), 0..=64),
+            split in 0usize..=64,
+            every in any::<u32>().prop_filter("every > 0", |&n| n > 0),
+            note in 0u8..=127,
+            vel in 1u8..=127,
+            ch in 0u8..=15,
+            accent_note in 0u8..=127,
+            accent_vel in 1u8..=127,
+        ) {
+            let accent = MidiClickAccent {
+                every: NonZeroU32::new(every).unwrap(),
+                note: accent_note,
+                vel: accent_vel,
+            };
+            let cfg = click_cfg(note, vel, ch, Some(accent));
+            let all_evs: Vec<ScheduledEvent> =
+                sample_indices.into_iter().map(ev).collect();
+            let split = split.min(all_evs.len());
+
+            // Single-call baseline.
+            let sink_a = TestSink::new();
+            let mut ctr_a = 0u32;
+            render_midi_click_block(&all_evs, &cfg, &mut ctr_a, &sink_a);
+
+            // Two-call: split at the generated index.
+            let sink_b = TestSink::new();
+            let mut ctr_b = 0u32;
+            render_midi_click_block(&all_evs[..split], &cfg, &mut ctr_b, &sink_b);
+            render_midi_click_block(&all_evs[split..], &cfg, &mut ctr_b, &sink_b);
+
+            prop_assert_eq!(sink_a.records(), sink_b.records());
+            prop_assert_eq!(ctr_a, ctr_b);
+            prop_assert_eq!(ctr_a as usize, all_evs.len());
+        }
+    }
+
+    proptest! {
+        /// Plan 2026-04-25-03 property
+        /// `click_every_event_produces_two_records`.
+        #[test]
+        fn click_every_event_produces_two_records(
+            samples in prop::collection::vec(any::<u64>(), 0..32),
+            note in 0u8..=127,
+            vel in 1u8..=127,
+            ch in 0u8..=15,
+        ) {
+            let cfg = click_cfg(note, vel, ch, None);
+            let evs: Vec<ScheduledEvent> = samples.iter().copied().map(ev).collect();
+            let sink = TestSink::new();
+            let mut counter = 0u32;
+            render_midi_click_block(&evs, &cfg, &mut counter, &sink);
+            let recs = sink.records();
+            prop_assert_eq!(recs.len(), 2 * evs.len());
+            prop_assert_eq!(counter as usize, evs.len());
+        }
+
+        /// Plan 2026-04-25-03 property
+        /// `click_records_are_paired_on_off`: every odd-indexed record
+        /// is a Note Off matching the preceding Note On's note + ch.
+        #[test]
+        fn click_records_are_paired_on_off(
+            samples in prop::collection::vec(any::<u64>(), 0..32),
+            note in 0u8..=127,
+            vel in 1u8..=127,
+            ch in 0u8..=15,
+        ) {
+            let cfg = click_cfg(note, vel, ch, None);
+            let evs: Vec<ScheduledEvent> = samples.iter().copied().map(ev).collect();
+            let sink = TestSink::new();
+            let mut counter = 0u32;
+            render_midi_click_block(&evs, &cfg, &mut counter, &sink);
+            let recs = sink.records();
+            for pair in recs.chunks_exact(2) {
+                let on  = &pair[0];
+                let off = &pair[1];
+                prop_assert_eq!(on.at_sample,  off.at_sample);
+                prop_assert_eq!(on.bytes[0],  MIDI_NOTE_ON  | ch);
+                prop_assert_eq!(off.bytes[0], MIDI_NOTE_OFF | ch);
+                prop_assert_eq!(on.bytes[1], off.bytes[1]);
+                prop_assert_eq!(off.bytes[2], 0);
+            }
+        }
+
+        /// Plan 2026-04-25-03 property
+        /// `click_status_byte_carries_channel`: status nibble is
+        /// `0x90|ch` / `0x80|ch` for any `ch ∈ 0..=15`.
+        #[test]
+        fn click_status_byte_carries_channel(
+            samples in prop::collection::vec(any::<u64>(), 1..16),
+            ch in 0u8..=15,
+        ) {
+            let cfg = click_cfg(60, 80, ch, None);
+            let evs: Vec<ScheduledEvent> = samples.iter().copied().map(ev).collect();
+            let sink = TestSink::new();
+            let mut counter = 0u32;
+            render_midi_click_block(&evs, &cfg, &mut counter, &sink);
+            for r in sink.records() {
+                prop_assert!(
+                    r.bytes[0] == (MIDI_NOTE_ON | ch) || r.bytes[0] == (MIDI_NOTE_OFF | ch),
+                    "status byte {:#x} not in expected set for ch={}",
+                    r.bytes[0], ch,
+                );
+            }
+        }
+
+        /// Plan 2026-04-25-03 property
+        /// `accent_lands_every_n_emitted_clicks_from_zero`: with
+        /// `accent.every = N` the i-th emitted Note On uses the
+        /// accent note iff `i % N == 0`. Counter starts at 0.
+        #[test]
+        fn accent_lands_every_n_emitted_clicks_from_zero(
+            n in 1u32..=12,
+            event_count in 0usize..=40,
+        ) {
+            let accent = MidiClickAccent {
+                every: NonZeroU32::new(n).unwrap(),
+                note: 38,
+                vel: 120,
+            };
+            let cfg = click_cfg(37, 70, 9, Some(accent));
+            let evs: Vec<ScheduledEvent> = (0..event_count as u64).map(ev).collect();
+            let sink = TestSink::new();
+            let mut counter = 0u32;
+            render_midi_click_block(&evs, &cfg, &mut counter, &sink);
+            let recs = sink.records();
+            for i in 0..event_count {
+                let on = &recs[i * 2];
+                let is_accent = (i as u32) % n == 0;
+                let expected_note = if is_accent { 38 } else { 37 };
+                let expected_vel = if is_accent { 120 } else { 70 };
+                prop_assert_eq!(
+                    on.bytes[1], expected_note,
+                    "tick {}: expected note {}", i, expected_note,
+                );
+                prop_assert_eq!(
+                    on.bytes[2], expected_vel,
+                    "tick {}: expected vel {}", i, expected_vel,
+                );
+            }
+        }
+    }
+
+    // ── render_channel_block dispatch on Click ────────────────────
+
+    #[test]
+    fn click_mode_routes_through_render_midi_click_block() {
+        let cfg = click_cfg(76, 100, 9, None);
+        let mut ch = zero_channel(ChannelMode::Click(ClickConfig::Midi(cfg)), Grid::T4);
+        ch.bar_multiplier = None;
+        let evs = [ev(0), ev(24_000)];
+        let sink = TestSink::new();
+        let mut counter = 0u32;
+        render_channel_block(
+            &ch,
+            &evs,
+            Some(MidiRtByte::Start),
+            0,
+            Some(&mut counter),
+            &sink,
+        );
+        let recs = sink.records();
+        // Click mode ignores transport bytes — only Note On/Off pairs.
+        assert_eq!(recs.len(), 4);
+        assert_eq!(recs[0].bytes, vec![MIDI_NOTE_ON | 9, 76, 100]);
+        assert_eq!(recs[1].bytes, vec![MIDI_NOTE_OFF | 9, 76, 0]);
+        assert_eq!(recs[2].bytes, vec![MIDI_NOTE_ON | 9, 76, 100]);
+        assert_eq!(recs[3].bytes, vec![MIDI_NOTE_OFF | 9, 76, 0]);
+        assert_eq!(counter, 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "ChannelMode::Click(_) requires a counter slot")]
+    fn click_mode_panics_without_counter() {
+        let cfg = click_cfg(76, 100, 9, None);
+        let ch = zero_channel(ChannelMode::Click(ClickConfig::Midi(cfg)), Grid::T4);
+        let evs = [ev(0)];
+        let sink = TestSink::new();
+        // Plan 2026-04-25-03 contract: Machine always supplies the
+        // counter; passing None is a programmer error and panics fast.
+        render_channel_block(&ch, &evs, None, 0, None, &sink);
     }
 }

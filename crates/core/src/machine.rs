@@ -41,7 +41,16 @@ pub struct Machine<R: SampleTime> {
     /// All channels share one PhaseSource and one tick→sample
     /// conversion. Per-channel divider/swing/delay live inside each
     /// [`Channel`].
-    pub channels: Vec<Channel>,
+    ///
+    /// **Crate-private** because `bar_counters` and `click_counters`
+    /// are indexed in lock-step with this `Vec`. External mutation
+    /// (push/remove/reorder) would either OOB-panic in `on_buffer`
+    /// or silently associate counter state with the wrong channel.
+    /// Construct via [`Machine::new`] (which sizes the parallel
+    /// counter vecs) and treat the channel set as immutable for
+    /// the `Machine`'s lifetime — matches the struct-level
+    /// "never mutated from the control thread thereafter" contract.
+    pub(crate) channels: Vec<Channel>,
     /// Sample-rate-typed phase source. `R: SampleTime` binds the
     /// rate at compile time so the Internal/External arms inside
     /// `PhaseSource` can monomorphise.
@@ -54,6 +63,20 @@ pub struct Machine<R: SampleTime> {
     /// `max_events_for_buffer(buffer_frames)` so [`tick_stream_into`]
     /// never reallocates inside the audio callback.
     events_pool: Vec<ScheduledEvent>,
+    /// Per-channel pre-filter counter for `Channel.bar_multiplier`.
+    /// Index parallels `channels`. Slot is meaningful only for
+    /// channels with `bar_multiplier = Some(_)`. Counts every
+    /// `tick_stream_into` event from this channel; the filter keeps
+    /// only events where `counter % multiplier == 0`. Reset to 0
+    /// when transport stops (see [`Machine::on_buffer`]).
+    bar_counters: Vec<u32>,
+    /// Per-channel emitted-click counter for `MidiClickAccent`.
+    /// Index parallels `channels`. Slot is meaningful only for
+    /// `ChannelMode::Click(_)` channels. Threaded into
+    /// [`render_midi_click_block`] via `render_channel_block`'s
+    /// `Option<&mut u32>` parameter; advanced once per emitted
+    /// Note On. Reset to 0 when transport stops.
+    click_counters: Vec<u32>,
     /// Cross-thread stop signal. `MachineStopHandle::request_stop`
     /// flips this; the next [`Machine::on_buffer`] reads it and
     /// emits [`MidiRtByte::Stop`].
@@ -225,12 +248,15 @@ impl<R: SampleTime> Machine<R> {
         buffer_frames: usize,
     ) -> Self {
         let cap = crate::channel::scheduler::max_events_for_buffer(buffer_frames);
+        let n = channels.len();
         Self {
             channels,
             phase_source,
             stc: SampleTickConn::new(sr, bpm, ppqn),
             transport: TransportState::new(transport),
             events_pool: Vec::with_capacity(cap),
+            bar_counters: vec![0; n],
+            click_counters: vec![0; n],
             stop_flag: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -282,14 +308,21 @@ impl<R: SampleTime> Machine<R> {
         //    has already been emitted above; the stream now stays
         //    silent until the cpal stream is dropped. See
         //    `TransportState::running` for the full latch contract.
+        //    Per-channel counter state (bar_counters /
+        //    click_counters) resets to 0 here so that any subsequent
+        //    fresh `Machine` (or future resume of this one) starts
+        //    bar-multiplier filtering and click-accent placement
+        //    from a known phase.
         if !self.transport.running {
+            self.bar_counters.iter_mut().for_each(|c| *c = 0);
+            self.click_counters.iter_mut().for_each(|c| *c = 0);
             return;
         }
 
         // 5. Per-channel scheduling + rendering. Channels are
         //    independent so we can iterate them without cross-talk;
         //    `events_pool` is reused (cleared) between channels.
-        for ch in &self.channels {
+        for (idx, ch) in self.channels.iter().enumerate() {
             self.events_pool.clear();
             tick_stream_into(
                 &mut self.events_pool,
@@ -298,11 +331,27 @@ impl<R: SampleTime> Machine<R> {
                 io.buffer_start_sample,
                 io.frames,
             );
+            // Apply bar_multiplier filter pre-render (Plan
+            // 2026-04-25-03 T3): keep only every Nth event from
+            // this channel's tick stream, advancing the per-channel
+            // bar counter once per pre-filter event. Filter runs
+            // before render dispatch so the renderer (clock or
+            // click) sees only the kept ticks.
+            if let Some(m) = ch.bar_multiplier {
+                let counter = &mut self.bar_counters[idx];
+                let m = m.get() as u32;
+                self.events_pool.retain(|_| {
+                    let keep = *counter % m == 0;
+                    *counter = counter.wrapping_add(1);
+                    keep
+                });
+            }
             render_channel_block(
                 ch,
                 &self.events_pool,
                 None, // transport byte already emitted globally
                 io.buffer_start_sample,
+                Some(&mut self.click_counters[idx]),
                 sink,
             );
         }
@@ -332,6 +381,7 @@ mod tests {
             delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
+            bar_multiplier: None,
         }
     }
 
@@ -658,5 +708,313 @@ mod tests {
 
             prop_assert_eq!(multi_clocks, reference);
         }
+    }
+
+    // ── Plan 2026-04-25-03: bar_multiplier + click counter tests ──
+
+    use crate::channel::mode::{ClickConfig, MidiClickAccent, MidiClickConfig};
+    use crate::out::midi::{MIDI_NOTE_OFF, MIDI_NOTE_ON};
+    use core::num::{NonZeroU16, NonZeroU32};
+
+    fn click_channel(
+        divider: Grid,
+        cfg: MidiClickConfig,
+        bar_multiplier: Option<NonZeroU16>,
+    ) -> Channel {
+        Channel {
+            mode: ChannelMode::Click(ClickConfig::Midi(cfg)),
+            divider,
+            shuffle: SwingConfig {
+                resolution: TBase::T16,
+                amount: 0,
+            },
+            delay: Micro::ZERO,
+            offset: Micro::ZERO,
+            snap_to_quantum: None,
+            bar_multiplier,
+        }
+    }
+
+    /// Plan 2026-04-25-03 spot check: a click channel with no
+    /// `bar_multiplier` emits Note On at every scheduled tick
+    /// produced by the divider. At T4 / 120 BPM / 48 kHz, that's
+    /// samples `{0, 24_000, 48_000, 72_000}` over 4 buffers.
+    #[test]
+    fn click_channel_emits_note_on_per_divider_tick() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let cfg = MidiClickConfig {
+            note: 76,
+            vel: 100,
+            ch: 9,
+            accent: None,
+        };
+        let mut machine = Machine::<S48>::new(
+            vec![click_channel(Grid::T4, cfg, None)],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            PPQN,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+            24_000,
+        );
+        let sink = TestSink::new();
+        drive_buffers(&mut machine, &sink, 4, 24_000, 48_000);
+        let on_samples: Vec<u64> = sink
+            .records()
+            .into_iter()
+            .filter(|r| r.bytes[0] == (MIDI_NOTE_ON | 9))
+            .map(|r| r.at_sample)
+            .collect();
+        assert_eq!(on_samples, vec![0, 24_000, 48_000, 72_000]);
+    }
+
+    /// Helper for the bars-filter proptest + spot check: extract a
+    /// channel's emitted "tick" sample positions from a TestSink,
+    /// filtering by mode (clock channels emit `0xF8`; click
+    /// channels emit `0x9X` Note Ons).
+    fn collect_tick_samples(sink: &TestSink, mode_is_click: bool, ch: u8) -> Vec<u64> {
+        sink.records()
+            .into_iter()
+            .filter(|r| {
+                if mode_is_click {
+                    r.bytes[0] == (MIDI_NOTE_ON | ch)
+                } else {
+                    r.bytes == vec![MIDI_CLOCK]
+                }
+            })
+            .map(|r| r.at_sample)
+            .collect()
+    }
+
+    proptest! {
+        /// Plan 2026-04-25-03 property
+        /// `bars_filter_emits_every_nth_grid_event`: a `bars=N` channel
+        /// emits exactly the i-th `tick_stream_into` event iff
+        /// `i % N == 0`. Strategy varies divider across `Grid::ALL`
+        /// and mode across clock/click.
+        ///
+        /// Domain notes:
+        /// - `bars` is bounded `1..=8` so each iteration exercises
+        ///   filtering on event sequences containing multiple
+        ///   accept-then-reject cycles. With `bars > total_events`
+        ///   only the very first event passes, which is true but
+        ///   useless for differentiating filter implementations.
+        ///   The full `NonZeroU16::MAX` boundary is covered by
+        ///   `bars_filter_huge_n_keeps_only_first_event` below per
+        ///   CLAUDE.md's "spot-check the un-sampled boundary" rule.
+        /// - `n_buffers` capped at 4 to keep proptest runtime
+        ///   reasonable across the 36 dividers (T512P generates
+        ///   ~3840 events per bar).
+        #[test]
+        fn bars_filter_emits_every_nth_grid_event(
+            divider in prop::sample::select(Grid::ALL.as_slice()),
+            mode_is_click in any::<bool>(),
+            bars in 1u16..=8,
+            n_buffers in 1u64..=4,
+        ) {
+            let bpm = Tempo::from_bpm_integer(120);
+            let frames: usize = 24_000; // 0.5 sec / buffer @ 48k
+            let sr: u32 = 48_000;
+            let mch: u8 = 9;
+
+            let make_mode = || {
+                if mode_is_click {
+                    ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
+                        note: 76, vel: 100, ch: mch, accent: None,
+                    }))
+                } else {
+                    ChannelMode::MidiClock
+                }
+            };
+            let mk_channel = |bm: Option<NonZeroU16>| Channel {
+                mode: make_mode(),
+                divider,
+                shuffle: SwingConfig { resolution: TBase::T16, amount: 0 },
+                delay: Micro::ZERO,
+                offset: Micro::ZERO,
+                snap_to_quantum: None,
+                bar_multiplier: bm,
+            };
+
+            let mut m_un = Machine::<S48>::new(
+                vec![mk_channel(None)],
+                PhaseSource::Internal { bpm },
+                sr, bpm, PPQN,
+                TransportPolicy::Scripted { schedule: VecDeque::new() },
+                frames,
+            );
+            let mut m_fi = Machine::<S48>::new(
+                vec![mk_channel(Some(NonZeroU16::new(bars).unwrap()))],
+                PhaseSource::Internal { bpm },
+                sr, bpm, PPQN,
+                TransportPolicy::Scripted { schedule: VecDeque::new() },
+                frames,
+            );
+
+            let s_un = TestSink::new();
+            let s_fi = TestSink::new();
+            drive_buffers(&mut m_un, &s_un, n_buffers, frames, sr);
+            drive_buffers(&mut m_fi, &s_fi, n_buffers, frames, sr);
+
+            let on_un = collect_tick_samples(&s_un, mode_is_click, mch);
+            let on_fi = collect_tick_samples(&s_fi, mode_is_click, mch);
+
+            let expected: Vec<u64> = on_un
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &s)| (i as u64 % bars as u64 == 0).then_some(s))
+                .collect();
+            prop_assert_eq!(on_fi, expected,
+                "divider={:?}, mode_is_click={}, bars={}, n_buffers={}",
+                divider, mode_is_click, bars, n_buffers);
+        }
+    }
+
+    /// Spot check at the un-sampled `bars` boundary
+    /// (`NonZeroU16::MAX` = 65,535) per CLAUDE.md proptest-bound
+    /// rule. With bars far larger than any realistic per-buffer
+    /// event count, only the very first event ever satisfies
+    /// `counter % bars == 0`; subsequent events are filtered out.
+    #[test]
+    fn bars_filter_huge_n_keeps_only_first_event() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let cfg = MidiClickConfig { note: 76, vel: 100, ch: 9, accent: None };
+        let mut machine = Machine::<S48>::new(
+            vec![click_channel(Grid::T16, cfg, NonZeroU16::new(u16::MAX))],
+            PhaseSource::Internal { bpm },
+            48_000, bpm, PPQN,
+            TransportPolicy::Scripted { schedule: VecDeque::new() },
+            48_000, // 1 sec at 48k = ~16 sixteenth-note events
+        );
+        let sink = TestSink::new();
+        drive_buffers(&mut machine, &sink, 4, 48_000, 48_000);
+        let on_samples = collect_tick_samples(&sink, true, 9);
+        assert_eq!(
+            on_samples.len(), 1,
+            "bars=u16::MAX must filter all but the first event, got {} clicks",
+            on_samples.len(),
+        );
+        assert_eq!(on_samples[0], 0, "first event lands at sample 0");
+    }
+
+    proptest! {
+        /// Plan 2026-04-25-03 properties
+        /// `click_counter_resets_on_transport_stop` +
+        /// `bars_counter_resets_on_transport_stop`: after
+        /// `MachineStopHandle::request_stop` latches the running flag
+        /// off and a subsequent buffer hits the stop arm, both
+        /// counter vecs are reset to zero — regardless of how
+        /// non-zero they were before. Strategy varies the divider,
+        /// pre-stop drive duration, bars multiplier, and accent
+        /// period so the reset arm fires from a wide range of
+        /// pre-stop counter states.
+        #[test]
+        fn counters_reset_on_transport_stop(
+            divider in prop::sample::select(Grid::ALL.as_slice()),
+            n_buffers_before_stop in 1u64..=8,
+            bars in 1u16..=8,
+            every in 1u32..=8,
+        ) {
+            let bpm = Tempo::from_bpm_integer(120);
+            let cfg = MidiClickConfig {
+                note: 37, vel: 70, ch: 9,
+                accent: Some(MidiClickAccent {
+                    every: NonZeroU32::new(every).unwrap(),
+                    note: 38, vel: 120,
+                }),
+            };
+            let mut machine = Machine::<S48>::new(
+                vec![click_channel(divider, cfg, NonZeroU16::new(bars))],
+                PhaseSource::Internal { bpm },
+                48_000, bpm, PPQN,
+                TransportPolicy::Scripted { schedule: VecDeque::new() },
+                24_000,
+            );
+
+            let sink = TestSink::new();
+            drive_buffers(&mut machine, &sink, n_buffers_before_stop, 24_000, 48_000);
+
+            // Trigger transport stop. The next on_buffer will emit
+            // Stop, latch running off, and reset the counters.
+            machine.stop_handle().request_stop();
+            drive_buffers(&mut machine, &sink, 1, 24_000, 48_000);
+
+            prop_assert_eq!(
+                machine.bar_counters[0], 0,
+                "bar counter must reset (divider={:?}, bars={}, before={})",
+                divider, bars, n_buffers_before_stop,
+            );
+            prop_assert_eq!(
+                machine.click_counters[0], 0,
+                "click counter must reset (divider={:?}, every={}, before={})",
+                divider, every, n_buffers_before_stop,
+            );
+
+            // And further buffers beyond the stop must stay zero —
+            // the !running early-return loops back through the
+            // reset arm idempotently.
+            drive_buffers(&mut machine, &sink, 1, 24_000, 48_000);
+            prop_assert_eq!(machine.bar_counters[0], 0);
+            prop_assert_eq!(machine.click_counters[0], 0);
+        }
+    }
+
+    /// Plan 2026-04-25-03 spot check: `bar_multiplier` interacts
+    /// correctly with click accent. A `div=t1,bars=2,accent-every=2`
+    /// click channel emits a click every 2 bars; the accent counter
+    /// advances per *emitted* click (not per pre-filter event), so
+    /// every 2nd emitted click is accented. Concretely: bars 0, 2,
+    /// 4, 6 emit clicks; clicks 0, 2 (i.e. bars 0 and 4) are
+    /// accented, clicks 1, 3 (bars 2 and 6) are not.
+    #[test]
+    fn bars_and_accent_compose_correctly() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let cfg = MidiClickConfig {
+            note: 37,
+            vel: 70,
+            ch: 9,
+            accent: Some(MidiClickAccent {
+                every: NonZeroU32::new(2).unwrap(),
+                note: 38,
+                vel: 120,
+            }),
+        };
+        let mut machine = Machine::<S48>::new(
+            vec![click_channel(
+                Grid::T1,
+                cfg,
+                Some(NonZeroU16::new(2).unwrap()),
+            )],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            PPQN,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+            96_000,
+        );
+        let sink = TestSink::new();
+        // 8 buffers = 8 bars; bars=2 → 4 emitted clicks; accent=2 →
+        // first and third are accented.
+        drive_buffers(&mut machine, &sink, 8, 96_000, 48_000);
+        let records = sink.records();
+        let notes: Vec<u8> = records
+            .iter()
+            .filter(|r| r.bytes[0] == (MIDI_NOTE_ON | 9))
+            .map(|r| r.bytes[1])
+            .collect();
+        // Same accent pattern echoes through the Note Off stream —
+        // `render_midi_click_block` always emits a same-sample
+        // Note Off matching the Note On's note number.
+        let note_offs: Vec<u8> = records
+            .iter()
+            .filter(|r| r.bytes[0] == (MIDI_NOTE_OFF | 9))
+            .map(|r| r.bytes[1])
+            .collect();
+        assert_eq!(notes, vec![38, 37, 38, 37]);
+        assert_eq!(note_offs, vec![38, 37, 38, 37]);
     }
 }
