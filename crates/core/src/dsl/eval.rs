@@ -129,6 +129,8 @@ mod tests {
 
     #[test]
     fn forward_ref_errors() {
+        // C1 is defined but C2 is not — strict monotonicity means
+        // channel N can only reference channels 1..N-1.
         let env = vec![("C1".to_string(), Grid::T4)];
         let err = eval("C2&C1", &env).unwrap_err();
         assert_eq!(
