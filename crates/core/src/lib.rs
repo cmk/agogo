@@ -6,6 +6,7 @@ pub mod dsl;
 pub mod fxp;
 pub mod host;
 pub mod machine;
+pub mod midi;
 pub mod out;
 pub mod sync;
 pub mod testing;
