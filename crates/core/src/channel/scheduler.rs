@@ -167,7 +167,6 @@ mod tests {
             },
             delay: Micro::ZERO,
             offset: Micro::ZERO,
-            snap_to_quantum: None,
             bar_multiplier: None,
         }
     }
@@ -252,7 +251,6 @@ mod tests {
                 shuffle,
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
-                snap_to_quantum: None,
                 bar_multiplier: None,
             };
             let end = buffer_start + frames as u64;
@@ -299,7 +297,6 @@ mod tests {
                 shuffle,
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
-                snap_to_quantum: None,
                 bar_multiplier: None,
             };
             let stc = stc_120_48k();
@@ -342,7 +339,6 @@ mod tests {
                 shuffle,
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
-                snap_to_quantum: None,
                 bar_multiplier: None,
             };
             let stc = stc_120_48k();
@@ -379,7 +375,6 @@ mod tests {
                 shuffle,
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
-                snap_to_quantum: None,
                 bar_multiplier: None,
             };
             let stc = stc_120_48k();

@@ -207,10 +207,14 @@ fn quantum_snap_produces_positive_offset() {
         },
         delay: Micro::ZERO,
         offset: Micro::ZERO,
-        snap_to_quantum: Some(Quantum::from_bars(4)),
         bar_multiplier: None,
     };
-    agogo_session.arm_channel(&mut ch);
+    // Audit P2 (Plan 20): the previous `arm_channel(&mut ch)` API
+    // mutated `ch.offset` in place; the new `snap_offset_for(intent)`
+    // returns the delta and the caller folds it in.
+    let snap_intent = Some(Quantum::from_bars(4));
+    let delta = agogo_session.snap_offset_for(snap_intent);
+    ch.offset = Micro(ch.offset.0.saturating_add(delta.0));
     agogo_session.enable(false);
 
     // At 120 BPM, Quantum::from_bars(4) spans 4 beats (one 4/4 bar):

@@ -380,7 +380,6 @@ mod tests {
             },
             delay: Micro::ZERO,
             offset: Micro::ZERO,
-            snap_to_quantum: None,
             bar_multiplier: None,
         }
     }
@@ -731,7 +730,6 @@ mod tests {
             },
             delay: Micro::ZERO,
             offset: Micro::ZERO,
-            snap_to_quantum: None,
             bar_multiplier,
         }
     }
@@ -836,7 +834,6 @@ mod tests {
                 shuffle: SwingConfig { resolution: TBase::T16, amount: 0 },
                 delay: Micro::ZERO,
                 offset: Micro::ZERO,
-                snap_to_quantum: None,
                 bar_multiplier: bm,
             };
 
