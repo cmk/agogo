@@ -17,7 +17,9 @@
 
 use std::num::NonZeroU32;
 
-use agogo_core::fxp::{Micro, Phase, Quantum, Tempo, f64_phase_to_phase};
+use agogo_core::fxp::{
+    Extended, ExtendedFloat, F64F06, Micro, Phase, Quantum, Tempo, f64_phase_to_phase,
+};
 use agogo_core::sync::PhaseSourceImpl;
 use rusty_link::{AblLink, SessionState};
 
@@ -198,25 +200,46 @@ impl LinkClock {
     /// Not RT-safe — `capture_audio_session_state` refreshes the
     /// cached session. Run on the control thread.
     pub fn snap_offset_micro(&mut self, quantum: Quantum) -> Micro {
-        // Link FFI — Quantum (microbeats) → f64 beats.
-        let q_f64 = (quantum.0.0 as f64) / 1_000_000.0;
+        // Quantum (Micro / microbeats) → f64 beats via the lawful
+        // F64F06 Conn inverse. The `10⁶` unit shift lives inside
+        // `F64F06`'s definition in the `connections` crate, not
+        // open-coded here (audit findings M5/N6 closed for this
+        // call site by Plan 23 / audit P5). `Extended::Finite`
+        // lifts the `Micro` into the saturation lattice F64F06
+        // operates on; `Bot`/`Top` are unreachable for a finite
+        // `Quantum` but the match keeps the result total.
+        let q_f64 = match F64F06.inner(Extended::Finite(quantum.0)) {
+            ExtendedFloat::Finite(b) => b,
+            ExtendedFloat::Bot | ExtendedFloat::Top => return Micro::ZERO,
+        };
         if q_f64 <= 0.0 || q_f64.is_nan() {
             return Micro::ZERO;
         }
         self.link.capture_audio_session_state(&mut self.session);
         let now = self.link.clock_micros();
-        let current_beat = self.session.beat_at_time(now, q_f64);
-        // Next quantum boundary: smallest multiple of `q_f64` that is
-        // ≥ `current_beat`. `ceil(current/q) * q` is stable across
-        // small f64 rounding — a beat already exactly on a boundary
-        // stays on it.
+        let next_boundary_us = self.next_quantum_boundary_us(q_f64, now);
+        Micro(next_boundary_us.saturating_sub(now).max(0))
+    }
+
+    /// Inner FFI-math helper: given an already-validated `q_f64`
+    /// (positive, finite) and a host-time `now_us`, return the
+    /// host-time (microseconds) of the next quantum boundary at or
+    /// after `now_us`.
+    ///
+    /// Confines the `f64` footprint to a single named function —
+    /// every f64 use lives inside the FFI calls or the immediate
+    /// `(current/q).ceil() * q` boundary computation. Audit P5
+    /// extraction (Plan 23) so CLAUDE.md exception 5's "within
+    /// 1–2 lines of the FFI call" rule holds at the public
+    /// `snap_offset_micro` API surface.
+    fn next_quantum_boundary_us(&mut self, q_f64: f64, now_us: i64) -> i64 {
+        // Link FFI calls take/return f64 beats. `ceil(current/q) * q`
+        // gives the smallest multiple of `q` ≥ `current`; stable under
+        // f64 rounding on exact-boundary inputs (a beat already on a
+        // boundary stays on it).
+        let current_beat = self.session.beat_at_time(now_us, q_f64);
         let next_boundary = (current_beat / q_f64).ceil() * q_f64;
-        let time_at_next = self.session.time_at_beat(next_boundary, q_f64);
-        let delta_us = time_at_next.saturating_sub(now);
-        if delta_us < 0 {
-            return Micro::ZERO;
-        }
-        Micro(delta_us)
+        self.session.time_at_beat(next_boundary, q_f64)
     }
 }
 
