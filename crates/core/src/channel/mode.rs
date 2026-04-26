@@ -8,6 +8,8 @@
 
 use core::num::NonZeroU32;
 
+use crate::midi::{U4, U7};
+
 /// Per-channel output mode.
 ///
 /// `MidiClock` and `Click(_)` are rendered. `Din`, `AnalogPulse`,
@@ -25,13 +27,8 @@ pub enum ChannelMode {
     /// Continuous LFO waveform rendered at sample rate. Stub —
     /// `channel/lfo.rs` lives in v0.2.
     AnalogLfo,
-    /// MIDI CC controller.
-    ///
-    /// `cc` and `range` values are in the MIDI `u7` domain (`0..=127`)
-    /// but stored as `u8`: agogo-core has no MIDI-crate dependency
-    /// that would provide a real `u7` newtype. Spec-surface stub;
-    /// rendering is v0.2.
-    MidiCc { cc: u8, range: (u8, u8) },
+    /// MIDI CC controller. Spec-surface stub; rendering is v0.2.
+    MidiCc { cc: U7, range: (U7, U7) },
     /// Per-tick metronome trigger.
     ///
     /// `Click(_)` is the agnostic role; the nested [`ClickConfig`]
@@ -56,16 +53,15 @@ pub enum ClickConfig {
 
 /// MIDI Note On / Note Off per scheduled tick.
 ///
-/// `note` and `vel` (and the optional accent's note/vel) live in the
-/// MIDI `u7` domain (`0..=127`). `ch` is `0..=15` (zero-based MIDI
-/// channel; user-facing 1–16 is mapped down at the spec parser).
-/// `vel` is `1..=127`; `vel=0` is a Note Off in the MIDI spec, so the
-/// parser rejects it explicitly to avoid silent metronomes.
+/// `vel` is `U7` but additionally restricted to `1..=127` at the spec
+/// parser — `vel=0` is a Note Off in the MIDI spec, so the parser
+/// rejects it to avoid silent metronomes. `ch` is the zero-based MIDI
+/// channel; user-facing 1–16 is mapped to `U4` at the spec parser.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MidiClickConfig {
-    pub note: u8,
-    pub vel: u8,
-    pub ch: u8,
+    pub note: U7,
+    pub vel: U7,
+    pub ch: U4,
     pub accent: Option<MidiClickAccent>,
 }
 
@@ -78,8 +74,8 @@ pub struct MidiClickConfig {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MidiClickAccent {
     pub every: NonZeroU32,
-    pub note: u8,
-    pub vel: u8,
+    pub note: U7,
+    pub vel: U7,
 }
 
 #[cfg(test)]
@@ -91,19 +87,19 @@ mod tests {
     #[test]
     fn all_variants_constructible() {
         let click_no_accent = ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
-            note: 76,
-            vel: 100,
-            ch: 9,
+            note: U7(76),
+            vel: U7(100),
+            ch: U4(9),
             accent: None,
         }));
         let click_with_accent = ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
-            note: 37,
-            vel: 70,
-            ch: 9,
+            note: U7(37),
+            vel: U7(70),
+            ch: U4(9),
             accent: Some(MidiClickAccent {
                 every: NonZeroU32::new(4).unwrap(),
-                note: 38,
-                vel: 120,
+                note: U7(38),
+                vel: U7(120),
             }),
         }));
         let modes = [
@@ -112,8 +108,8 @@ mod tests {
             ChannelMode::AnalogPulse,
             ChannelMode::AnalogLfo,
             ChannelMode::MidiCc {
-                cc: 74,
-                range: (0, 127),
+                cc: U7(74),
+                range: (U7(0), U7(127)),
             },
             click_no_accent,
             click_with_accent,

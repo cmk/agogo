@@ -713,6 +713,7 @@ mod tests {
     // ── Plan 2026-04-25-03: bar_multiplier + click counter tests ──
 
     use crate::channel::mode::{ClickConfig, MidiClickAccent, MidiClickConfig};
+    use crate::midi::{U4, U7};
     use crate::out::midi::{MIDI_NOTE_OFF, MIDI_NOTE_ON};
     use core::num::{NonZeroU16, NonZeroU32};
 
@@ -743,9 +744,9 @@ mod tests {
     fn click_channel_emits_note_on_per_divider_tick() {
         let bpm = Tempo::from_bpm_integer(120);
         let cfg = MidiClickConfig {
-            note: 76,
-            vel: 100,
-            ch: 9,
+            note: U7(76),
+            vel: U7(100),
+            ch: U4(9),
             accent: None,
         };
         let mut machine = Machine::<S48>::new(
@@ -774,12 +775,13 @@ mod tests {
     /// channel's emitted "tick" sample positions from a TestSink,
     /// filtering by mode (clock channels emit `0xF8`; click
     /// channels emit `0x9X` Note Ons).
-    fn collect_tick_samples(sink: &TestSink, mode_is_click: bool, ch: u8) -> Vec<u64> {
+    fn collect_tick_samples(sink: &TestSink, mode_is_click: bool, ch: U4) -> Vec<u64> {
+        let ch_byte: u8 = ch.into();
         sink.records()
             .into_iter()
             .filter(|r| {
                 if mode_is_click {
-                    r.bytes[0] == (MIDI_NOTE_ON | ch)
+                    r.bytes[0] == (MIDI_NOTE_ON | ch_byte)
                 } else {
                     r.bytes == vec![MIDI_CLOCK]
                 }
@@ -817,12 +819,12 @@ mod tests {
             let bpm = Tempo::from_bpm_integer(120);
             let frames: usize = 24_000; // 0.5 sec / buffer @ 48k
             let sr: u32 = 48_000;
-            let mch: u8 = 9;
+            let mch: U4 = U4(9);
 
             let make_mode = || {
                 if mode_is_click {
                     ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
-                        note: 76, vel: 100, ch: mch, accent: None,
+                        note: U7(76), vel: U7(100), ch: mch, accent: None,
                     }))
                 } else {
                     ChannelMode::MidiClock
@@ -880,7 +882,7 @@ mod tests {
     #[test]
     fn bars_filter_huge_n_keeps_only_first_event() {
         let bpm = Tempo::from_bpm_integer(120);
-        let cfg = MidiClickConfig { note: 76, vel: 100, ch: 9, accent: None };
+        let cfg = MidiClickConfig { note: U7(76), vel: U7(100), ch: U4(9), accent: None };
         let mut machine = Machine::<S48>::new(
             vec![click_channel(Grid::T16, cfg, NonZeroU16::new(u16::MAX))],
             PhaseSource::Internal { bpm },
@@ -890,7 +892,7 @@ mod tests {
         );
         let sink = TestSink::new();
         drive_buffers(&mut machine, &sink, 4, 48_000, 48_000);
-        let on_samples = collect_tick_samples(&sink, true, 9);
+        let on_samples = collect_tick_samples(&sink, true, U4(9));
         assert_eq!(
             on_samples.len(), 1,
             "bars=u16::MAX must filter all but the first event, got {} clicks",
@@ -919,10 +921,10 @@ mod tests {
         ) {
             let bpm = Tempo::from_bpm_integer(120);
             let cfg = MidiClickConfig {
-                note: 37, vel: 70, ch: 9,
+                note: U7(37), vel: U7(70), ch: U4(9),
                 accent: Some(MidiClickAccent {
                     every: NonZeroU32::new(every).unwrap(),
-                    note: 38, vel: 120,
+                    note: U7(38), vel: U7(120),
                 }),
             };
             let mut machine = Machine::<S48>::new(
@@ -972,13 +974,13 @@ mod tests {
     fn bars_and_accent_compose_correctly() {
         let bpm = Tempo::from_bpm_integer(120);
         let cfg = MidiClickConfig {
-            note: 37,
-            vel: 70,
-            ch: 9,
+            note: U7(37),
+            vel: U7(70),
+            ch: U4(9),
             accent: Some(MidiClickAccent {
                 every: NonZeroU32::new(2).unwrap(),
-                note: 38,
-                vel: 120,
+                note: U7(38),
+                vel: U7(120),
             }),
         };
         let mut machine = Machine::<S48>::new(

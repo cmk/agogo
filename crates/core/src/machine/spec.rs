@@ -35,6 +35,7 @@ use crate::channel::transform::MAX_DELAY;
 use crate::channel::{Channel, ChannelMode};
 use crate::dsl;
 use crate::fxp::{Extended, ExtendedFloat, F64F06, Micro};
+use crate::midi::{U4, U7};
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
 use crate::time::tbase::TBase;
@@ -130,12 +131,12 @@ impl ChannelSpec {
         // note+vel; clock rejects click keys) are easier to enforce
         // in one pass at the end.
         let mut mode_kw: Option<&'static str> = None; // "clock" | "click"
-        let mut note: Option<u8> = None;
-        let mut vel: Option<u8> = None;
-        let mut mch_one_based: Option<u8> = None;
+        let mut note: Option<U7> = None;
+        let mut vel: Option<U7> = None;
+        let mut mch_zero_based: Option<U4> = None;
         let mut accent_every: Option<u32> = None;
-        let mut accent_note: Option<u8> = None;
-        let mut accent_vel: Option<u8> = None;
+        let mut accent_note: Option<U7> = None;
+        let mut accent_vel: Option<U7> = None;
         let mut bars: Option<NonZeroU16> = None;
 
         for (k, v) in pairs {
@@ -170,25 +171,28 @@ impl ChannelSpec {
                     let n = v
                         .parse::<u8>()
                         .map_err(|e| ChannelSpecError::BadValue("note", e.to_string()))?;
-                    if n > 127 {
-                        return Err(ChannelSpecError::BadValue(
-                            "note",
-                            format!("must be 0..=127, got {n}"),
-                        ));
-                    }
-                    note = Some(n);
+                    note = Some(U7::new(n).ok_or_else(|| {
+                        ChannelSpecError::BadValue("note", format!("must be 0..=127, got {n}"))
+                    })?);
                 }
                 "vel" => {
                     let n = v
                         .parse::<u8>()
                         .map_err(|e| ChannelSpecError::BadValue("vel", e.to_string()))?;
-                    if n == 0 || n > 127 {
+                    // vel=0 is a Note Off in the MIDI spec — reject
+                    // separately so the error message is meaningful.
+                    if n == 0 {
                         return Err(ChannelSpecError::BadValue(
                             "vel",
                             format!("must be 1..=127 (vel=0 is Note Off), got {n}"),
                         ));
                     }
-                    vel = Some(n);
+                    vel = Some(U7::new(n).ok_or_else(|| {
+                        ChannelSpecError::BadValue(
+                            "vel",
+                            format!("must be 1..=127 (vel=0 is Note Off), got {n}"),
+                        )
+                    })?);
                 }
                 "mch" => {
                     let n = v
@@ -200,7 +204,8 @@ impl ChannelSpec {
                             format!("must be 1..=16 (user-facing), got {n}"),
                         ));
                     }
-                    mch_one_based = Some(n);
+                    // n ∈ 1..=16, so n - 1 ∈ 0..=15 ⊂ U4 — `new` is total.
+                    mch_zero_based = Some(U4::new(n - 1).expect("n - 1 in 0..=15"));
                 }
                 "accent-every" => {
                     let n = v
@@ -218,25 +223,29 @@ impl ChannelSpec {
                     let n = v
                         .parse::<u8>()
                         .map_err(|e| ChannelSpecError::BadValue("accent-note", e.to_string()))?;
-                    if n > 127 {
-                        return Err(ChannelSpecError::BadValue(
+                    accent_note = Some(U7::new(n).ok_or_else(|| {
+                        ChannelSpecError::BadValue(
                             "accent-note",
                             format!("must be 0..=127, got {n}"),
-                        ));
-                    }
-                    accent_note = Some(n);
+                        )
+                    })?);
                 }
                 "accent-vel" => {
                     let n = v
                         .parse::<u8>()
                         .map_err(|e| ChannelSpecError::BadValue("accent-vel", e.to_string()))?;
-                    if n == 0 || n > 127 {
+                    if n == 0 {
                         return Err(ChannelSpecError::BadValue(
                             "accent-vel",
                             format!("must be 1..=127 (vel=0 is Note Off), got {n}"),
                         ));
                     }
-                    accent_vel = Some(n);
+                    accent_vel = Some(U7::new(n).ok_or_else(|| {
+                        ChannelSpecError::BadValue(
+                            "accent-vel",
+                            format!("must be 1..=127 (vel=0 is Note Off), got {n}"),
+                        )
+                    })?);
                 }
                 "bars" => {
                     let n = v
@@ -302,7 +311,7 @@ impl ChannelSpec {
                 let presence = [
                     note.is_some(),
                     vel.is_some(),
-                    mch_one_based.is_some(),
+                    mch_zero_based.is_some(),
                     accent_every.is_some(),
                     accent_note.is_some(),
                     accent_vel.is_some(),
@@ -320,7 +329,8 @@ impl ChannelSpec {
             "click" => {
                 let note = note.ok_or(ChannelSpecError::MissingKey("note"))?;
                 let vel = vel.ok_or(ChannelSpecError::MissingKey("vel"))?;
-                let mch = mch_one_based.unwrap_or(10); // GM drum default
+                // GM drum kit default = mch 10 (1-based) = U4(9).
+                let ch = mch_zero_based.unwrap_or(U4(9));
                 let accent = match accent_every {
                     Some(e) => {
                         let av =
@@ -349,7 +359,7 @@ impl ChannelSpec {
                 ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
                     note,
                     vel,
-                    ch: mch - 1,
+                    ch,
                     accent,
                 }))
             }
@@ -513,7 +523,7 @@ impl Display for ChannelSpec {
                     ",mode=click,note={},vel={},mch={}",
                     cfg.note,
                     cfg.vel,
-                    cfg.ch + 1, // user-facing 1-based
+                    cfg.ch.0 + 1, // user-facing 1-based
                 )?;
                 if let Some(a) = &cfg.accent {
                     write!(f, ",accent-every={},accent-vel={}", a.every, a.vel)?;
@@ -914,13 +924,13 @@ mod tests {
             .prop_map(|(note, vel, ch, accent_triple)| {
                 let accent = accent_triple.map(|(every, an, av)| MidiClickAccent {
                     every: NonZeroU32::new(every).unwrap(),
-                    note: an,
-                    vel: av,
+                    note: U7(an),
+                    vel: U7(av),
                 });
                 ChannelMode::Click(ClickConfig::Midi(MidiClickConfig {
-                    note,
-                    vel,
-                    ch,
+                    note: U7(note),
+                    vel: U7(vel),
+                    ch: U4(ch),
                     accent,
                 }))
             });
@@ -1017,13 +1027,13 @@ mod tests {
             ChannelMode::Click(ClickConfig::Midi(c)) => c,
             other => panic!("expected Click(Midi), got {:?}", other),
         };
-        assert_eq!(cfg.note, 37);
-        assert_eq!(cfg.vel, 80);
-        assert_eq!(cfg.ch, 9, "mch=10 → ch=9 (zero-based)");
+        assert_eq!(cfg.note, U7(37));
+        assert_eq!(cfg.vel, U7(80));
+        assert_eq!(cfg.ch, U4(9), "mch=10 → ch=9 (zero-based)");
         let accent = cfg.accent.expect("accent set");
         assert_eq!(accent.every.get(), 4);
-        assert_eq!(accent.note, 38);
-        assert_eq!(accent.vel, 120);
+        assert_eq!(accent.note, U7(38));
+        assert_eq!(accent.vel, U7(120));
     }
 
     #[test]
@@ -1034,7 +1044,7 @@ mod tests {
             ChannelMode::Click(ClickConfig::Midi(c)) => c,
             _ => panic!(),
         };
-        assert_eq!(cfg.ch, 9);
+        assert_eq!(cfg.ch, U4(9));
     }
 
     #[test]
@@ -1046,7 +1056,7 @@ mod tests {
             _ => panic!(),
         };
         let accent = cfg.accent.unwrap();
-        assert_eq!(accent.note, 37, "accent-note absent → defaults to note");
+        assert_eq!(accent.note, U7(37), "accent-note absent → defaults to note");
     }
 
     #[test]
@@ -1167,7 +1177,7 @@ mod tests {
                 .unwrap();
         let ch = spec.into_channel().unwrap();
         match ch.mode {
-            ChannelMode::Click(ClickConfig::Midi(cfg)) => assert_eq!(cfg.ch, 9),
+            ChannelMode::Click(ClickConfig::Midi(cfg)) => assert_eq!(cfg.ch, U4(9)),
             _ => panic!("expected Click(Midi)"),
         }
     }
