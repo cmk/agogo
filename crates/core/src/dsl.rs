@@ -10,6 +10,7 @@
 pub mod ast;
 pub mod error;
 mod lexer;
+mod parser;
 
 pub use ast::TrackSpec;
 pub use error::DslError;
