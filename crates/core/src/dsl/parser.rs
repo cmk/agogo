@@ -639,7 +639,7 @@ mod tests {
     #[test]
     fn trailing_garbage() {
         let err = parse("T16 T8").unwrap_err();
-        matches!(err.kind, DslErrorKind::Expected { .. });
+        assert!(matches!(err.kind, DslErrorKind::Expected { .. }));
     }
 
     #[test]
@@ -657,7 +657,22 @@ mod tests {
     #[test]
     fn invalid_atom() {
         let err = parse("T3").unwrap_err();
-        matches!(err.kind, DslErrorKind::InvalidAtom(_));
+        assert!(matches!(err.kind, DslErrorKind::InvalidAtom(_)));
+    }
+
+    #[test]
+    fn nesting_depth_exceeded() {
+        // 33 consecutive `!` exceeds MAX_DEPTH (32).
+        let s = format!("{}T16", "!".repeat(33));
+        let err = parse(&s).unwrap_err();
+        assert_eq!(err.kind, DslErrorKind::NestingTooDeep);
+    }
+
+    #[test]
+    fn nesting_depth_at_limit_succeeds() {
+        // 32 consecutive `!` is exactly at the limit — should succeed.
+        let s = format!("{}T16", "!".repeat(32));
+        assert!(parse(&s).is_ok());
     }
 
     // ── Proptest ─────────────────────────────────────────────────

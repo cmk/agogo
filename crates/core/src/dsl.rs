@@ -52,6 +52,7 @@ pub fn parse(input: &str) -> Result<TrackSpec, DslError> {
 mod tests {
     use super::*;
     use crate::dsl::ast::{Expr, Span, TrackAst};
+    use crate::dsl::eval;
     use crate::time::grid::{self, Grid};
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
@@ -147,6 +148,25 @@ mod tests {
         prop::sample::select(Grid::ALL.as_slice())
     }
 
+    fn arb_expr() -> impl Strategy<Value = Expr> {
+        let sp = Span { start: 0, end: 0 };
+        let leaf = arb_grid().prop_map(move |g| Expr::Atom(g, sp));
+        leaf.prop_recursive(4, 16, 2, move |inner| {
+            prop_oneof![
+                3 => inner.clone(),
+                1 => inner.clone().prop_map(move |a| Expr::Neg(Box::new(a), sp)),
+                1 => (inner.clone(), inner.clone())
+                    .prop_map(move |(a, b)| Expr::Meet(Box::new(a), Box::new(b), sp)),
+                1 => (inner.clone(), inner.clone())
+                    .prop_map(move |(a, b)| Expr::Join(Box::new(a), Box::new(b), sp)),
+                1 => (inner.clone(), inner.clone())
+                    .prop_map(move |(a, b)| Expr::Imply(Box::new(a), Box::new(b), sp)),
+                1 => (inner.clone(), inner)
+                    .prop_map(move |(a, b)| Expr::Coimply(Box::new(a), Box::new(b), sp)),
+            ]
+        })
+    }
+
     proptest! {
         #[test]
         fn eval_preserves_meet(a in arb_grid(), b in arb_grid()) {
@@ -219,24 +239,22 @@ mod tests {
             prop_assert_eq!(parse(&s1).unwrap().grid, parse(&s2).unwrap().grid);
         }
 
-        /// Display → parse round-trip preserves evaluation.
+        /// Display → parse round-trip preserves evaluation for all
+        /// operator variants and nesting depths up to 4.
         #[test]
-        fn display_parse_round_trip(a in arb_grid(), b in arb_grid()) {
-            // Build an AST, display it, parse it back, check evaluation.
-            use crate::dsl::ast::Span;
+        fn display_parse_round_trip(expr in arb_expr()) {
             let sp = Span { start: 0, end: 0 };
             let ast = TrackAst {
-                expr: Expr::Meet(
-                    Box::new(Expr::Atom(a, sp)),
-                    Box::new(Expr::Atom(b, sp)),
-                    sp,
-                ),
+                expr: expr.clone(),
                 modifiers: vec![],
                 span: sp,
             };
             let displayed = ast.to_string();
-            let reparsed = parse(&displayed).unwrap();
-            prop_assert_eq!(reparsed.grid, grid::meet(a, b));
+            let reparsed = parse(&displayed).map_err(|e| {
+                TestCaseError::fail(format!("parse({displayed:?}): {e}"))
+            })?;
+            let expected = eval::eval_expr(&expr);
+            prop_assert_eq!(reparsed.grid, expected);
         }
     }
 }
