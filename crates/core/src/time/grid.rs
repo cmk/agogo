@@ -189,13 +189,18 @@ pub fn join(a: Grid, b: Grid) -> Grid {
     }
 }
 
-/// Heyting implication on the product. Factors component-wise; on
-/// each component it's the implication of that component's lattice.
-/// On the bool axes, Heyting implication coincides with classical
-/// implication (`a → b = !a || b`). On the `n`-axis chain, the
-/// implication is `min(a.exp, max(b.exp, ...))` — we compute it
-/// directly via the witness formula `max{c : meet(a, c) ⊑ b}`.
-pub fn heyting(a: Grid, b: Grid) -> Grid {
+// ── Heyting algebra ─────────────────────────────────────────────
+
+/// Heyting implication on the product lattice.
+///
+/// `imply(a, b)` = max{c ∈ L : meet(a, c) ⊑ b}
+///
+/// Upper adjoint of conjunction with a:
+///   meet(a, x) ⊑ b  ⟺  x ⊑ imply(a, b)
+///
+/// Factors component-wise on the product; on the bool axes Heyting
+/// implication coincides with classical implication (`a → b = !a || b`).
+pub fn imply(a: Grid, b: Grid) -> Grid {
     Grid::ALL
         .iter()
         .copied()
@@ -204,9 +209,65 @@ pub fn heyting(a: Grid, b: Grid) -> Grid {
         .expect("Grid::T512P always satisfies meet(a, T512P) = T512P ⊑ b")
 }
 
-/// Heyting pseudo-complement: `neg(x) = heyting(x, T512P)`.
+/// Heyting pseudo-complement: `neg(x) = imply(x, ⊥)`.
+///
+/// The largest element orthogonal to `x` (i.e. whose meet with `x`
+/// is bottom). Laws:
+///   neg(⊥) = ⊤, neg(⊤) = ⊥
+///   x ⊑ neg(neg(x))
+///   meet(x, neg(x)) = ⊥
+///   neg(neg(neg(x))) = neg(x)
 pub fn neg(x: Grid) -> Grid {
-    heyting(x, Grid::T512P)
+    imply(x, Grid::T512P)
+}
+
+/// Heyting middle: `mid(x) = join(x, neg(x))`.
+///
+/// Not necessarily ⊤ — equals ⊤ only in a Boolean algebra. On this
+/// lattice the excluded middle fails for most elements.
+pub fn mid(x: Grid) -> Grid {
+    join(x, neg(x))
+}
+
+// ── Co-Heyting algebra ──────────────────────────────────────────
+
+/// Co-Heyting coimplication (subtraction) on the product lattice.
+///
+/// `coimp(a, b)` = min{c ∈ L : a ⊑ join(b, c)}
+///
+/// Lower adjoint of disjunction with b:
+///   coimp(a, b) ⊑ c  ⟺  a ⊑ join(b, c)
+///
+/// Dual of [`imply`]: where `imply` finds the largest `c` satisfying
+/// a conjunction constraint, `coimp` finds the smallest `c` satisfying
+/// a disjunction constraint.
+pub fn coimp(a: Grid, b: Grid) -> Grid {
+    Grid::ALL
+        .iter()
+        .copied()
+        .filter(|&c| a.ple(&join(b, c)))
+        .reduce(meet)
+        .expect("Grid::T1 always satisfies a ⊑ join(b, T1)")
+}
+
+/// Co-Heyting co-negation: `coneg(x) = coimp(⊤, x)`.
+///
+/// The smallest element whose join with `x` is ⊤. Laws:
+///   coneg(⊥) = ⊤, coneg(⊤) = ⊥
+///   coneg(coneg(x)) ⊑ x
+///   join(x, coneg(x)) = ⊤
+///   coneg(coneg(coneg(x))) = coneg(x)
+pub fn coneg(x: Grid) -> Grid {
+    coimp(Grid::T1, x)
+}
+
+/// Co-Heyting co-middle (boundary): `comid(x) = meet(x, coneg(x))`.
+///
+/// Not necessarily ⊥ — equals ⊥ only in a Boolean algebra. Satisfies
+/// the Leibniz rule: `comid(meet(a, b)) = join(meet(comid(a), b),
+/// meet(a, comid(b)))`.
+pub fn comid(x: Grid) -> Grid {
+    meet(x, coneg(x))
 }
 
 // ── Display / FromStr — the DSL atom morphism ───────────────────
@@ -408,6 +469,50 @@ mod tests {
         assert_eq!(join(Grid::T1, Grid::T2), Grid::T1);
     }
 
+    // ── Heyting / co-Heyting spot checks ────────────────────────────
+
+    /// h8: neg boundary values
+    #[test]
+    fn h8_neg_boundary() {
+        assert_eq!(neg(Grid::T512P), Grid::T1);
+        assert_eq!(neg(Grid::T1), Grid::T512P);
+    }
+
+    /// c8: coneg boundary values
+    #[test]
+    fn c8_coneg_boundary() {
+        assert_eq!(coneg(Grid::T512P), Grid::T1);
+        assert_eq!(coneg(Grid::T1), Grid::T512P);
+    }
+
+    #[test]
+    fn coneg_t16_is_t2p() {
+        assert_eq!(coneg(Grid::T16), Grid::T2P);
+    }
+
+    #[test]
+    fn coneg_t16t_is_t2q() {
+        assert_eq!(coneg(Grid::T16T), Grid::T2Q);
+    }
+
+    /// Non-Boolean witness: neg ≠ coneg for T16.
+    #[test]
+    fn not_boolean_neg_ne_coneg() {
+        assert_ne!(neg(Grid::T16), coneg(Grid::T16));
+    }
+
+    /// Non-Boolean witness: double neg ≠ identity for T16.
+    #[test]
+    fn not_boolean_double_neg_ne_id() {
+        assert_ne!(neg(neg(Grid::T16)), Grid::T16);
+    }
+
+    /// Non-Boolean witness: excluded middle fails for neg.
+    #[test]
+    fn not_boolean_mid_ne_top() {
+        assert_ne!(mid(Grid::T16), Grid::T1);
+    }
+
     // ── Display / FromStr ─────────────────────────────────────────
 
     #[test]
@@ -531,14 +636,287 @@ mod tests {
             );
         }
 
-        /// Heyting adjunction: `meet(a, c) ⊑ b ⟺ c ⊑ heyting(a, b)`.
+        // ── Heyting (imply / neg / mid) ──────────────────────────
+
+        /// h0: adjunction — meet(x, y) ⊑ z ⟺ x ⊑ imply(y, z)
         #[test]
-        fn heyting_pseudo_complement(
-            a in arb_grid(), b in arb_grid(), c in arb_grid(),
+        fn h0_imply_adjunction(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
-            let lhs = meet(a, c).ple(&b);
-            let rhs = c.ple(&heyting(a, b));
-            prop_assert_eq!(lhs, rhs);
+            prop_assert_eq!(
+                meet(x, y).ple(&z),
+                x.ple(&imply(y, z))
+            );
+        }
+
+        /// h1: imply monotone in 2nd arg under join
+        #[test]
+        fn h1_imply_monotone_join_2nd(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert!(imply(x, y).ple(&imply(x, join(y, z))));
+        }
+
+        /// h2: imply antitone in 1st arg under join
+        #[test]
+        fn h2_imply_antitone_join_1st(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert!(imply(join(x, z), y).ple(&imply(x, y)));
+        }
+
+        /// h3: imply monotone in 2nd arg under ple
+        #[test]
+        fn h3_imply_monotone_ple_2nd(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            if x.ple(&y) {
+                prop_assert!(imply(z, x).ple(&imply(z, y)));
+            }
+        }
+
+        /// h4: currying
+        #[test]
+        fn h4_imply_currying(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert_eq!(imply(meet(x, y), z), imply(x, imply(y, z)));
+        }
+
+        /// h5: imply distributes over meet
+        #[test]
+        fn h5_imply_distributes_over_meet(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert_eq!(
+                imply(x, meet(y, z)),
+                meet(imply(x, y), imply(x, z))
+            );
+        }
+
+        /// h6: weakening
+        #[test]
+        fn h6_weakening(x in arb_grid(), y in arb_grid()) {
+            prop_assert!(y.ple(&imply(x, meet(x, y))));
+        }
+
+        /// h7: modus ponens
+        #[test]
+        fn h7_modus_ponens(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(meet(x, imply(x, y)), meet(x, y));
+        }
+
+        /// h9: neg-join ≤ imply
+        #[test]
+        fn h9_neg_join_le_imply(x in arb_grid(), y in arb_grid()) {
+            prop_assert!(join(neg(x), y).ple(&imply(x, y)));
+        }
+
+        /// h10: imply = top iff ple
+        #[test]
+        fn h10_imply_top_iff_ple(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(x.ple(&y), imply(x, y) == Grid::T1);
+        }
+
+        /// h11: neg antitone under join
+        #[test]
+        fn h11_neg_antitone_join(x in arb_grid(), y in arb_grid()) {
+            prop_assert!(neg(join(x, y)).ple(&neg(x)));
+        }
+
+        /// h12: neg-imply de Morgan
+        #[test]
+        fn h12_neg_imply_de_morgan(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(neg(imply(x, y)), meet(neg(neg(x)), neg(y)));
+        }
+
+        /// h13: neg-join de Morgan
+        #[test]
+        fn h13_neg_join_de_morgan(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(neg(join(x, y)), meet(neg(x), neg(y)));
+        }
+
+        /// h14: non-contradiction
+        #[test]
+        fn h14_non_contradiction(x in arb_grid()) {
+            prop_assert_eq!(meet(x, neg(x)), Grid::T512P);
+        }
+
+        /// h15: triple neg = neg
+        #[test]
+        fn h15_triple_neg(x in arb_grid()) {
+            prop_assert_eq!(neg(neg(neg(x))), neg(x));
+        }
+
+        /// h16: double neg excluded middle
+        #[test]
+        fn h16_double_neg_mid(x in arb_grid()) {
+            prop_assert_eq!(neg(neg(mid(x))), Grid::T1);
+        }
+
+        /// h17: double neg monad
+        #[test]
+        fn h17_double_neg_monad(x in arb_grid()) {
+            prop_assert!(x.ple(&neg(neg(x))));
+        }
+
+        // ── Co-Heyting (coimp / coneg / comid) ───────────────────
+
+        /// c0: adjunction — coimp(x, y) ⊑ z ⟺ x ⊑ join(y, z)
+        #[test]
+        fn c0_coimp_adjunction(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert_eq!(
+                coimp(x, y).ple(&z),
+                x.ple(&join(y, z))
+            );
+        }
+
+        /// c1: coimp monotone (meet in 1st arg)
+        #[test]
+        fn c1_coimp_monotone_meet_1st(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert!(coimp(meet(x, z), y).ple(&coimp(x, y)));
+        }
+
+        /// c2: coimp antitone (meet in 2nd arg)
+        #[test]
+        fn c2_coimp_antitone_meet_2nd(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert!(coimp(x, y).ple(&coimp(x, meet(y, z))));
+        }
+
+        /// c3: coimp monotone (ple in 1st arg)
+        #[test]
+        fn c3_coimp_monotone_ple_1st(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            if y.ple(&x) {
+                prop_assert!(coimp(y, z).ple(&coimp(x, z)));
+            }
+        }
+
+        /// c4: co-currying
+        #[test]
+        fn c4_coimp_co_currying(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert_eq!(coimp(z, join(x, y)), coimp(coimp(z, x), y));
+        }
+
+        /// c5: coimp distributes over join
+        #[test]
+        fn c5_coimp_distributes_over_join(
+            x in arb_grid(), y in arb_grid(), z in arb_grid(),
+        ) {
+            prop_assert_eq!(
+                coimp(join(y, z), x),
+                join(coimp(y, x), coimp(z, x))
+            );
+        }
+
+        /// c6: coimp ≤ self
+        #[test]
+        fn c6_coimp_le_self(x in arb_grid(), y in arb_grid()) {
+            prop_assert!(coimp(x, y).ple(&x));
+        }
+
+        /// c7: join absorption
+        #[test]
+        fn c7_join_absorption(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(join(x, coimp(y, x)), join(x, y));
+        }
+
+        /// c9: meet-coneg ≥ coimp
+        #[test]
+        fn c9_meet_coneg_ge_coimp(x in arb_grid(), y in arb_grid()) {
+            prop_assert!(coimp(x, y).ple(&meet(x, coneg(y))));
+        }
+
+        /// c10: coimp = bottom iff ple
+        #[test]
+        fn c10_coimp_bot_iff_ple(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(y.ple(&x), coimp(y, x) == Grid::T512P);
+        }
+
+        /// c11: coneg antitone under meet
+        #[test]
+        fn c11_coneg_antitone_meet(x in arb_grid(), y in arb_grid()) {
+            prop_assert!(coneg(x).ple(&coneg(meet(x, y))));
+        }
+
+        /// c12: coneg-coimp de Morgan
+        #[test]
+        fn c12_coneg_coimp_de_morgan(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(
+                coneg(coimp(y, x)),
+                join(coneg(coneg(x)), coneg(y))
+            );
+        }
+
+        /// c13: coneg-meet de Morgan
+        #[test]
+        fn c13_coneg_meet_de_morgan(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(coneg(meet(x, y)), join(coneg(x), coneg(y)));
+        }
+
+        /// c14: excluded middle
+        #[test]
+        fn c14_excluded_middle(x in arb_grid()) {
+            prop_assert_eq!(join(x, coneg(x)), Grid::T1);
+        }
+
+        /// c15: triple coneg = coneg
+        #[test]
+        fn c15_triple_coneg(x in arb_grid()) {
+            prop_assert_eq!(coneg(coneg(coneg(x))), coneg(x));
+        }
+
+        /// c16: double coneg comid
+        #[test]
+        fn c16_double_coneg_comid(x in arb_grid()) {
+            prop_assert_eq!(coneg(coneg(comid(x))), Grid::T512P);
+        }
+
+        /// c17: double coneg comonad
+        #[test]
+        fn c17_double_coneg_comonad(x in arb_grid()) {
+            prop_assert!(coneg(coneg(x)).ple(&x));
+        }
+
+        /// c18: comid decomposition
+        #[test]
+        fn c18_comid_decomposition(x in arb_grid()) {
+            prop_assert_eq!(x, join(comid(x), coneg(coneg(x))));
+        }
+
+        /// c19: Leibniz rule
+        #[test]
+        fn c19_leibniz(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(
+                comid(meet(x, y)),
+                join(meet(comid(x), y), meet(x, comid(y)))
+            );
+        }
+
+        /// c20: comid additivity
+        #[test]
+        fn c20_comid_additivity(x in arb_grid(), y in arb_grid()) {
+            prop_assert_eq!(
+                join(comid(join(x, y)), comid(meet(x, y))),
+                join(comid(x), comid(y))
+            );
+        }
+
+        // ── Bi-Heyting ──────────────────────────────────────────
+
+        /// s1: neg ≤ coneg
+        #[test]
+        fn s1_neg_le_coneg(x in arb_grid()) {
+            prop_assert!(neg(x).ple(&coneg(x)));
         }
 
         #[test]
