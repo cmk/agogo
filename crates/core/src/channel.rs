@@ -3,14 +3,19 @@
 //! transform pipeline. Pure logic — no audio I/O, no MIDI bytes.
 //!
 //! Submodules:
-//! - [`mode`]      — enum `ChannelMode` (MidiClock, Din, AnalogPulse, AnalogLfo, MidiCc).
-//! - [`transform`] — `Channel` struct + per-buffer transform pipeline.
+//! - [`role`]      — per-routing-target role enums (`MidiRole`,
+//!   `DinRole`, `CvRole`) + the shared [`role::ChannelCommon`]
+//!   field set.
+//! - [`transform`] — sum-typed [`transform::Channel`] enum + the
+//!   per-buffer transform pipeline.
 //! - [`scheduler`] — `tick_stream` block-level event emission.
 
-pub mod mode;
+pub mod role;
 pub mod scheduler;
 pub mod transform;
 
-pub use mode::ChannelMode;
+pub use role::{
+    ChannelCommon, CvRole, DinRole, MidiCcConfig, MidiClickAccent, MidiClickConfig, MidiRole,
+};
 pub use scheduler::tick_stream;
 pub use transform::{Channel, MAX_DELAY, ScheduledEvent, transform};

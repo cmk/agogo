@@ -58,7 +58,7 @@ pub use agogo_core::channel::scheduler::max_events_for_buffer;
 mod tests {
     use super::*;
     use crate::cpal::control::spsc;
-    use agogo_core::channel::{Channel, ChannelMode};
+    use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
     use agogo_core::fxp::{Micro, S48, Tempo};
     use agogo_core::machine::TransportPolicy;
     use agogo_core::sync::PhaseSource;
@@ -77,16 +77,18 @@ mod tests {
         crate::cpal::control::ControlConsumer,
     ) {
         let (producer, consumer) = spsc(1024);
-        let channel = Channel {
-            mode: ChannelMode::MidiClock,
-            divider,
-            shuffle: SwingConfig {
-                resolution: TBase::T16,
-                amount: 0,
+        let channel = Channel::Midi {
+            common: ChannelCommon {
+                divider,
+                shuffle: SwingConfig {
+                    resolution: TBase::T16,
+                    amount: 0,
+                },
+                delay: Micro::ZERO,
+                offset: Micro::ZERO,
+                bar_multiplier: None,
             },
-            delay: Micro::ZERO,
-            offset: Micro::ZERO,
-            bar_multiplier: None,
+            role: MidiRole::Clock,
         };
         let machine = Machine::<S48>::new(
             vec![channel],

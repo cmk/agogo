@@ -186,7 +186,7 @@ fn quantum_snap_produces_positive_offset() {
     // transform pipeline wired through the real audio callback,
     // which lands with Plan 05.
     link_multicast_or_skip!();
-    use agogo_core::channel::{Channel, ChannelMode, MAX_DELAY};
+    use agogo_core::channel::{Channel, ChannelCommon, MidiRole, MAX_DELAY};
     use agogo_core::fxp::Micro;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
@@ -198,35 +198,43 @@ fn quantum_snap_produces_positive_offset() {
     // Let Link's internal state stabilise.
     sleep(Duration::from_millis(100));
 
-    let mut ch = Channel {
-        mode: ChannelMode::MidiClock,
-        divider: Grid::T4,
-        shuffle: SwingConfig {
-            resolution: TBase::T16,
-            amount: 0,
+    let mut ch = Channel::Midi {
+        common: ChannelCommon {
+            divider: Grid::T4,
+            shuffle: SwingConfig {
+                resolution: TBase::T16,
+                amount: 0,
+            },
+            delay: Micro::ZERO,
+            offset: Micro::ZERO,
+            bar_multiplier: None,
         },
-        delay: Micro::ZERO,
-        offset: Micro::ZERO,
-        bar_multiplier: None,
+        role: MidiRole::Clock,
     };
     // Audit P2 (Plan 20): the previous `arm_channel(&mut ch)` API
     // mutated `ch.offset` in place; the new `snap_offset_for(intent)`
-    // returns the delta and the caller folds it in.
+    // returns the delta and the caller folds it in. Plan 21
+    // (audit P3) reshaped Channel into a sum type — `ch.offset`
+    // becomes `ch.common_mut().offset`.
     let snap_intent = Some(Quantum::from_bars(4));
     let delta = agogo_session.snap_offset_for(snap_intent);
-    ch.offset = Micro(ch.offset.0.saturating_add(delta.0));
+    {
+        let common = ch.common_mut();
+        common.offset = Micro(common.offset.0.saturating_add(delta.0));
+    }
     agogo_session.enable(false);
 
     // At 120 BPM, Quantum::from_bars(4) spans 4 beats (one 4/4 bar):
     // 4 × 500 ms = 2 s = 2_000_000 µs.
     // Snap delta must be within [0, 2_000_001) (+1 µs rounding slack).
+    let final_offset = ch.common().offset;
     assert!(
-        ch.offset.0 >= 0,
-        "snap produced negative offset: {:?}", ch.offset
+        final_offset.0 >= 0,
+        "snap produced negative offset: {:?}", final_offset
     );
     assert!(
-        ch.offset.0 < 2_000_001,
-        "snap offset {:?} exceeds one-quantum span at 120 BPM", ch.offset
+        final_offset.0 < 2_000_001,
+        "snap offset {:?} exceeds one-quantum span at 120 BPM", final_offset
     );
     // Also: the offset shouldn't accidentally saturate MAX_DELAY
     // (which would indicate unit confusion — MAX_DELAY is 300 ms).
