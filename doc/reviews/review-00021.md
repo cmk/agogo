@@ -11,7 +11,7 @@ same-sample Note Off) through the existing `MidirSink`. Per-channel
 configuration:
 
 ```
---ch dev=midi,mode=click,div=t4,note=37,vel=70,mch=10,\
+--ch dev=midi,mode=click,grid=t4,note=37,vel=70,mch=10,\
      accent-every=4,accent-note=38,accent-vel=120,out="IAC Bus 1"
 ```
 
@@ -22,8 +22,8 @@ user's hardware/soft synth turns the Note On into sound.
 
 **`bars=N`** is a divider-agnostic multiplier on the channel's
 scheduled tick stream — emit every N-th `tick_stream_into` event.
-Idiomatic case `div=t1,bars=N` fires every N bars (in 4/4); the
-mechanism also works on smaller dividers, so `div=t8,bars=3`
+Idiomatic case `grid=t1,bars=N` fires every N bars (in 4/4); the
+mechanism also works on smaller dividers, so `grid=t8,bars=3`
 expresses a dotted-quarter cadence not in `Grid::ALL`.
 
 ### Why these shapes
@@ -211,7 +211,18 @@ Spot checks from the Verification table: all 15 listed spot checks are present a
 
 5. The `render_channel_block` `Option<&mut u32>` API makes the Click/non-Click invariant a runtime panic rather than a compile-time guarantee. The plan's Review section acknowledges this and defers a typed solution; tracking it as a v0.2 debt item would keep the deferral visible.
 
+### Resolution (2026-04-25, fix commit 3bb2597 + post-rebase)
+
+All three Must-fix items above were addressed before push and survived the subsequent rebase onto Plan 17's refactored base:
+
+1. ✅ `click_counter_advances_across_buffer_boundaries` is now a proptest with arbitrary split point, suffix count, and accent period (`out/midi.rs`).
+2. ✅ `bars_filter_emits_every_nth_grid_event` is now a proptest sampling `Grid::ALL` × clock/click; boundary spot check `bars_filter_huge_n_keeps_only_first_event` covers `bars=u16::MAX` (`machine.rs`).
+3. ✅ `arb_mode.accent_every` and `arb_bars` widened to full `NonZeroU32` / `NonZeroU16` domain with documented justification (`spec.rs`).
+
+Follow-up #4 (shift_ms — now `delay_ms` after rebase) was also addressed as a bonus: `arb_spec.delay_ms` widened with a comment. Follow-up #5 (typed Click/non-Click contract) remains a v0.2 debt item, captured in the plan's Review section.
+
 <!-- gh-id: 3143031925 -->
+### Copilot on [`crates/core/src/machine/spec.rs:10`](https://github.com/cmk/agogo/pull/21#discussion_r3143031925) (2026-04-26 05:29 UTC)
 ### Copilot on [`crates/core/src/machine/spec.rs:10`](https://github.com/cmk/agogo/pull/21#discussion_r3143031925) (2026-04-26 05:29 UTC)
 
 Module docs describe `bars` as a “T1-multiplier on the divider”, but the implemented semantics (and the plan) are divider-agnostic “emit every Nth scheduled tick_stream event”. This wording is contradictory and can mislead readers into thinking `bars` is tied to `div=t1`.
@@ -308,3 +319,58 @@ Fixed — replaced the dummy const with a real Note Off assertion in `bars_and_a
 #### ↳ cmk ([2026-04-26 05:38 UTC](https://github.com/cmk/agogo/pull/21#discussion_r3143040004))
 
 Fixed — `channels` is now `pub(crate)` so external mutation can't desync the parallel `bar_counters`/`click_counters` vecs. Confirmed no external `machine.channels` access exists today; the field's doc comment now spells out the lockstep invariant.
+
+<!-- gh-id: 3143077286 -->
+### Copilot on [`crates/core/src/machine.rs:965`](https://github.com/cmk/agogo/pull/21#discussion_r3143077286) (2026-04-26 06:17 UTC)
+
+This doc comment uses `div=t1`, but the spec key used by `ChannelSpec` in this PR is `grid=`. Updating the example to `grid=t1` would avoid confusing readers (especially since nearby docs/tests use `grid=` consistently).
+```suggestion
+    /// correctly with click accent. A `grid=t1,bars=2,accent-every=2`
+```
+
+<!-- gh-id: 3143077297 -->
+### Copilot on [`doc/plans/plan-2026-04-25-03.md:8`](https://github.com/cmk/agogo/pull/21#discussion_r3143077297) (2026-04-26 06:17 UTC)
+
+The plan title frames this as a “T1 bar multiplier”, but the plan body (and implementation) describes `bars=N` as divider-agnostic (works for non-`grid=t1` too, e.g. `grid=t8,bars=3`). Consider updating the H1 (and possibly the Goal blurb) so the headline matches the divider-agnostic semantics and doesn’t imply a `grid=t1` restriction.
+```suggestion
+# Plan 2026-04-25-03 — `mode=click` metronome + divider-agnostic `bars=N` multiplier
+
+## Goal
+
+Add a per-channel "metronome" output mode that emits a MIDI Note On
+per scheduled tick (configurable note, velocity, MIDI channel,
+optional N-tick accent), and a mode-agnostic, divider-agnostic
+`bars=N` multiplier that emits every Nth scheduled grid event
+(with `grid=t1,bars=N` yielding every N bars). No new audio-output
+```
+
+<!-- gh-id: 3143077299 -->
+### Copilot on [`doc/reviews/review-00021.md:16`](https://github.com/cmk/agogo/pull/21#discussion_r3143077299) (2026-04-26 06:17 UTC)
+
+The example `--ch` spec uses `div=t4`, but the current `ChannelSpec` grammar in this PR uses `grid=...` (and the plan below uses `grid=`). This review record also lists several “Must fix before push” items later in the file that appear to have been addressed in the code (e.g., the bars/counter tests are now proptests and generator bounds were widened). Consider updating the example to `grid=...` and marking those must-fix items as resolved/obsolete so the review record matches the state of the branch.
+
+<!-- gh-id: 4176600433 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-26 06:17 UTC](https://github.com/cmk/agogo/pull/21#pullrequestreview-4176600433))
+
+## Pull request overview
+
+Copilot reviewed 12 out of 13 changed files in this pull request and generated 3 comments.
+
+
+
+
+
+<!-- gh-id: 3143082359 -->
+#### ↳ cmk ([2026-04-26 06:23 UTC](https://github.com/cmk/agogo/pull/21#discussion_r3143082359))
+
+Fixed — `grid=t1,bars=2,accent-every=2` in the doc comment now.
+
+<!-- gh-id: 3143082445 -->
+#### ↳ cmk ([2026-04-26 06:23 UTC](https://github.com/cmk/agogo/pull/21#discussion_r3143082445))
+
+Fixed — H1 is now "`mode=click` metronome + divider-agnostic `bars=N` multiplier" and the Goal blurb leads with the divider-agnostic semantics, demoting `grid=t1,bars=N` to the idiomatic case. Adopted your suggested phrasing nearly verbatim.
+
+<!-- gh-id: 3143082514 -->
+#### ↳ cmk ([2026-04-26 06:23 UTC](https://github.com/cmk/agogo/pull/21#discussion_r3143082514))
+
+Fixed — example spec now uses `grid=t4`. Added a "Resolution (2026-04-25)" subsection below the must-fix list noting all three items were addressed in fix commit 3bb2597 (now part of the rebased history) so the review record matches the branch state.

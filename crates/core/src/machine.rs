@@ -962,7 +962,7 @@ mod tests {
     }
 
     /// Plan 2026-04-25-03 spot check: `bar_multiplier` interacts
-    /// correctly with click accent. A `div=t1,bars=2,accent-every=2`
+    /// correctly with click accent. A `grid=t1,bars=2,accent-every=2`
     /// click channel emits a click every 2 bars; the accent counter
     /// advances per *emitted* click (not per pre-filter event), so
     /// every 2nd emitted click is accented. Concretely: bars 0, 2,
