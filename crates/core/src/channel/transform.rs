@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn t4_at_120bpm_48k_emits_at_half_second_multiples() {
         // Divider T4 (quarter, 960 ticks at 960 PPQN), shuffle 0,
-        // shift 0, offset 0 → samples 0, 24 000, 48 000, …
+        // delay 0, offset 0 → samples 0, 24 000, 48 000, …
         let ch = zero_channel(Grid::T4);
         let master: Vec<Tick> = (0..=3840).map(Tick).collect();
         let ev = transform(master, &ch, &stc_120_48k());
@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_10ms_adds_exactly_480_samples() {
+    fn delay_10ms_adds_exactly_480_samples() {
         // delay = 10 ms at 48 kHz → +480 samples.
         let mut ch = zero_channel(Grid::T4);
         ch.delay = Micro(10_000); // 10 ms
@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_over_300ms_saturates() {
+    fn delay_over_300ms_saturates() {
         let mut ch = zero_channel(Grid::T4);
         ch.delay = Micro(1_000_000); // 1 s
         let ev = transform([Tick(0)], &ch, &stc_120_48k());
@@ -290,7 +290,7 @@ mod tests {
 
         /// Plan property `shift_clamping`, upper bound.
         #[test]
-        fn shift_upper_clamp(delay_us in MAX_DELAY.0..=10_000_000_i64) {
+        fn delay_upper_clamp(delay_us in MAX_DELAY.0..=10_000_000_i64) {
             let mut ch = zero_channel(Grid::T4);
             ch.delay = Micro(delay_us);
             let stc = stc_120_48k();
@@ -301,7 +301,7 @@ mod tests {
 
         /// Plan property `shift_clamping`, lower bound.
         #[test]
-        fn shift_lower_clamp(delay_us in -10_000_000_i64..0) {
+        fn delay_lower_clamp(delay_us in -10_000_000_i64..0) {
             let mut ch = zero_channel(Grid::T4);
             ch.delay = Micro(delay_us);
             let ev = transform([Tick(960)], &ch, &stc_120_48k());

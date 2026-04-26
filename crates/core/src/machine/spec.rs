@@ -339,8 +339,8 @@ mod tests {
 
     #[test]
     fn parse_rejects_legacy_keys() {
-        // div, swing, swing-res are no longer accepted — use grid= with
-        // DSL syntax instead.
+        // div, swing, swing-res are no longer accepted — use grid=
+        // (plain grid name now; full DSL expressions in a future PR).
         let err = ChannelSpec::parse("dev=midi,div=t32t").unwrap_err();
         assert_eq!(err, ChannelSpecError::UnknownKey("div".into()));
         let err = ChannelSpec::parse("dev=midi,grid=t32t,swing=80").unwrap_err();

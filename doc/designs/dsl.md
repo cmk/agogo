@@ -11,7 +11,6 @@ targets, so the DSL is a thin syntactic shell.
 ## Grammar
 
 ```
-poly       := track ( '&' track )*                    # polyrhythm (loosest)
 track      := expr modifier*
 expr       := impl_expr
 impl_expr  := join_expr ( ('>' | '<') join_expr )*    # imply / coimply

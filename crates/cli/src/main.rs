@@ -282,7 +282,7 @@ enum ChannelSub {
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
-        /// Grid expression (e.g. `t4`, `t16`, `t8t`, `t8q`, `t2p`).
+        /// Grid name (e.g. `t4`, `t16`, `t8t`, `t8q`, `t2p`).
         #[bpaf(long, argument("EXPR"))]
         grid: String,
         /// Positive delay compensation in ms; clamped to `[0, 300]`
