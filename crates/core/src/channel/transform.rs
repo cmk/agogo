@@ -16,7 +16,7 @@
 use core::num::NonZeroU16;
 
 use crate::channel::mode::ChannelMode;
-use crate::fxp::{Quantum, pico_to_samples};
+use crate::fxp::pico_to_samples;
 use crate::time::conn::SampleTickConn;
 use crate::time::grid::Grid;
 use crate::time::swing::{self, SwingConfig};
@@ -41,16 +41,12 @@ pub struct Channel {
     pub delay: Micro,
     /// Signed calibration offset. Not clamped here — CLI / UI should
     /// pick a musical range (agogo.md §6 cites ±5 ms = ±5 000 µs).
+    /// Audit P2 (Plan 20) folded the previous `snap_to_quantum`
+    /// arming intent into this single offset field at orchestrator
+    /// startup time; the snap intent now lives only on `ChannelSpec`
+    /// (`spec.snap_intent()`) and is applied via
+    /// `LinkSession::snap_offset_for(intent)` by the caller.
     pub offset: Micro,
-    /// Optional Link-quantum snap. When `Some(q)` and the active
-    /// `PhaseSource` is Link, the orchestrator (Plan 09's
-    /// `LinkSession::arm_channel`) bakes a `Micro` offset into
-    /// `offset` at arm time so the channel's first tick lands on the
-    /// next `q`-boundary. The `tick_stream` scheduler stays
-    /// Link-unaware — Plan 03's `scheduler_block_equivalence`
-    /// property must remain bit-for-bit unchanged when
-    /// `snap_to_quantum = None`.
-    pub snap_to_quantum: Option<Quantum>,
     /// Period multiplier on the channel's grid output. When
     /// `Some(N)`, the channel emits every `N`-th `tick_stream` event
     /// — applied as a pre-renderer filter in `Machine::on_buffer`
@@ -150,7 +146,6 @@ mod tests {
             },
             delay: Micro::ZERO,
             offset: Micro::ZERO,
-            snap_to_quantum: None,
             bar_multiplier: None,
         }
     }
@@ -269,7 +264,6 @@ mod tests {
                 shuffle,
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
-                snap_to_quantum: None,
                 bar_multiplier: None,
             };
             let master: Vec<Tick> = (0..=max_tick).map(Tick).collect();

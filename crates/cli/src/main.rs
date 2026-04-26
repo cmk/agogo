@@ -203,9 +203,10 @@ enum LinkSub {
         /// Initial BPM.
         #[bpaf(long, argument("BPM"), parse(parse_positive_f64), fallback(120.0))]
         bpm: f64,
-        /// Quantum in bars (used when armed channels land with
-        /// `snap_to_quantum` exposure via the preset sprint; ignored
-        /// by the bare `link transport` runner).
+        /// Quantum in bars (consumed by the future orchestrator
+        /// snap-arming path via `ChannelSpec::snap_intent` +
+        /// `LinkSession::snap_offset_for`; ignored by the bare
+        /// `link transport` runner).
         #[bpaf(long, argument("QUANTUM"), parse(parse_positive_f64), fallback(4.0))]
         quantum: f64,
         /// Sample rate (bound for the anchor; transport path itself
@@ -991,7 +992,6 @@ pub mod channel_trace {
             },
             delay,
             offset: Micro::ZERO,
-            snap_to_quantum: None,
             bar_multiplier: None,
         };
         // Pre-flight: reject ranges where `buffers × frames` would
@@ -1096,7 +1096,6 @@ pub mod midi_trace {
             },
             delay: Micro::ZERO,
             offset: Micro::ZERO,
-            snap_to_quantum: None,
             bar_multiplier: None,
         };
         // Overflow pre-flight matches channel_trace's shape.
@@ -1472,7 +1471,6 @@ pub mod demo {
             },
             delay: Micro::ZERO,
             offset: Micro::ZERO,
-            snap_to_quantum: None,
             bar_multiplier: None,
         };
         let machine = Machine::<S48>::new(

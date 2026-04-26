@@ -454,7 +454,6 @@ mod tests {
             },
             delay: Micro::ZERO,
             offset: Micro::ZERO,
-            snap_to_quantum: None,
             bar_multiplier: None,
         }
     }

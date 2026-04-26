@@ -419,11 +419,22 @@ impl ChannelSpec {
             shuffle: self.swing,
             delay,
             offset: Micro::ZERO,
-            snap_to_quantum: self
-                .snap_to_quantum_micro
-                .map(|m| crate::fxp::Quantum(Micro(m))),
             bar_multiplier: self.bars,
         })
+    }
+
+    /// Parsed `snap-quantum-us=N` intent, if present. Returns
+    /// `Option<Quantum>` for the orchestrator to feed into
+    /// `LinkSession::snap_offset_for` at startup.
+    ///
+    /// Audit P2 (Plan 20) dropped `snap_to_quantum` from the runtime
+    /// `Channel` because the field was never read in production
+    /// (`arm_channel` was test-only). The intent now lives only on
+    /// `ChannelSpec`; orchestrator wiring that actually applies the
+    /// snap to `Channel.offset` is a follow-up.
+    pub fn snap_intent(&self) -> Option<crate::fxp::Quantum> {
+        self.snap_to_quantum_micro
+            .map(|m| crate::fxp::Quantum(Micro(m)))
     }
 }
 
@@ -1190,6 +1201,32 @@ mod tests {
         match ch.mode {
             ChannelMode::Click(ClickConfig::Midi(cfg)) => assert!(cfg.accent.is_none()),
             _ => panic!(),
+        }
+    }
+
+    // ── Plan 20: snap_intent accessor (audit P2). ──
+
+    #[test]
+    fn snap_intent_none_when_key_absent() {
+        let spec = ChannelSpec::parse("dev=midi,grid=t4", &[]).unwrap();
+        assert!(spec.snap_intent().is_none());
+    }
+
+    proptest! {
+        /// `snap-quantum-us=N` parsed back through `snap_intent()`
+        /// recovers `Some(Quantum(Micro(N)))` for every signed `i64`.
+        /// Generator spans the full domain — the parse path stores
+        /// the raw `i64` and `snap_intent` just rewraps; bounding
+        /// would hide nothing.
+        #[test]
+        fn snap_intent_round_trips_through_spec(n in any::<i64>()) {
+            let s = format!("dev=midi,grid=t4,snap-quantum-us={n}");
+            let spec = ChannelSpec::parse(&s, &[])
+                .map_err(|e| TestCaseError::fail(format!("parse `{s}`: {e}")))?;
+            prop_assert_eq!(
+                spec.snap_intent(),
+                Some(crate::fxp::Quantum(Micro(n)))
+            );
         }
     }
 }

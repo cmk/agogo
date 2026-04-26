@@ -4,7 +4,6 @@
 //! Stubbed in T0; filled out in T4 once tempo-push (T1) and the FSM
 //! (T2) + quantum snap (T3) are in place.
 
-use agogo_core::channel::Channel;
 use agogo_core::fxp::{Micro, Phase, Quantum, Tempo};
 // Required for `LinkClock::phase_at_sample` (trait-provided method
 // called by the `phase_at_sample` shim below). Copilot flagged this
@@ -16,12 +15,14 @@ use crate::link::{HostTimeAnchor, LinkClock};
 use crate::transport::{TransportEvent, TransportFsm, TransportOutput, TransportState};
 
 // `LinkSession::quantum` was originally a T0 placeholder for a
-// session-level default quantum. T3's per-channel
-// `ch.snap_to_quantum` field superseded it: `arm_channel` reads
-// `ch.snap_to_quantum` directly, with `LinkWriteConfig::default_quantum`
-// held on `config` as the authoritative default. Removed to avoid
-// duplicating state that the v0.5 Sprint 01 developer might mistake
-// for load-bearing.
+// session-level default quantum. T3's per-channel snap_to_quantum
+// field superseded it briefly; audit P2 (Plan 20) then dropped that
+// field too. The session now exposes a stateless
+// `snap_offset_for(Option<Quantum>)` helper; callers (orchestrator
+// or tests) pull the snap intent from `ChannelSpec::snap_intent()`
+// and apply the returned `Micro` delta to their own `offset`.
+// `LinkWriteConfig::default_quantum` remains on `config` for
+// session-level defaults independent of per-channel snaps.
 
 /// Write-path configuration for `LinkSession`. Tunes which classes
 /// of transport / tempo events agogo emits vs. only observes.
@@ -161,24 +162,32 @@ impl LinkSession {
         }
     }
 
-    /// Control-thread: if `ch.snap_to_quantum` is `Some(q)`, compute
-    /// the micro-offset that places the channel's next tick on the
-    /// nearest upcoming `q`-boundary and add it into `ch.offset`. No-op
-    /// when `snap_to_quantum` is `None`.
+    /// Compute the `Micro` delta required to snap a channel's next
+    /// tick onto the nearest upcoming `q`-boundary on the Link
+    /// timeline. Returns `Micro::ZERO` when `snap` is `None` (no
+    /// snap intent).
     ///
-    /// Deviation from the plan draft: no `stc: &SampleTickConn` arg
-    /// needed. Link's host-time model and agogo's `Micro` lattice are
-    /// both microseconds, so the snap delta is already in the target
-    /// type — `PicoSampleConn` is only needed downstream in
+    /// Stateless w.r.t. the channel — callers fold the returned delta
+    /// into their own `Channel.offset` if they want arming behaviour:
+    ///
+    /// ```ignore
+    /// let delta = session.snap_offset_for(spec.snap_intent());
+    /// ch.offset = Micro(ch.offset.0.saturating_add(delta.0));
+    /// ```
+    ///
+    /// Pre-P2 this was `arm_channel(&mut Channel)` which mutated the
+    /// channel directly; that coupling is gone — `LinkSession` no
+    /// longer touches `agogo_core::channel::Channel`.
+    ///
+    /// Link's host-time model and agogo's `Micro` lattice are both
+    /// microseconds, so no `SampleTickConn` is needed here —
+    /// `PicoSampleConn` is only required downstream in
     /// `transform::micro_to_samples` when applying the sample rate.
-    /// Documented in Plan 09 §Review.
-    pub fn arm_channel(&mut self, ch: &mut Channel) {
-        let q = match ch.snap_to_quantum {
-            Some(q) => q,
-            None => return,
-        };
-        let delta = self.clock.snap_offset_micro(q);
-        ch.offset = Micro(ch.offset.0.saturating_add(delta.0));
+    pub fn snap_offset_for(&mut self, snap: Option<Quantum>) -> Micro {
+        match snap {
+            Some(q) => self.clock.snap_offset_micro(q),
+            None => Micro::ZERO,
+        }
     }
 
     fn drive_and_publish(&mut self, ev: TransportEvent) {
@@ -200,10 +209,6 @@ impl LinkSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo_core::channel::{Channel, ChannelMode, MAX_DELAY};
-    use agogo_core::time::grid::Grid;
-    use agogo_core::time::swing::SwingConfig;
-    use agogo_core::time::tbase::TBase;
     use std::num::NonZeroU32;
 
     fn anchor_48k() -> HostTimeAnchor {
@@ -213,81 +218,54 @@ mod tests {
         }
     }
 
-    fn channel_with_snap(q: Option<Quantum>) -> Channel {
-        Channel {
-            mode: ChannelMode::MidiClock,
-            divider: Grid::T4,
-            shuffle: SwingConfig {
-                resolution: TBase::T16,
-                amount: 0,
-            },
-            delay: Micro::ZERO,
-            offset: Micro::ZERO,
-            snap_to_quantum: q,
-            bar_multiplier: None,
-        }
-    }
-
     #[test]
-    fn arm_channel_noop_when_snap_is_none() {
+    fn snap_offset_for_none_is_zero() {
         let mut s = LinkSession::new(
             Tempo::from_bpm_integer(120),
             anchor_48k(),
             LinkWriteConfig::default(),
         );
-        let mut ch = channel_with_snap(None);
-        let offset_before = ch.offset;
-        s.arm_channel(&mut ch);
-        assert_eq!(ch.offset, offset_before);
+        assert_eq!(s.snap_offset_for(None), Micro::ZERO);
     }
 
-    /// `quantum_snap_nonneg` at the LinkSession layer: arm_channel
-    /// never reduces `offset` below its starting value when the
-    /// starting value is ≥ 0. (Snap goes forward, always.)
+    /// `quantum_snap_nonneg` at the LinkSession layer: the returned
+    /// snap delta is never negative, so adding it to a non-negative
+    /// `offset` never reduces it. (Snap goes forward, always.)
     #[test]
-    fn arm_channel_never_reduces_offset() {
+    fn snap_offset_for_some_is_nonneg() {
         let mut s = LinkSession::new(
             Tempo::from_bpm_integer(120),
             anchor_48k(),
             LinkWriteConfig::default(),
         );
-        for start in [Micro::ZERO, Micro(1_000), Micro(MAX_DELAY.0 / 2)] {
-            let mut ch = channel_with_snap(Some(Quantum::from_bars(4)));
-            ch.offset = start;
-            s.arm_channel(&mut ch);
-            assert!(
-                ch.offset.0 >= start.0,
-                "snap reduced offset from {:?} to {:?}",
-                start, ch.offset
-            );
-        }
+        let delta = s.snap_offset_for(Some(Quantum::from_bars(4)));
+        assert!(
+            delta.0 >= 0,
+            "snap delta is negative: {delta:?}",
+        );
     }
 
-    /// `quantum_snap_idempotent` — calling `arm_channel` twice in
-    /// quick succession on two identical channel copies yields
-    /// offsets within 1 ms of each other. "Bit-exact" isn't
-    /// achievable because Link's session state drifts microseconds
-    /// between two `capture_audio_session_state` calls (the network
-    /// sync protocol runs continuously). 1 ms of tolerance catches
-    /// any real-world divergence while still being tight enough to
-    /// flag a regression.
+    /// `quantum_snap_idempotent` — two consecutive calls with the
+    /// same intent yield deltas within 1 ms of each other. Bit-exact
+    /// equality isn't achievable because Link's session state drifts
+    /// microseconds between two `capture_audio_session_state` calls
+    /// (the network sync protocol runs continuously). 1 ms of
+    /// tolerance catches any real-world divergence while still being
+    /// tight enough to flag a regression.
     #[test]
-    fn arm_channel_is_near_idempotent() {
+    fn snap_offset_for_is_near_idempotent() {
         let mut s = LinkSession::new(
             Tempo::from_bpm_integer(120),
             anchor_48k(),
             LinkWriteConfig::default(),
         );
         let q = Some(Quantum::from_bars(4));
-        let mut ch_a = channel_with_snap(q);
-        let mut ch_b = channel_with_snap(q);
-        s.arm_channel(&mut ch_a);
-        s.arm_channel(&mut ch_b);
-        let drift = (ch_a.offset.0 - ch_b.offset.0).abs();
+        let a = s.snap_offset_for(q);
+        let b = s.snap_offset_for(q);
+        let drift = (a.0 - b.0).abs();
         assert!(
             drift < 1_000,
-            "two consecutive arm_channel calls diverged by {} µs (>1 ms)",
-            drift
+            "two consecutive snap_offset_for calls diverged by {drift} µs (>1 ms)",
         );
     }
 }
