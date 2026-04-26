@@ -430,5 +430,37 @@ mod tests {
             "expected --ch parse error with key name, got: {err}"
         );
     }
+
+    /// Plan 2026-04-25-03 spot-check: a `mode=click` spec passes the
+    /// CLI's eager `ChannelSpec` validation. We pin the success at
+    /// the parse layer by combining the click spec with an
+    /// unsupported `sr=22_050` — `run` rejects the rate *after* the
+    /// spec validation step, so seeing "22050" (and the absence of
+    /// the "--ch" parse-error prefix) means click parsed cleanly.
+    #[test]
+    fn run_accepts_mode_click_spec() {
+        let args = args_with(
+            vec!["dev=midi,mode=click,grid=t4,note=37,vel=80,mch=10,out=default"],
+            22_050,
+        );
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("22050") && !err.contains("--ch"),
+            "expected --sr rate error (spec parsed OK), got: {err}"
+        );
+    }
+
+    /// Plan 2026-04-25-03 spot-check: the same surface accepts
+    /// `bars=N` on a non-T1 divider (the gating restriction was
+    /// dropped per design discussion).
+    #[test]
+    fn run_accepts_bars_on_non_t1_div() {
+        let args = args_with(vec!["dev=midi,grid=t8,bars=3,out=default"], 22_050);
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("22050") && !err.contains("--ch"),
+            "expected --sr rate error (spec parsed OK), got: {err}"
+        );
+    }
 }
 
