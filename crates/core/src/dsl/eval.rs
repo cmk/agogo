@@ -6,7 +6,8 @@
 
 use super::ast::*;
 use super::error::{DslError, DslErrorKind};
-use crate::time::grid::{self, Grid};
+use crate::time::grid::Grid;
+use connections::lattice::{Coheyting, Heyting, Join, Meet};
 
 /// Evaluate a grid expression to a [`Grid`], resolving any variable
 /// references against `env`.
@@ -25,18 +26,18 @@ pub fn eval_expr(expr: &Expr, env: &[(String, Grid)], source: &str) -> Result<Gr
                 span: *span,
                 source: source.to_string(),
             }),
-        Expr::Neg(inner, _) => Ok(grid::neg(eval_expr(inner, env, source)?)),
+        Expr::Neg(inner, _) => Ok(eval_expr(inner, env, source)?.neg()),
         Expr::Meet(a, b, _) => {
-            Ok(grid::meet(eval_expr(a, env, source)?, eval_expr(b, env, source)?))
+            Ok(eval_expr(a, env, source)?.meet(&eval_expr(b, env, source)?))
         }
         Expr::Join(a, b, _) => {
-            Ok(grid::join(eval_expr(a, env, source)?, eval_expr(b, env, source)?))
+            Ok(eval_expr(a, env, source)?.join(&eval_expr(b, env, source)?))
         }
         Expr::Imply(a, b, _) => {
-            Ok(grid::imply(eval_expr(a, env, source)?, eval_expr(b, env, source)?))
+            Ok(eval_expr(a, env, source)?.imp(&eval_expr(b, env, source)?))
         }
         Expr::Coimply(a, b, _) => {
-            Ok(grid::coimp(eval_expr(a, env, source)?, eval_expr(b, env, source)?))
+            Ok(eval_expr(a, env, source)?.coimp(&eval_expr(b, env, source)?))
         }
     }
 }
@@ -46,6 +47,7 @@ mod tests {
     use super::*;
     use crate::dsl::lexer::tokenize;
     use crate::dsl::parser::parse_tokens;
+    use connections::lattice::{Coheyting, Heyting, Join, Meet};
 
     fn eval(s: &str, env: &[(String, Grid)]) -> Result<Grid, DslError> {
         let tokens = tokenize(s)?;
@@ -62,7 +64,7 @@ mod tests {
     fn meet() {
         assert_eq!(
             eval("T16&T8", &[]).unwrap(),
-            grid::meet(Grid::T16, Grid::T8)
+            Grid::T16.meet(&Grid::T8)
         );
     }
 
@@ -70,7 +72,7 @@ mod tests {
     fn join() {
         assert_eq!(
             eval("T16|T8", &[]).unwrap(),
-            grid::join(Grid::T16, Grid::T8)
+            Grid::T16.join(&Grid::T8)
         );
     }
 
@@ -78,7 +80,7 @@ mod tests {
     fn imply() {
         assert_eq!(
             eval("T16>T8", &[]).unwrap(),
-            grid::imply(Grid::T16, Grid::T8)
+            Grid::T16.imp(&Grid::T8)
         );
     }
 
@@ -86,13 +88,13 @@ mod tests {
     fn coimply() {
         assert_eq!(
             eval("T16<T8", &[]).unwrap(),
-            grid::coimp(Grid::T16, Grid::T8)
+            Grid::T16.coimp(&Grid::T8)
         );
     }
 
     #[test]
     fn neg() {
-        assert_eq!(eval("!T16", &[]).unwrap(), grid::neg(Grid::T16));
+        assert_eq!(eval("!T16", &[]).unwrap(), Grid::T16.neg());
     }
 
     #[test]
@@ -106,7 +108,7 @@ mod tests {
         let env = vec![("kick".to_string(), Grid::T4)];
         assert_eq!(
             eval("kick&T16", &env).unwrap(),
-            grid::meet(Grid::T4, Grid::T16)
+            Grid::T4.meet(&Grid::T16)
         );
     }
 
@@ -127,7 +129,6 @@ mod tests {
 
     #[test]
     fn forward_ref_errors() {
-        // C1 is defined but C2 is not — strict monotonicity.
         let env = vec![("C1".to_string(), Grid::T4)];
         let err = eval("C2&C1", &env).unwrap_err();
         assert_eq!(
