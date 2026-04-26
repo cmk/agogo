@@ -8,9 +8,11 @@
 //! hard errors so typos are caught early.
 //!
 //! The `grid` value is currently a plain grid name (`t16`, `t8q`,
-//! etc.) parsed via `Grid::from_str`. When the DSL parser lands
-//! (Plan 16), it will accept full DSL expressions with lattice ops,
-//! swing, and offset (`T16~T16:80@-5`).
+//! etc.) parsed via `Grid::from_str`. The DSL parser
+//! (`agogo_core::dsl::parse`) exists but is not yet wired into
+//! `ChannelSpec::parse`; a follow-up will accept full DSL
+//! expressions with lattice ops, swing, and offset
+//! (`T16~T16:80@-5`).
 //!
 //! [`ChannelSpec`] holds the parsed form; [`ChannelSpec::into_channel`]
 //! converts to a [`Channel`] at the CLI argv boundary, where the only
@@ -158,8 +160,16 @@ impl ChannelSpec {
             ChannelDev::Audio => return Err(ChannelSpecError::AudioDeferred),
         };
         // argv boundary: delay (ms) crosses into Micro via F64F06.
-        let delay = micro_from_ms(self.delay_ms);
-        let delay = Micro(delay.0.clamp(0, MAX_DELAY.0));
+        // Reject out-of-range values rather than silently saturating.
+        let delay = match micro_from_ms(self.delay_ms) {
+            Some(m) => Micro(m.0.clamp(0, MAX_DELAY.0)),
+            None => {
+                return Err(ChannelSpecError::BadValue(
+                    "delay",
+                    format!("{} ms out of range", self.delay_ms),
+                ));
+            }
+        };
 
         Ok(Channel {
             mode,
@@ -183,13 +193,12 @@ impl ChannelSpec {
 /// `Extended::PosInf` / `Extended::NegInf` here means the user
 /// asked for a value billions-of-years out of `Micro`'s ±i64 range
 /// — saturate rather than panic.
-fn micro_from_ms(ms: f64) -> Micro {
+fn micro_from_ms(ms: f64) -> Option<Micro> {
     // argv boundary
     let seconds = ms * 1.0e-3; // argv boundary
     match F64F06.ceil(ExtendedFloat::Finite(seconds)) {
-        Extended::Finite(m) => m,
-        Extended::PosInf => Micro(i64::MAX),
-        Extended::NegInf => Micro(i64::MIN),
+        Extended::Finite(m) => Some(m),
+        Extended::PosInf | Extended::NegInf => None,
     }
 }
 
