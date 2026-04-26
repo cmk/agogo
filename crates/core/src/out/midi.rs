@@ -393,7 +393,7 @@ mod tests {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
         }

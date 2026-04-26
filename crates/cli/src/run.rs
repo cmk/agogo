@@ -70,9 +70,10 @@ pub struct RunArgs {
     /// Per-channel spec, repeatable. One `--ch` per channel.
     /// Format: `key=val[,key=val]*`. Required keys: `div`, `dev`.
     /// Optional: `id`, `out`, `swing` (i8 tick offset),
-    /// `swing-res` (binary resolution, default `t16`), `shift-ms`,
-    /// `offset-ms`, `snap-quantum-us`. Quote values containing
-    /// spaces or commas: `--ch "out=IAC Bus 1,div=t32t,dev=midi"`.
+    /// `swing-res` (binary resolution, default `t16`), `delay`
+    /// (latency compensation in ms), `snap-quantum-us`. Quote values
+    /// containing spaces or commas:
+    /// `--ch "out=IAC Bus 1,div=t32t,dev=midi"`.
     #[bpaf(long, argument("SPEC"), many)]
     pub ch: Vec<String>,
     /// Link quantum in beats. Required when `--source link`;

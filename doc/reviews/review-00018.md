@@ -23,10 +23,16 @@ polyrhythm DSL parser sprint.
   - New operators: `!` (neg), `>` (imp), `<` (coimp)
   - Precedence: `!` > `^` > `|` > `>/<` > `&`
   - Swing syntax: `~TBase:amount` (explicit resolution)
-  - Modifier units: `@` in ticks (musical), `+` in ms (physical)
+  - Offset: `@` in ticks (musical, in the DSL)
+  - Delay compensation: renamed from `shift`, lives in `--ch` spec
+    (not in the DSL)
+
+- **Code rename**: `Channel.shift` → `Channel.delay`, `MAX_SHIFT` →
+  `MAX_DELAY` throughout the workspace. CLI flag `shift-ms` → `delay`.
+  `offset-ms` removed from CLI (offset now comes from DSL `@<ticks>`).
 
 ### Why
 
 The DSL is the user-facing syntax for agogo's rhythmic algebra. This
-docs-only PR lands the design before implementation begins, so the
-plan can be reviewed independently of code changes.
+PR lands the design and renames the delay compensation field for
+clarity before implementation begins.

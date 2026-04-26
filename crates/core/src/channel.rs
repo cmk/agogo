@@ -1,5 +1,5 @@
 //! Per-channel scheduler: consumes a master tick stream and emits
-//! sample-indexed events after the divider / shuffle / shift / offset
+//! sample-indexed events after the divider / shuffle / delay / offset
 //! transform pipeline. Pure logic — no audio I/O, no MIDI bytes.
 //!
 //! Submodules:
@@ -13,4 +13,4 @@ pub mod transform;
 
 pub use mode::ChannelMode;
 pub use scheduler::tick_stream;
-pub use transform::{Channel, MAX_SHIFT, ScheduledEvent, transform};
+pub use transform::{Channel, MAX_DELAY, ScheduledEvent, transform};

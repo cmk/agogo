@@ -200,7 +200,7 @@ impl LinkSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo_core::channel::{Channel, ChannelMode, MAX_SHIFT};
+    use agogo_core::channel::{Channel, ChannelMode, MAX_DELAY};
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
@@ -221,7 +221,7 @@ mod tests {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: q,
         }
@@ -250,7 +250,7 @@ mod tests {
             anchor_48k(),
             LinkWriteConfig::default(),
         );
-        for start in [Micro::ZERO, Micro(1_000), Micro(MAX_SHIFT.0 / 2)] {
+        for start in [Micro::ZERO, Micro(1_000), Micro(MAX_DELAY.0 / 2)] {
             let mut ch = channel_with_snap(Some(Quantum::from_bars(4)));
             ch.offset = start;
             s.arm_channel(&mut ch);

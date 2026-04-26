@@ -5,17 +5,17 @@
 //!
 //! Required keys: `div`, `dev`. Optional keys: `id`, `out`, `swing`
 //! (i8 tick offset), `swing-res` (binary resolution, default `t16`),
-//! `shift-ms`, `offset-ms`, `snap-quantum-us`. Unknown keys are hard
-//! errors so typos are caught early.
+//! `shift` (latency compensation in ms), `snap-quantum-us`. Unknown
+//! keys are hard errors so typos are caught early.
 //!
 //! [`ChannelSpec`] holds the parsed form; [`ChannelSpec::into_channel`]
 //! converts to a [`Channel`] at the CLI argv boundary, where the only
-//! `f64` fields (`shift_ms`, `offset_ms`) cross via the `F64F06` Conn
-//! per CLAUDE.md float exception 4.
+//! `f64` field (`delay_ms`) crosses via the `F64F06` Conn per CLAUDE.md
+//! float exception 4.
 
 use std::fmt::{self, Display};
 
-use crate::channel::transform::MAX_SHIFT;
+use crate::channel::transform::MAX_DELAY;
 use crate::channel::{Channel, ChannelMode};
 use crate::fxp::{Extended, ExtendedFloat, F64F06, Micro};
 use crate::time::grid::Grid;
@@ -42,11 +42,9 @@ pub struct ChannelSpec {
     /// `SwingConfig::resolution` — binary subdivision the swing
     /// grid lives on. Default `TBase::T16`.
     pub swing_res: TBase,
-    /// Positive shift in milliseconds. Clamped to MAX_SHIFT (300 ms)
-    /// in `into_channel`.
-    pub shift_ms: f64, // argv boundary
-    /// Signed offset in milliseconds.
-    pub offset_ms: f64, // argv boundary
+    /// Positive delay compensation in milliseconds. Clamped to
+    /// MAX_DELAY (300 ms) in `into_channel`.
+    pub delay_ms: f64, // argv boundary
     /// Optional quantum snap, in microseconds (Link-aware channels).
     pub snap_to_quantum_micro: Option<i64>,
 }
@@ -102,8 +100,7 @@ impl ChannelSpec {
         let mut div: Option<Grid> = None;
         let mut swing: i8 = 0;
         let mut swing_res: TBase = TBase::T16;
-        let mut shift_ms: f64 = 0.0; // argv boundary
-        let mut offset_ms: f64 = 0.0; // argv boundary
+        let mut delay_ms: f64 = 0.0; // argv boundary
         let mut snap_to_quantum_micro: Option<i64> = None;
 
         for (k, v) in pairs {
@@ -135,29 +132,17 @@ impl ChannelSpec {
                         .parse::<TBase>()
                         .map_err(|e| ChannelSpecError::BadValue("swing-res", e.to_string()))?;
                 }
-                "shift-ms" => {
+                "delay" => {
                     let parsed = v
                         .parse::<f64>()
-                        .map_err(|e| ChannelSpecError::BadValue("shift-ms", e.to_string()))?;
+                        .map_err(|e| ChannelSpecError::BadValue("delay", e.to_string()))?;
                     if !parsed.is_finite() {
                         return Err(ChannelSpecError::BadValue(
-                            "shift-ms",
+                            "delay",
                             "must be finite".into(),
                         ));
                     }
-                    shift_ms = parsed;
-                }
-                "offset-ms" => {
-                    let parsed = v
-                        .parse::<f64>()
-                        .map_err(|e| ChannelSpecError::BadValue("offset-ms", e.to_string()))?;
-                    if !parsed.is_finite() {
-                        return Err(ChannelSpecError::BadValue(
-                            "offset-ms",
-                            "must be finite".into(),
-                        ));
-                    }
-                    offset_ms = parsed;
+                    delay_ms = parsed;
                 }
                 "snap-quantum-us" => {
                     snap_to_quantum_micro = Some(
@@ -177,25 +162,22 @@ impl ChannelSpec {
             div: div.ok_or(ChannelSpecError::MissingKey("div"))?,
             swing,
             swing_res,
-            shift_ms,
-            offset_ms,
+            delay_ms,
             snap_to_quantum_micro,
         })
     }
 
     /// Convert the parsed spec into the runtime [`Channel`] type. The
-    /// only `f64`s in this crate die here at the `// argv boundary`
+    /// only `f64` in this crate dies here at the `// argv boundary`
     /// via the `F64F06` Conn (per CLAUDE.md float exception 4).
     pub fn into_channel(self) -> Result<Channel, ChannelSpecError> {
         let mode = match self.dev {
             ChannelDev::Midi => ChannelMode::MidiClock,
             ChannelDev::Audio => return Err(ChannelSpecError::AudioDeferred),
         };
-        // argv boundary: shift-ms / offset-ms cross into Micro via F64F06.
-        // Shift-ms multiplied by 1e3 since F64F06 is seconds → micros.
-        let shift = micro_from_ms(self.shift_ms);
-        let offset = micro_from_ms(self.offset_ms);
-        let shift = Micro(shift.0.clamp(0, MAX_SHIFT.0));
+        // argv boundary: delay (ms) crosses into Micro via F64F06.
+        let delay = micro_from_ms(self.delay_ms);
+        let delay = Micro(delay.0.clamp(0, MAX_DELAY.0));
 
         Ok(Channel {
             mode,
@@ -204,8 +186,8 @@ impl ChannelSpec {
                 resolution: self.swing_res,
                 amount: self.swing,
             },
-            shift,
-            offset,
+            delay,
+            offset: Micro::ZERO,
             snap_to_quantum: self
                 .snap_to_quantum_micro
                 .map(|m| crate::fxp::Quantum(Micro(m))),
@@ -249,11 +231,8 @@ impl Display for ChannelSpec {
         if self.swing_res != TBase::T16 {
             write!(f, ",swing-res={}", self.swing_res)?;
         }
-        if self.shift_ms != 0.0 {
-            write!(f, ",shift-ms={}", self.shift_ms)?;
-        }
-        if self.offset_ms != 0.0 {
-            write!(f, ",offset-ms={}", self.offset_ms)?;
+        if self.delay_ms != 0.0 {
+            write!(f, ",delay={}", self.delay_ms)?;
         }
         if let Some(q) = self.snap_to_quantum_micro {
             write!(f, ",snap-quantum-us={}", q)?;
@@ -367,15 +346,14 @@ mod tests {
 
     #[test]
     fn parse_full_spec() {
-        let s = "div=t32t,dev=midi,out=IAC Bus 1,swing=10,shift-ms=2.5,offset-ms=-1.0";
+        let s = "div=t32t,dev=midi,out=IAC Bus 1,swing=10,delay=2.5";
         let spec = ChannelSpec::parse(s).expect("parse");
         assert_eq!(spec.div, Grid::T32T);
         assert_eq!(spec.dev, ChannelDev::Midi);
         assert_eq!(spec.out.as_deref(), Some("IAC Bus 1"));
         assert_eq!(spec.swing, 10);
         assert_eq!(spec.swing_res, TBase::T16);
-        assert!((spec.shift_ms - 2.5).abs() < 1e-9);
-        assert!((spec.offset_ms - -1.0).abs() < 1e-9);
+        assert!((spec.delay_ms - 2.5).abs() < 1e-9);
         assert_eq!(spec.snap_to_quantum_micro, None);
     }
 
@@ -448,18 +426,18 @@ mod tests {
     }
 
     #[test]
-    fn into_channel_clamps_shift_ms() {
-        // 500 ms exceeds MAX_SHIFT (300 ms); clamped to 300 ms.
-        let spec = ChannelSpec::parse("dev=midi,div=t32t,shift-ms=500").unwrap();
+    fn into_channel_clamps_delay() {
+        // 500 ms exceeds MAX_DELAY (300 ms); clamped to 300 ms.
+        let spec = ChannelSpec::parse("dev=midi,div=t32t,delay=500").unwrap();
         let ch = spec.into_channel().unwrap();
-        assert_eq!(ch.shift, MAX_SHIFT);
+        assert_eq!(ch.delay, MAX_DELAY);
     }
 
     #[test]
-    fn into_channel_negative_shift_clamps_to_zero() {
-        let spec = ChannelSpec::parse("dev=midi,div=t32t,shift-ms=-50").unwrap();
+    fn into_channel_negative_delay_clamps_to_zero() {
+        let spec = ChannelSpec::parse("dev=midi,div=t32t,delay=-50").unwrap();
         let ch = spec.into_channel().unwrap();
-        assert_eq!(ch.shift, Micro(0));
+        assert_eq!(ch.delay, Micro(0));
     }
 
     #[test]
@@ -511,30 +489,20 @@ mod tests {
             any::<i8>(),
             arb_tbase(),
             (0u32..=300).prop_map(|n| n as f64),
-            (-100i32..=100).prop_map(|n| n as f64),
             prop::option::of(any::<i32>().prop_map(|n| n as i64)),
         )
             .prop_map(
-                |(
-                    dev,
-                    div,
-                    id,
-                    out,
-                    swing,
-                    swing_res,
-                    shift_ms,
-                    offset_ms,
-                    snap_to_quantum_micro,
-                )| ChannelSpec {
-                    id,
-                    dev,
-                    out,
-                    div,
-                    swing,
-                    swing_res,
-                    shift_ms,
-                    offset_ms,
-                    snap_to_quantum_micro,
+                |(dev, div, id, out, swing, swing_res, delay_ms, snap_to_quantum_micro)| {
+                    ChannelSpec {
+                        id,
+                        dev,
+                        out,
+                        div,
+                        swing,
+                        swing_res,
+                        delay_ms,
+                        snap_to_quantum_micro,
+                    }
                 },
             )
     }

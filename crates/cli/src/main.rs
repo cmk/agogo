@@ -288,14 +288,11 @@ enum ChannelSub {
         /// `SwingConfig::amount` — signed `i8` tick offset on a `t16` resolution grid.
         #[bpaf(long, argument("AMOUNT"), fallback(0))]
         shuffle: i32,
-        /// Positive latency shift in ms; clamped to `[0, 300]` inside
-        /// the transform. Non-finite or negative values rejected at
-        /// the CLI boundary.
-        #[bpaf(long, argument("SHIFT_MS"), parse(parse_non_negative_f64), fallback(0.0))]
-        shift_ms: f64,
-        /// Signed calibration offset in ms. Must be finite.
-        #[bpaf(long, argument("OFFSET_MS"), parse(parse_finite_f64), fallback(0.0))]
-        offset_ms: f64,
+        /// Positive delay compensation in ms; clamped to `[0, 300]`
+        /// inside the transform. Non-finite or negative values
+        /// rejected at the CLI boundary.
+        #[bpaf(long, argument("MS"), parse(parse_non_negative_f64), fallback(0.0))]
+        delay: f64,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
         frames: usize,
@@ -329,13 +326,7 @@ fn parse_non_negative_f64(v: f64) -> Result<f64, String> {
     }
 }
 
-fn parse_finite_f64(v: f64) -> Result<f64, String> {
-    if v.is_finite() {
-        Ok(v)
-    } else {
-        Err(format!("must be a finite number, got {v}"))
-    }
-}
+
 
 fn main() {
     let cli = cli().run();
@@ -383,8 +374,7 @@ fn main() {
                     sr,
                     divider,
                     shuffle,
-                    shift_ms,
-                    offset_ms,
+                    delay,
                     frames,
                     buffers,
                 },
@@ -396,8 +386,7 @@ fn main() {
                     sr,
                     divider,
                     shuffle,
-                    shift_ms,
-                    offset_ms,
+                    delay,
                     frames,
                     buffers,
                 };
@@ -415,7 +404,7 @@ fn main() {
             }
             #[cfg(not(feature = "core"))]
             {
-                let _ = (bpm, sr, divider, shuffle, shift_ms, offset_ms, frames, buffers);
+                let _ = (bpm, sr, divider, shuffle, delay, frames, buffers);
                 eprintln!("error: build with --features core to enable `channel trace`");
                 std::process::exit(2);
             }
@@ -937,8 +926,7 @@ pub mod channel_trace {
         pub sr: u32,
         pub divider: String,
         pub shuffle: i32,
-        pub shift_ms: f64,
-        pub offset_ms: f64,
+        pub delay: f64,
         pub frames: usize,
         pub buffers: u32,
     }
@@ -986,8 +974,8 @@ pub mod channel_trace {
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
         // argv-boundary: ms (f64) → Micro via the upstream `F64F06`
         // lawful conn. Out-of-range saturations are user errors, not
-        // silent defaults — `parse_non_negative_f64` / `parse_finite_f64`
-        // already validated finiteness, so an `Extended::PosInf` /
+        // silent defaults — `parse_non_negative_f64` already validated
+        // finiteness, so an `Extended::PosInf` /
         // `Extended::NegInf` result means the user asked for a value
         // outside `Micro`'s ±i64 range (billions of years). Surface
         // that as an error rather than silently mapping to zero.
@@ -999,8 +987,7 @@ pub mod channel_trace {
                 }
             }
         };
-        let shift = ms_to_micro("--shift-ms", args.shift_ms)?;
-        let offset = ms_to_micro("--offset-ms", args.offset_ms)?;
+        let delay = ms_to_micro("--delay", args.delay)?;
         let amount: i8 = args
             .shuffle
             .try_into()
@@ -1012,8 +999,8 @@ pub mod channel_trace {
                 resolution: TBase::T16,
                 amount,
             },
-            shift,
-            offset,
+            delay,
+            offset: Micro::ZERO,
             snap_to_quantum: None,
         };
         // Pre-flight: reject ranges where `buffers × frames` would
@@ -1116,7 +1103,7 @@ pub mod midi_trace {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
         };
@@ -1491,7 +1478,7 @@ pub mod demo {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
         };
@@ -1710,8 +1697,7 @@ mod tests {
             sr: 48_000,
             divider: "t4".to_string(),
             shuffle: 0,
-            shift_ms: 0.0,
-            offset_ms: 0.0,
+            delay: 0.0,
             frames: 4_096,
             buffers: 16,
         };
@@ -1729,8 +1715,7 @@ mod tests {
             sr: 48_000,
             divider: "nope".to_string(),
             shuffle: 0,
-            shift_ms: 0.0,
-            offset_ms: 0.0,
+            delay: 0.0,
             frames: 4_096,
             buffers: 1,
         };

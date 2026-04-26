@@ -25,7 +25,6 @@ atom       := 'T' <n>              # binary       (n ∈ {1,2,4,...,256})
             | 'T' <n> 'p'          # 15-tuplet    (n ∈ {2,4,...,512})
 modifier   := '~' <TBase> ':' <i8> # swing (resolution : amount)
             | '@' <ticks>          # musical offset (signed i32, in ticks)
-            | '+' <ms>             # delay compensation (positive u32, in ms)
 ```
 
 ## Operators
@@ -98,7 +97,6 @@ surface syntax over time.
 |----------|--------|-----------|
 | swing | `~T16:80` | `SwingConfig { resolution: T16, amount: 80 }` — explicit binary resolution + signed i8 tick offset |
 | offset | `@-50` | Musical offset in ticks (signed i32). Tempo-dependent. |
-| delay | `+5` | Hardware delay compensation in milliseconds (positive u32). Tempo-independent. |
 
 Swing resolution is an explicit `TBase` argument (not inferred from
 the grid). The binary axis (`Grid.n`) is the structural backbone of
@@ -144,7 +142,9 @@ T16 < T8                       # co-Heyting coimplication
 - Polyrhythm is event-set union — given for free by the fact that
   union doesn't close inside the lattice.
 - One swing modifier — given for free by the i8/TBase model.
-- Offset and delay — one musical, one physical, orthogonal units.
+- Offset — musical displacement in ticks (tempo-dependent).
+- Delay compensation — physical, lives in the CLI `--ch` spec, not
+  the DSL.
 
 Every piece of grammar maps to one piece of underlying math.
 Adding pattern combinators on top would re-invent expressivity

@@ -6,9 +6,9 @@
 //! 2. **Shuffle** — apply [`swing::effective_tick`] (off-beats shift
 //!    earlier by `amount × multiplier`; on-beats pass through).
 //! 3. **Tick → Sample** via [`SampleTickConn::inner`].
-//! 4. **Shift** — add `clamp(shift, 0, MAX_SHIFT)` → Pico → Sample
+//! 4. **Delay** — add `clamp(delay, 0, MAX_DELAY)` → Pico → Sample
 //!    via `F12F06 ∘ pico_to_samples`. Plan 03 does not implement
-//!    negative shift (needs a forward-look ring buffer, deferred to
+//!    negative delay (needs a forward-look ring buffer, deferred to
 //!    v0.2).
 //! 5. **Offset** — same composition chain for the signed calibration
 //!    offset.
@@ -21,8 +21,8 @@ use crate::time::swing::{self, SwingConfig};
 use crate::time::tick::Tick;
 use connections::conn::fixed::{F12F06, Micro};
 
-/// Maximum positive shift before saturation: 300 ms = 300 000 µs.
-pub const MAX_SHIFT: Micro = Micro(300_000);
+/// Maximum positive delay before saturation: 300 ms = 300 000 µs.
+pub const MAX_DELAY: Micro = Micro(300_000);
 
 /// Per-channel configuration.
 #[derive(Copy, Clone, Debug)]
@@ -34,9 +34,9 @@ pub struct Channel {
     /// quintuplet 8ths (5 per quarter at 192 ticks each).
     pub divider: Grid,
     pub shuffle: SwingConfig,
-    /// Positive-only shift, clamped to `[Micro::ZERO, MAX_SHIFT]` on
-    /// use. v0.1 does not implement negative shift.
-    pub shift: Micro,
+    /// Positive-only delay compensation, clamped to
+    /// `[Micro::ZERO, MAX_DELAY]` on use.
+    pub delay: Micro,
     /// Signed calibration offset. Not clamped here — CLI / UI should
     /// pick a musical range (agogo.md §6 cites ±5 ms = ±5 000 µs).
     pub offset: Micro,
@@ -82,7 +82,7 @@ pub(crate) fn micro_to_samples(m: Micro, sr: u32) -> i64 {
     })
 }
 
-/// Run the divider → shuffle → sample → shift → offset pipeline over
+/// Run the divider → shuffle → sample → delay → offset pipeline over
 /// a master tick stream. Pure: output order matches input order and
 /// no I/O is performed.
 pub fn transform(
@@ -91,8 +91,8 @@ pub fn transform(
     stc: &SampleTickConn,
 ) -> Vec<ScheduledEvent> {
     let divisor = channel.divider.tick_count();
-    let shift_clamped = Micro(channel.shift.0.clamp(0, MAX_SHIFT.0));
-    let shift_samples = micro_to_samples(shift_clamped, stc.sr()).max(0) as u64;
+    let delay_clamped = Micro(channel.delay.0.clamp(0, MAX_DELAY.0));
+    let delay_samples = micro_to_samples(delay_clamped, stc.sr()).max(0) as u64;
     let offset_samples = micro_to_samples(channel.offset, stc.sr());
 
     master_ticks
@@ -101,11 +101,11 @@ pub fn transform(
         .map(|t| {
             let swung = swing::effective_tick(&channel.shuffle, t);
             let base = stc.inner(swung);
-            let with_shift = base.saturating_add(shift_samples);
+            let with_delay = base.saturating_add(delay_samples);
             let final_sample = if offset_samples >= 0 {
-                with_shift.saturating_add(offset_samples as u64)
+                with_delay.saturating_add(offset_samples as u64)
             } else {
-                with_shift.saturating_sub(offset_samples.unsigned_abs())
+                with_delay.saturating_sub(offset_samples.unsigned_abs())
             };
             ScheduledEvent {
                 sample_index: final_sample,
@@ -134,7 +134,7 @@ mod tests {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
         }
@@ -155,9 +155,9 @@ mod tests {
 
     #[test]
     fn shift_10ms_adds_exactly_480_samples() {
-        // shift = 10 ms at 48 kHz → +480 samples.
+        // delay = 10 ms at 48 kHz → +480 samples.
         let mut ch = zero_channel(Grid::T4);
-        ch.shift = Micro(10_000); // 10 ms
+        ch.delay = Micro(10_000); // 10 ms
         let ev = transform([Tick(0), Tick(960)], &ch, &stc_120_48k());
         let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
         assert_eq!(samples, vec![480, 24_480]);
@@ -188,16 +188,16 @@ mod tests {
     #[test]
     fn shift_over_300ms_saturates() {
         let mut ch = zero_channel(Grid::T4);
-        ch.shift = Micro(1_000_000); // 1 s
+        ch.delay = Micro(1_000_000); // 1 s
         let ev = transform([Tick(0)], &ch, &stc_120_48k());
         // Clamped to 300 ms → 14 400 samples at 48 kHz.
         assert_eq!(ev[0].sample_index, 14_400);
     }
 
     #[test]
-    fn negative_shift_clamped_to_zero() {
+    fn negative_delay_clamped_to_zero() {
         let mut ch = zero_channel(Grid::T4);
-        ch.shift = Micro(-100_000); // -100 ms
+        ch.delay = Micro(-100_000); // -100 ms
         let ev = transform([Tick(0), Tick(960)], &ch, &stc_120_48k());
         assert_eq!(ev[0].sample_index, 0);
         assert_eq!(ev[1].sample_index, 24_000);
@@ -244,7 +244,7 @@ mod tests {
         #[test]
         fn tick_monotonicity(
             (divider, shuffle) in arb_divider_with_bounded_swing(),
-            shift_us in 0_i64..=MAX_SHIFT.0,
+            delay_us in 0_i64..=MAX_DELAY.0,
             offset_us in -5_000_i64..=5_000,
             max_tick in 960u32..=10_000,
         ) {
@@ -252,7 +252,7 @@ mod tests {
                 mode: ChannelMode::MidiClock,
                 divider,
                 shuffle,
-                shift: Micro(shift_us),
+                delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
             };
@@ -290,20 +290,20 @@ mod tests {
 
         /// Plan property `shift_clamping`, upper bound.
         #[test]
-        fn shift_upper_clamp(shift_us in MAX_SHIFT.0..=10_000_000_i64) {
+        fn shift_upper_clamp(delay_us in MAX_DELAY.0..=10_000_000_i64) {
             let mut ch = zero_channel(Grid::T4);
-            ch.shift = Micro(shift_us);
+            ch.delay = Micro(delay_us);
             let stc = stc_120_48k();
             let ev = transform([Tick(960)], &ch, &stc);
-            let cap_samples = super::micro_to_samples(MAX_SHIFT, stc.sr()) as u64;
+            let cap_samples = super::micro_to_samples(MAX_DELAY, stc.sr()) as u64;
             prop_assert_eq!(ev[0].sample_index, 24_000 + cap_samples);
         }
 
         /// Plan property `shift_clamping`, lower bound.
         #[test]
-        fn shift_lower_clamp(shift_us in -10_000_000_i64..0) {
+        fn shift_lower_clamp(delay_us in -10_000_000_i64..0) {
             let mut ch = zero_channel(Grid::T4);
-            ch.shift = Micro(shift_us);
+            ch.delay = Micro(delay_us);
             let ev = transform([Tick(960)], &ch, &stc_120_48k());
             prop_assert_eq!(ev[0].sample_index, 24_000);
         }
