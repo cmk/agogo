@@ -49,7 +49,6 @@ All binary operators are left-associative.
 | `\|` | alignment intersection | join (lcm of tick counts) | single grid |
 | `>` | implication | Heyting →: max{c : a ∧ c ⊑ b} | single grid |
 | `<` | coimplication | co-Heyting \\: min{c : a ⊑ b ∨ c} | single grid |
-| `&` | polyrhythm | parallel voices (not a lattice element) | multiple tracks |
 
 The lattice's divisibility ordering is *inverted* relative to
 event-set inclusion (finer grids divide coarser ones). The DSL
