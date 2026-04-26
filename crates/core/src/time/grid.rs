@@ -513,6 +513,13 @@ mod tests {
         assert_ne!(mid(Grid::T16), Grid::T1);
     }
 
+    #[test]
+    fn comid_t16_spot_check() {
+        // comid(T16) = meet(T16, coneg(T16)) = meet(T16, T2P)
+        let expected = meet(Grid::T16, coneg(Grid::T16));
+        assert_eq!(comid(Grid::T16), expected);
+    }
+
     // ── Display / FromStr ─────────────────────────────────────────
 
     #[test]
