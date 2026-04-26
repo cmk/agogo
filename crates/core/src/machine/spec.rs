@@ -41,12 +41,18 @@ use crate::time::swing::SwingConfig;
 use crate::time::tbase::TBase;
 
 /// Parsed `--ch` spec.
+///
+/// Audit P4 (Plan 22): the spec carries no routing-target tag —
+/// every `ChannelSpec` is implicitly MIDI-targeted, because that's
+/// the only target the parser produces today (`dev=audio` is
+/// rejected at parse time as `AudioDeferred`). When v0.2/v0.4 add
+/// `dev=din` or `dev=cv` parsers, `ChannelSpec` becomes a sum type
+/// `enum { Midi, Din, Cv }` mirroring [`Channel`](crate::channel::Channel)'s
+/// variants from audit P3.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChannelSpec {
     /// Optional human-readable identifier. Free-form string.
     pub id: Option<String>,
-    /// Routing destination kind. `Audio` is reserved for v0.4.
-    pub dev: ChannelDev,
     /// Device-specific routing target (port name, channel index).
     pub out: Option<String>,
     /// Grid — resolved from a DSL expression at parse time.
@@ -75,22 +81,6 @@ pub struct ChannelSpec {
     pub bars: Option<NonZeroU16>,
 }
 
-/// Output device kind for a channel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChannelDev {
-    Midi,
-    Audio,
-}
-
-impl Display for ChannelDev {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Midi => f.write_str("midi"),
-            Self::Audio => f.write_str("audio"),
-        }
-    }
-}
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum ChannelSpecError {
     #[error("channel spec: empty key")]
@@ -116,7 +106,11 @@ impl ChannelSpec {
         let pairs = tokenize(s)?;
 
         let mut id: Option<String> = None;
-        let mut dev: Option<ChannelDev> = None;
+        // The `dev=` key is required (audit P4 keeps that contract)
+        // but its value is implicitly `midi` — `dev=audio` errors
+        // at parse, `dev=midi` validates and stores nothing. Only
+        // the presence of the key is tracked.
+        let mut dev_seen: bool = false;
         let mut out: Option<String> = None;
         let mut grid_str: Option<String> = None;
         let mut swing: SwingConfig = SwingConfig {
@@ -144,13 +138,14 @@ impl ChannelSpec {
             match k.as_str() {
                 "id" => id = Some(v),
                 "dev" => {
-                    dev = Some(match v.as_str() {
-                        "midi" => ChannelDev::Midi,
+                    match v.as_str() {
+                        "midi" => {} // ok — only valid value today
                         "audio" => return Err(ChannelSpecError::AudioDeferred),
                         other => {
                             return Err(ChannelSpecError::BadValue("dev", other.to_string()));
                         }
-                    });
+                    }
+                    dev_seen = true;
                 }
                 "out" => out = Some(v),
                 "grid" => {
@@ -367,9 +362,11 @@ impl ChannelSpec {
             _ => unreachable!("mode_kw is constrained to clock|click at parse"),
         };
 
+        if !dev_seen {
+            return Err(ChannelSpecError::MissingKey("dev"));
+        }
         Ok(Self {
             id,
-            dev: dev.ok_or(ChannelSpecError::MissingKey("dev"))?,
             out,
             grid,
             mode,
@@ -383,12 +380,10 @@ impl ChannelSpec {
 
     /// Convert the parsed spec into the runtime [`Channel`] type.
     pub fn into_channel(self) -> Result<Channel, ChannelSpecError> {
-        // dev=audio is reserved for v0.4. The mode/click validation
-        // already happened in `parse`, so by here `self.mode` is the
-        // ready-to-use MidiRole (Clock or Click(MidiClickConfig)).
-        if matches!(self.dev, ChannelDev::Audio) {
-            return Err(ChannelSpecError::AudioDeferred);
-        }
+        // `dev=audio` is rejected at parse time (audit P4); by here
+        // every spec is implicitly MIDI-targeted. The mode/click
+        // validation already happened in `parse`, so `self.mode` is
+        // the ready-to-use MidiRole (Clock or Click(MidiClickConfig)).
         // argv boundary: delay (ms) crosses into Micro via F64F06.
         let delay = match micro_from_ms(self.delay_ms) {
             Some(m) => Micro(m.0.clamp(0, MAX_DELAY.0)),
@@ -520,7 +515,10 @@ fn micro_from_ms(ms: f64) -> Option<Micro> {
 
 impl Display for ChannelSpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "dev={},grid={}", self.dev, self.grid)?;
+        // `dev=midi` is the only supported value (audit P4); emitted
+        // as a literal so the round-trip parser still sees the
+        // required key.
+        write!(f, "dev=midi,grid={}", self.grid)?;
         if let Some(id) = &self.id {
             write!(f, ",id={}", quote_if_needed(id))?;
         }
@@ -668,9 +666,22 @@ mod tests {
     fn parse_minimal() {
         let spec = ChannelSpec::parse("dev=midi", &[]).unwrap();
         assert_eq!(spec.grid, Grid::T4); // default
-        assert_eq!(spec.dev, ChannelDev::Midi);
+        // dev field is gone (audit P4); the parser still requires
+        // the `dev=` key but stores nothing.
         assert_eq!(spec.swing, SwingConfig { resolution: TBase::T8, amount: 0 });
         assert_eq!(spec.offset_ticks, 0);
+    }
+
+    #[test]
+    fn parse_rejects_dev_unknown() {
+        let err = ChannelSpec::parse("dev=florble", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, val) => {
+                assert_eq!(key, "dev");
+                assert_eq!(val, "florble");
+            }
+            other => panic!("expected BadValue, got {other:?}"),
+        }
     }
 
     #[test]
@@ -900,10 +911,6 @@ mod tests {
 
     // ── Proptest ─────────────────────────────────────────────────
 
-    fn arb_dev() -> impl Strategy<Value = ChannelDev> {
-        Just(ChannelDev::Midi)
-    }
-
     fn arb_grid() -> impl Strategy<Value = Grid> {
         prop::sample::select(Grid::ALL.as_slice())
     }
@@ -960,7 +967,6 @@ mod tests {
 
     fn arb_spec() -> impl Strategy<Value = ChannelSpec> {
         (
-            arb_dev(),
             arb_grid(),
             prop::option::of("[a-zA-Z][a-zA-Z0-9]{0,8}"),
             prop::option::of("[a-zA-Z0-9]{1,10}"),
@@ -974,7 +980,6 @@ mod tests {
         )
             .prop_map(
                 |(
-                    dev,
                     grid,
                     id,
                     out,
@@ -988,7 +993,6 @@ mod tests {
                 )| {
                     ChannelSpec {
                         id,
-                        dev,
                         out,
                         grid,
                         mode,
