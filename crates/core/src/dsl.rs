@@ -9,6 +9,7 @@
 
 pub mod ast;
 pub mod error;
+mod lexer;
 
 pub use ast::TrackSpec;
 pub use error::DslError;
