@@ -154,3 +154,50 @@ No TODOs, stubs, or security issues introduced.
 **Follow-up (future work):**
 - When `dev=din` or `dev=cv` lands as a parser key, `Display for ChannelSpec` must be updated; the struct doc comment flags this.
 - `dev=` could be made optional (default `midi`) in a follow-up. Deferred per plan.
+
+<!-- gh-id: 4176868946 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-26 11:36 UTC](https://github.com/cmk/agogo/pull/27#pullrequestreview-4176868946))
+
+## Pull request overview
+
+Removes the legacy routing-target tag (`dev`) from `ChannelSpec`, making the parsed spec implicitly MIDI-targeted and preserving the existing CLI/parse contracts by still requiring a `dev=` key (now validated-only).
+
+**Changes:**
+- Dropped `ChannelSpec.dev` and deleted the `ChannelDev` enum (and its public re-export).
+- Moved `dev=audio` rejection to parse time; `Display for ChannelSpec` now hardcodes `dev=midi` to preserve round-tripping.
+- Simplified CLI MIDI port selection logic to use the first parsed spec; added coverage for unknown `dev` values and a CLI smoke test.
+
+### Reviewed changes
+
+Copilot reviewed 5 out of 5 changed files in this pull request and generated 1 comment.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| `crates/core/src/machine/spec.rs` | Removes `dev` field/enum, validates `dev=` presence via `dev_seen`, hardcodes `dev=midi` in `Display`, updates tests/proptests accordingly. |
+| `crates/core/src/machine.rs` | Removes `ChannelDev` from public re-exports. |
+| `crates/cli/src/run.rs` | Collapses “find first MIDI spec” logic to “first spec”; adds a regression-style CLI test to ensure minimal MIDI spec parses through to rate dispatch. |
+| `doc/plans/plan-2026-04-26-03.md` | Adds Plan 22 documentation for audit P4 work. |
+| `doc/reviews/review-00027.md` | Adds review record for PR #27 / audit P4. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3143413244 -->
+### Copilot on [`crates/cli/src/run.rs:130`](https://github.com/cmk/agogo/pull/27#discussion_r3143413244) (2026-04-26 11:36 UTC)
+
+Using `.expect(...)` here will panic instead of returning a `Result` error if the invariant is ever violated (e.g., if the earlier guard changes or `named` can become empty in the future). Since `run()` already returns `Result<(), String>`, prefer propagating a normal error (`ok_or_else(...)` / `ok_or(...)`) so the CLI fails gracefully rather than crashing.
+```suggestion
+        .ok_or_else(|| "at least one --ch spec is required".to_string())
+        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()))?;
+```
+
+<!-- gh-id: 3143416919 -->
+#### ↳ cmk ([2026-04-26 11:39 UTC](https://github.com/cmk/agogo/pull/27#discussion_r3143416919))
+
+Fixed in 6e6efd0 — switched to `.ok_or_else(...)` + `?` per the suggestion. The empty-spec branch is still structurally unreachable today via the args.ch.is_empty guard, but the new shape stays graceful if any future caller path bypasses that guard.
