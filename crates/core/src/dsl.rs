@@ -59,7 +59,8 @@ mod tests {
     use super::*;
     use crate::dsl::ast::{Expr, Span};
     use crate::dsl::eval;
-    use crate::time::grid::{self, Grid};
+    use crate::time::grid::Grid;
+    use connections::lattice::{Coheyting, Heyting, Join, Meet};
     use proptest::prelude::*;
 
     // ── Spot checks ─────────────────────────────────────────────
@@ -88,14 +89,14 @@ mod tests {
 
     #[test]
     fn neg() {
-        assert_eq!(parse("!T16", &[]).unwrap(), grid::neg(Grid::T16));
+        assert_eq!(parse("!T16", &[]).unwrap(), Grid::T16.neg());
     }
 
     #[test]
     fn imply() {
         assert_eq!(
             parse("T16>T8", &[]).unwrap(),
-            grid::imply(Grid::T16, Grid::T8)
+            Grid::T16.imp(&Grid::T8)
         );
     }
 
@@ -103,13 +104,13 @@ mod tests {
     fn coimply() {
         assert_eq!(
             parse("T16<T8", &[]).unwrap(),
-            grid::coimp(Grid::T16, Grid::T8)
+            Grid::T16.coimp(&Grid::T8)
         );
     }
 
     #[test]
     fn complex() {
-        let expected = grid::join(grid::meet(Grid::T16T, Grid::T16Q), Grid::T8);
+        let expected = Grid::T16T.meet(&Grid::T16Q).join(&Grid::T8);
         assert_eq!(parse("(T16t&T16q)|T8", &[]).unwrap(), expected);
     }
 
@@ -126,7 +127,7 @@ mod tests {
         let env = vec![("kick".to_string(), Grid::T4)];
         assert_eq!(
             parse("kick&T16", &env).unwrap(),
-            grid::meet(Grid::T4, Grid::T16)
+            Grid::T4.meet(&Grid::T16)
         );
     }
 
@@ -202,31 +203,31 @@ mod tests {
         #[test]
         fn eval_preserves_meet(a in arb_grid(), b in arb_grid()) {
             let s = format!("{}&{}", a, b);
-            prop_assert_eq!(parse(&s, &[]).unwrap(), grid::meet(a, b));
+            prop_assert_eq!(parse(&s, &[]).unwrap(), a.meet(&b));
         }
 
         #[test]
         fn eval_preserves_join(a in arb_grid(), b in arb_grid()) {
             let s = format!("{}|{}", a, b);
-            prop_assert_eq!(parse(&s, &[]).unwrap(), grid::join(a, b));
+            prop_assert_eq!(parse(&s, &[]).unwrap(), a.join(&b));
         }
 
         #[test]
         fn eval_preserves_imply(a in arb_grid(), b in arb_grid()) {
             let s = format!("{}>{}", a, b);
-            prop_assert_eq!(parse(&s, &[]).unwrap(), grid::imply(a, b));
+            prop_assert_eq!(parse(&s, &[]).unwrap(), a.imp(&b));
         }
 
         #[test]
         fn eval_preserves_coimply(a in arb_grid(), b in arb_grid()) {
             let s = format!("{}<{}", a, b);
-            prop_assert_eq!(parse(&s, &[]).unwrap(), grid::coimp(a, b));
+            prop_assert_eq!(parse(&s, &[]).unwrap(), a.coimp(&b));
         }
 
         #[test]
         fn eval_preserves_neg(a in arb_grid()) {
             let s = format!("!{}", a);
-            prop_assert_eq!(parse(&s, &[]).unwrap(), grid::neg(a));
+            prop_assert_eq!(parse(&s, &[]).unwrap(), a.neg());
         }
 
         #[test]
@@ -274,7 +275,7 @@ mod tests {
             let env = vec![("x".to_string(), g)];
             prop_assert_eq!(
                 parse("x&T16", &env).unwrap(),
-                grid::meet(g, Grid::T16)
+                g.meet(&Grid::T16)
             );
         }
 

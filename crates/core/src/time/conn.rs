@@ -28,7 +28,8 @@
 use connections::conn::Conn;
 use num_rational::Rational64;
 
-use crate::time::grid::{self, Grid};
+use crate::time::grid::Grid;
+use connections::lattice::{Join, Meet};
 use crate::time::tick::{Tick, Time, from_ticks, from_ticks_floor, time_to_tick, PPQN};
 
 /// A rational whole-note duration. `Whole::new(1, 4)` = quarter note.
@@ -302,7 +303,7 @@ pub fn time() -> Conn<(Time, Time), Time> {
 
 fn grid_pair_ceil(ab: (Grid, Grid)) -> Grid {
     let (a, b) = ab;
-    grid::meet(a, b)
+    a.meet(&b)
 }
 
 fn grid_pair_inner(t: Grid) -> (Grid, Grid) {
@@ -311,7 +312,7 @@ fn grid_pair_inner(t: Grid) -> (Grid, Grid) {
 
 fn grid_pair_floor(ab: (Grid, Grid)) -> Grid {
     let (a, b) = ab;
-    grid::join(a, b)
+    a.join(&b)
 }
 
 /// Divisibility-lattice connection on `Grid`. `ceil = meet (GCD of
@@ -798,13 +799,13 @@ mod tests {
         #[test]
         fn grid_ceil_is_meet(a in arb_grid(), b in arb_grid()) {
             let c = grid();
-            prop_assert_eq!(c.ceil((a, b)), grid::meet(a, b));
+            prop_assert_eq!(c.ceil((a, b)), a.meet(&b));
         }
 
         #[test]
         fn grid_floor_is_join(a in arb_grid(), b in arb_grid()) {
             let c = grid();
-            prop_assert_eq!(c.floor((a, b)), grid::join(a, b));
+            prop_assert_eq!(c.floor((a, b)), a.join(&b));
         }
 
         #[test]
