@@ -32,7 +32,7 @@ use crate::out::midi::{MidiRtByte, MidiSink, render_channel_block};
 use crate::sync::PhaseSource;
 use crate::time::conn::SampleTickConn;
 
-pub use spec::{ChannelDev, ChannelSpec, ChannelSpecError};
+pub use spec::{ChannelDev, ChannelSpec, ChannelSpecError, parse_channels};
 
 /// N-channel runtime state. Built on the control thread, moved into
 /// the audio callback closure, never mutated from the control thread
