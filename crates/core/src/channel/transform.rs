@@ -13,6 +13,8 @@
 //! 5. **Offset** — same composition chain for the signed calibration
 //!    offset.
 
+use core::num::NonZeroU16;
+
 use crate::channel::mode::ChannelMode;
 use crate::fxp::{Quantum, pico_to_samples};
 use crate::time::conn::SampleTickConn;
@@ -49,6 +51,18 @@ pub struct Channel {
     /// property must remain bit-for-bit unchanged when
     /// `snap_to_quantum = None`.
     pub snap_to_quantum: Option<Quantum>,
+    /// Period multiplier on the channel's grid output. When
+    /// `Some(N)`, the channel emits every `N`-th `tick_stream` event
+    /// — applied as a pre-renderer filter in `Machine::on_buffer`
+    /// against the per-channel `bar_counters` slot. The name reflects
+    /// the most idiomatic case (`grid=t1,bars=N` = `N` literal bars
+    /// in 4/4); the mechanism is divider-agnostic, so `grid=t8,bars=3`
+    /// expresses a dotted-quarter period that isn't in `Grid::ALL`.
+    /// `NonZeroU16` caps `N` at 65,535 — worst-case multiplied period
+    /// `65,535 × Grid::T1.tick_count() (3840) ≈ 251M` ticks fits in
+    /// `Tick(u32)` (`u32::MAX ≈ 4.29B`) with no overflow-check
+    /// arithmetic.
+    pub bar_multiplier: Option<NonZeroU16>,
 }
 
 /// A master-tick-driven event scheduled at a specific sample index.
@@ -137,6 +151,7 @@ mod tests {
             delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
+            bar_multiplier: None,
         }
     }
 
@@ -255,6 +270,7 @@ mod tests {
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
+                bar_multiplier: None,
             };
             let master: Vec<Tick> = (0..=max_tick).map(Tick).collect();
             let ev = transform(master, &ch, &stc_120_48k());

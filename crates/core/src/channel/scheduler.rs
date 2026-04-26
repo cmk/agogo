@@ -168,6 +168,7 @@ mod tests {
             delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
+            bar_multiplier: None,
         }
     }
 
@@ -252,6 +253,7 @@ mod tests {
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
+                bar_multiplier: None,
             };
             let end = buffer_start + frames as u64;
             let ev = tick_stream(&ch, &stc_120_48k(), buffer_start, frames);
@@ -298,6 +300,7 @@ mod tests {
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
+                bar_multiplier: None,
             };
             let stc = stc_120_48k();
             let buffer_end = buffer_start + frames as u64;
@@ -340,6 +343,7 @@ mod tests {
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
+                bar_multiplier: None,
             };
             let stc = stc_120_48k();
             // Upper bound: every master tick in the window could
@@ -376,6 +380,7 @@ mod tests {
                 delay: Micro(delay_us),
                 offset: Micro(offset_us),
                 snap_to_quantum: None,
+                bar_multiplier: None,
             };
             let stc = stc_120_48k();
             let total = buf_size * n_buffers;

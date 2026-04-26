@@ -992,6 +992,7 @@ pub mod channel_trace {
             delay,
             offset: Micro::ZERO,
             snap_to_quantum: None,
+            bar_multiplier: None,
         };
         // Pre-flight: reject ranges where `buffers × frames` would
         // overflow `u64`. Silent wrap in release builds would produce
@@ -1096,6 +1097,7 @@ pub mod midi_trace {
             delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
+            bar_multiplier: None,
         };
         // Overflow pre-flight matches channel_trace's shape.
         let frames_u64 = u64::try_from(args.frames)
@@ -1128,7 +1130,7 @@ pub mod midi_trace {
                 _ => None,
             };
             let evs = tick_stream(&channel, &stc, start_sample, args.frames);
-            render_channel_block(&channel, &evs, transport, start_sample, &sink);
+            render_channel_block(&channel, &evs, transport, start_sample, None, &sink);
         }
         Ok(sink
             .records()
@@ -1471,6 +1473,7 @@ pub mod demo {
             delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
+            bar_multiplier: None,
         };
         let machine = Machine::<S48>::new(
             vec![channel],
