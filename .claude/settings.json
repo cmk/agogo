@@ -2,11 +2,12 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash(git commit*)",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "{ cargo fmt --all -- --check || echo '[warn] cargo fmt found formatting differences (non-blocking; run: cargo fmt --all)'; } && scripts/check-pii.sh && scripts/check-floats.sh && cargo test --workspace --quiet 2>&1 && cargo clippy --all-targets --quiet -- -D warnings 2>&1"
+            "if": "Bash(*git commit*)",
+            "command": "{ { cargo fmt --all -- --check || echo '[warn] cargo fmt found formatting differences (non-blocking; run: cargo fmt --all)'; } && scripts/check-pii.sh && scripts/check-floats.sh && cargo test --workspace --quiet 2>&1 && cargo clippy --all-targets --quiet -- -D warnings 2>&1; } || exit 2"
           }
         ]
       }
