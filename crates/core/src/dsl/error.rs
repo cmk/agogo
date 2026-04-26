@@ -24,8 +24,6 @@ pub enum DslErrorKind {
         expected: &'static str,
         found: String,
     },
-    /// Invalid grid atom (e.g., `T3`, `T1t`).
-    InvalidAtom(String),
     /// Unknown variable name — not in the environment.
     UnknownVariable(String),
     /// Unmatched parenthesis.
@@ -57,7 +55,6 @@ impl std::fmt::Display for DslErrorKind {
             Self::Expected { expected, found } => {
                 write!(f, "expected {expected}, found {found}")
             }
-            Self::InvalidAtom(s) => write!(f, "invalid grid atom: {s}"),
             Self::UnknownVariable(s) => write!(f, "unknown variable: {s}"),
             Self::UnmatchedParen => write!(f, "unmatched parenthesis"),
             Self::NestingTooDeep => write!(f, "nesting depth exceeds 32"),

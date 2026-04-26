@@ -228,6 +228,23 @@ pub fn parse_channels(
             .id
             .clone()
             .unwrap_or_else(|| format!("C{}", i + 1));
+        // Reject IDs that are valid grid names — they can never be
+        // referenced as variables since the parser always tries
+        // Grid::from_str first.
+        if id.parse::<Grid>().is_ok() {
+            return Err(ChannelSpecError::BadValue(
+                "id",
+                format!("`{id}` is a grid literal and cannot be used as a channel ID"),
+            ));
+        }
+        // Reject duplicate IDs — linear scan finds the first match,
+        // so a duplicate would silently shadow.
+        if env.iter().any(|(n, _)| n == &id) {
+            return Err(ChannelSpecError::BadValue(
+                "id",
+                format!("duplicate channel ID `{id}`"),
+            ));
+        }
         env.push((id.clone(), spec.grid));
         result.push((id, spec));
     }
@@ -512,6 +529,23 @@ mod tests {
         assert_eq!(result[2].1.grid, Grid::T4);
     }
 
+    #[test]
+    fn parse_channels_rejects_duplicate_id() {
+        let specs = vec![
+            "id=kick,dev=midi,grid=T4".to_string(),
+            "id=kick,dev=midi,grid=T8".to_string(),
+        ];
+        let err = parse_channels(&specs).unwrap_err();
+        assert!(matches!(err, ChannelSpecError::BadValue("id", _)));
+    }
+
+    #[test]
+    fn parse_channels_rejects_grid_literal_id() {
+        let specs = vec!["id=T16,dev=midi".to_string()];
+        let err = parse_channels(&specs).unwrap_err();
+        assert!(matches!(err, ChannelSpecError::BadValue("id", _)));
+    }
+
     // ── Error cases ──────────────────────────────────────────────
 
     #[test]
@@ -585,6 +619,25 @@ mod tests {
         let spec = ChannelSpec::parse("dev=midi,swing=T16:80", &[]).unwrap();
         let s = spec.to_string();
         assert!(s.contains("swing=t16:80"), "got: {s}");
+    }
+
+    #[test]
+    fn display_quotes_values_with_spaces() {
+        let spec = ChannelSpec::parse(r#"dev=midi,out="IAC Bus 1""#, &[]).unwrap();
+        let s = spec.to_string();
+        assert!(s.contains(r#"out="IAC Bus 1""#), "got: {s}");
+        let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
+        assert_eq!(spec, reparsed);
+    }
+
+    #[test]
+    fn display_quotes_values_with_commas() {
+        let spec =
+            ChannelSpec::parse(r#"dev=midi,out="port,with,commas""#, &[]).unwrap();
+        let s = spec.to_string();
+        assert!(s.contains(r#"out="port,with,commas""#), "got: {s}");
+        let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
+        assert_eq!(spec, reparsed);
     }
 
     // ── Proptest ─────────────────────────────────────────────────
