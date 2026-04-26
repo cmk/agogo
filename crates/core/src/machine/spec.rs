@@ -185,19 +185,26 @@ impl ChannelSpec {
             }
         };
 
-        // Convert offset ticks to Micro. At this point we don't have
-        // tempo, so we store the tick count and let the transform
-        // pipeline handle the conversion. For now, offset_ticks is
-        // applied as a direct tick displacement in the scheduler.
-        // TODO: integrate with tempo-dependent Tick→Micro conversion.
-        let offset_micro = Micro(i64::from(self.offset_ticks));
+        // Offset in ticks requires tempo to convert to Micro. Until
+        // the tempo-dependent Tick→Micro path is wired, reject non-zero
+        // values rather than silently storing ticks as microseconds.
+        if self.offset_ticks != 0 {
+            return Err(ChannelSpecError::BadValue(
+                "offset",
+                format!(
+                    "non-zero offset ({} ticks) requires tempo-dependent conversion \
+                     (not yet implemented)",
+                    self.offset_ticks
+                ),
+            ));
+        }
 
         Ok(Channel {
             mode,
             divider: self.grid,
             shuffle: self.swing,
             delay,
-            offset: offset_micro,
+            offset: Micro::ZERO,
             snap_to_quantum: self
                 .snap_to_quantum_micro
                 .map(|m| crate::fxp::Quantum(Micro(m))),
@@ -602,7 +609,7 @@ mod tests {
             prop::option::of("[a-zA-Z0-9]{1,10}"),
             arb_tbase(),
             any::<i8>(),
-            -1000i32..=1000,
+            any::<i32>(),
             (0u32..=300).prop_map(|n| n as f64),
             prop::option::of(any::<i32>().prop_map(|n| n as i64)),
         )
