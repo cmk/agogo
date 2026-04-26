@@ -97,10 +97,10 @@ enum DemoSub {
         /// arrive when `agogo run` lands in Plan 14.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
         sr: u32,
-        /// Per-channel divider — `t64t` for spec-compliant 24
+        /// Per-channel grid — `t64t` for spec-compliant 24
         /// PPQN MIDI clock at 960 PPQN master.
         #[bpaf(long, argument("GRID"))]
-        divider: String,
+        grid: String,
         /// cpal buffer size in frames.
         #[bpaf(long, argument("FRAMES"), parse(parse_positive_u32), fallback(1024))]
         buffer_frames: u32,
@@ -127,8 +127,8 @@ enum MidiSub {
     /// MIDI 1.0 pins clock at 24 PPQN — one `0xF8` every `PPQN/24`
     /// master ticks. At agogo's 960 PPQN master that's every 40
     /// master ticks, which is `Grid::T64T` (64th-note triplet).
-    /// Pick `--divider t4` for one byte per beat (human-readable);
-    /// pick `--divider t64t` for a spec-compliant 24 PPQN stream.
+    /// Pick `--grid t4` for one byte per beat (human-readable);
+    /// pick `--grid t64t` for a spec-compliant 24 PPQN stream.
     #[bpaf(command("trace"))]
     Trace {
         /// Tempo in beats per minute.
@@ -137,9 +137,9 @@ enum MidiSub {
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
-        /// Per-channel divider (e.g. `t4`, `t16`, `t32t`, `t8q`, `t2p`).
+        /// Per-channel grid (e.g. `t4`, `t16`, `t32t`, `t8q`, `t2p`).
         #[bpaf(long, argument("GRID"))]
-        divider: String,
+        grid: String,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
         frames: usize,
@@ -282,20 +282,14 @@ enum ChannelSub {
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
-        /// Per-channel divider (e.g. `t4`, `t16`, `t8t`, `t8q`, `t2p`).
-        #[bpaf(long, argument("GRID"))]
-        divider: String,
-        /// `SwingConfig::amount` — signed `i8` tick offset on a `t16` resolution grid.
-        #[bpaf(long, argument("AMOUNT"), fallback(0))]
-        shuffle: i32,
-        /// Positive latency shift in ms; clamped to `[0, 300]` inside
-        /// the transform. Non-finite or negative values rejected at
-        /// the CLI boundary.
-        #[bpaf(long, argument("SHIFT_MS"), parse(parse_non_negative_f64), fallback(0.0))]
-        shift_ms: f64,
-        /// Signed calibration offset in ms. Must be finite.
-        #[bpaf(long, argument("OFFSET_MS"), parse(parse_finite_f64), fallback(0.0))]
-        offset_ms: f64,
+        /// Grid expression (e.g. `t4`, `t16`, `t8t`, `t8q`, `t2p`).
+        #[bpaf(long, argument("EXPR"))]
+        grid: String,
+        /// Positive delay compensation in ms; clamped to `[0, 300]`
+        /// inside the transform. Non-finite or negative values
+        /// rejected at the CLI boundary.
+        #[bpaf(long, argument("MS"), parse(parse_non_negative_f64), fallback(0.0))]
+        delay: f64,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
         frames: usize,
@@ -329,13 +323,7 @@ fn parse_non_negative_f64(v: f64) -> Result<f64, String> {
     }
 }
 
-fn parse_finite_f64(v: f64) -> Result<f64, String> {
-    if v.is_finite() {
-        Ok(v)
-    } else {
-        Err(format!("must be a finite number, got {v}"))
-    }
-}
+
 
 fn main() {
     let cli = cli().run();
@@ -381,10 +369,8 @@ fn main() {
                 ChannelSub::Trace {
                     bpm,
                     sr,
-                    divider,
-                    shuffle,
-                    shift_ms,
-                    offset_ms,
+                    grid,
+                    delay,
                     frames,
                     buffers,
                 },
@@ -394,10 +380,8 @@ fn main() {
                 let args = channel_trace::TraceArgs {
                     bpm,
                     sr,
-                    divider,
-                    shuffle,
-                    shift_ms,
-                    offset_ms,
+                    grid,
+                    delay,
                     frames,
                     buffers,
                 };
@@ -415,7 +399,7 @@ fn main() {
             }
             #[cfg(not(feature = "core"))]
             {
-                let _ = (bpm, sr, divider, shuffle, shift_ms, offset_ms, frames, buffers);
+                let _ = (bpm, sr, grid, delay, frames, buffers);
                 eprintln!("error: build with --features core to enable `channel trace`");
                 std::process::exit(2);
             }
@@ -425,7 +409,7 @@ fn main() {
                 MidiSub::Trace {
                     bpm,
                     sr,
-                    divider,
+                    grid,
                     frames,
                     buffers,
                     start,
@@ -437,7 +421,7 @@ fn main() {
                 let args = midi_trace::TraceArgs {
                     bpm,
                     sr,
-                    divider,
+                    grid,
                     frames,
                     buffers,
                     start,
@@ -457,7 +441,7 @@ fn main() {
             }
             #[cfg(not(feature = "core"))]
             {
-                let _ = (bpm, sr, divider, frames, buffers, start, stop_on_exit);
+                let _ = (bpm, sr, grid, frames, buffers, start, stop_on_exit);
                 eprintln!("error: build with --features core to enable `midi trace`");
                 std::process::exit(2);
             }
@@ -543,7 +527,7 @@ fn main() {
                     source,
                     bpm,
                     sr,
-                    divider,
+                    grid,
                     buffer_frames,
                     duration_ms,
                 },
@@ -554,7 +538,7 @@ fn main() {
                 source,
                 bpm,
                 sr,
-                divider,
+                grid,
                 buffer_frames,
                 duration_ms,
             };
@@ -935,10 +919,8 @@ pub mod channel_trace {
     pub struct TraceArgs {
         pub bpm: f64,
         pub sr: u32,
-        pub divider: String,
-        pub shuffle: i32,
-        pub shift_ms: f64,
-        pub offset_ms: f64,
+        pub grid: String,
+        pub delay: f64,
         pub frames: usize,
         pub buffers: u32,
     }
@@ -952,12 +934,12 @@ pub mod channel_trace {
     }
 
     /// Pure CPU scheduling trace — useful for testing without capturing
-    /// stdout. Returns an error if `divider` isn't a valid `Grid` name.
+    /// stdout. Returns an error if `grid` isn't a valid `Grid` name.
     pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
-        let divider: Grid = args
-            .divider
+        let grid: Grid = args
+            .grid
             .parse()
-            .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
+            .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
         // argv-boundary: f64 BPM → µBPM. f64 dies right here.
         let bpm = {
             let scaled = (args.bpm * 1.0e6).round();
@@ -986,8 +968,8 @@ pub mod channel_trace {
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
         // argv-boundary: ms (f64) → Micro via the upstream `F64F06`
         // lawful conn. Out-of-range saturations are user errors, not
-        // silent defaults — `parse_non_negative_f64` / `parse_finite_f64`
-        // already validated finiteness, so an `Extended::PosInf` /
+        // silent defaults — `parse_non_negative_f64` already validated
+        // finiteness, so an `Extended::PosInf` /
         // `Extended::NegInf` result means the user asked for a value
         // outside `Micro`'s ±i64 range (billions of years). Surface
         // that as an error rather than silently mapping to zero.
@@ -999,21 +981,16 @@ pub mod channel_trace {
                 }
             }
         };
-        let shift = ms_to_micro("--shift-ms", args.shift_ms)?;
-        let offset = ms_to_micro("--offset-ms", args.offset_ms)?;
-        let amount: i8 = args
-            .shuffle
-            .try_into()
-            .map_err(|_| format!("--shuffle {} out of range (i8 [-128, 127])", args.shuffle))?;
+        let delay = ms_to_micro("--delay", args.delay)?;
         let channel = Channel {
             mode: ChannelMode::MidiClock,
-            divider,
+            divider: grid,
             shuffle: SwingConfig {
                 resolution: TBase::T16,
-                amount,
+                amount: 0,
             },
-            shift,
-            offset,
+            delay,
+            offset: Micro::ZERO,
             snap_to_quantum: None,
         };
         // Pre-flight: reject ranges where `buffers × frames` would
@@ -1061,7 +1038,7 @@ pub mod midi_trace {
     pub struct TraceArgs {
         pub bpm: f64,
         pub sr: u32,
-        pub divider: String,
+        pub grid: String,
         pub frames: usize,
         pub buffers: u32,
         pub start: bool,
@@ -1078,10 +1055,10 @@ pub mod midi_trace {
     /// a `TestSink` for `buffers` buffers of `frames` samples each
     /// and returns every emitted `(at_sample, byte)` in FIFO order.
     pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
-        let divider: Grid = args
-            .divider
+        let grid: Grid = args
+            .grid
             .parse()
-            .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
+            .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
         // argv-boundary: f64 BPM → µBPM. f64 dies right here.
         let bpm = {
             let scaled = (args.bpm * 1.0e6).round();
@@ -1111,12 +1088,12 @@ pub mod midi_trace {
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
         let channel = Channel {
             mode: ChannelMode::MidiClock,
-            divider,
+            divider: grid,
             shuffle: SwingConfig {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
         };
@@ -1176,7 +1153,7 @@ pub mod midi_trace {
             TraceArgs {
                 bpm: 120.0,
                 sr: 48_000,
-                divider: "t4".to_string(),
+                grid: "t4".to_string(),
                 frames: 24_000,
                 buffers: 4,
                 start: false,
@@ -1239,9 +1216,9 @@ pub mod midi_trace {
         }
 
         #[test]
-        fn bad_divider_errors() {
+        fn bad_grid_errors() {
             let args = TraceArgs {
-                divider: "notatbase".to_string(),
+                grid: "notatbase".to_string(),
                 ..base_args()
             };
             assert!(trace(&args).is_err());
@@ -1373,7 +1350,7 @@ pub mod demo {
     use std::time::Duration;
 
     /// `--ppq 24` — MIDI clock baseline. Hard-coded for the demo;
-    /// the user picks the *output* PPQN via `--divider` (`t64t` =
+    /// the user picks the *output* PPQN via `--grid` (`t64t` =
     /// 24 PPQN at 960 PPQN master).
     const DEMO_PPQ: u32 = 24;
 
@@ -1383,7 +1360,7 @@ pub mod demo {
         pub source: String,
         pub bpm: f64,
         pub sr: u32,
-        pub divider: String,
+        pub grid: String,
         pub buffer_frames: u32,
         pub duration_ms: u32,
     }
@@ -1393,10 +1370,10 @@ pub mod demo {
     /// observed at shutdown via `eprintln!` and an exit-2 path if
     /// non-zero.
     pub fn run(args: &DemoArgs) -> Result<(), String> {
-        let divider: Grid = args
-            .divider
+        let grid: Grid = args
+            .grid
             .parse()
-            .map_err(|e| format!("invalid --divider {}: {e}", args.divider))?;
+            .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
         // argv-boundary BPM (matches channel_trace + midi_trace).
         let bpm = {
             let scaled = (args.bpm * 1.0e6).round();
@@ -1486,12 +1463,12 @@ pub mod demo {
         // (no Start / Stop / Continue, just clock).
         let channel = Channel {
             mode: ChannelMode::MidiClock,
-            divider,
+            divider: grid,
             shuffle: SwingConfig {
                 resolution: TBase::T16,
                 amount: 0,
             },
-            shift: Micro::ZERO,
+            delay: Micro::ZERO,
             offset: Micro::ZERO,
             snap_to_quantum: None,
         };
@@ -1534,12 +1511,12 @@ pub mod demo {
             .map_err(|e| format!("cpal run: {e}"))?;
 
         eprintln!(
-            "agogo demo: running for {} ms, --bpm {} --sr {} --divider {} \
+            "agogo demo: running for {} ms, --bpm {} --sr {} --grid {} \
              --source {} --audio-in {} --midi-out {}",
             args.duration_ms,
             args.bpm,
             args.sr,
-            args.divider,
+            args.grid,
             args.source,
             args.audio_in,
             midi_port_name,
@@ -1700,7 +1677,7 @@ mod tests {
     }
 
     /// Plan build gate: the trace command at 120 BPM / 48 kHz / T4
-    /// divider / 4 096-frame buffers must produce events at
+    /// grid / 4 096-frame buffers must produce events at
     /// samples 0, 24 000, 48 000, … (one quarter note = 24 000
     /// samples) across the first few buffers.
     #[test]
@@ -1708,10 +1685,8 @@ mod tests {
         let args = TraceArgs {
             bpm: 120.0,
             sr: 48_000,
-            divider: "t4".to_string(),
-            shuffle: 0,
-            shift_ms: 0.0,
-            offset_ms: 0.0,
+            grid: "t4".to_string(),
+            delay: 0.0,
             frames: 4_096,
             buffers: 16,
         };
@@ -1723,14 +1698,12 @@ mod tests {
     }
 
     #[test]
-    fn channel_trace_rejects_invalid_divider() {
+    fn channel_trace_rejects_invalid_grid() {
         let args = TraceArgs {
             bpm: 120.0,
             sr: 48_000,
-            divider: "nope".to_string(),
-            shuffle: 0,
-            shift_ms: 0.0,
-            offset_ms: 0.0,
+            grid: "nope".to_string(),
+            delay: 0.0,
             frames: 4_096,
             buffers: 1,
         };

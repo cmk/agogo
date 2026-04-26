@@ -128,7 +128,7 @@ core = ["dep:project-core"]
   fourteen exception modules — the ten from Plan 13 plus four
   added in Plan 14: `crates/core/src/machine.rs` (PCM ABI for
   `AudioIo` test construction), `crates/core/src/machine/spec.rs`
-  (argv-boundary for `--ch shift-ms` / `offset-ms`),
+  (argv-boundary for `--ch delay`),
   `crates/host-link/src/source.rs` (PCM ABI for
   `PhaseSourceImpl::feed_samples`'s `&[f32]` slice param), and
   `crates/cli/src/run.rs` (argv parsers for `--bpm` and

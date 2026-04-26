@@ -186,7 +186,7 @@ fn quantum_snap_produces_positive_offset() {
     // transform pipeline wired through the real audio callback,
     // which lands with Plan 05.
     link_multicast_or_skip!();
-    use agogo_core::channel::{Channel, ChannelMode, MAX_SHIFT};
+    use agogo_core::channel::{Channel, ChannelMode, MAX_DELAY};
     use agogo_core::fxp::Micro;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
@@ -205,7 +205,7 @@ fn quantum_snap_produces_positive_offset() {
             resolution: TBase::T16,
             amount: 0,
         },
-        shift: Micro::ZERO,
+        delay: Micro::ZERO,
         offset: Micro::ZERO,
         snap_to_quantum: Some(Quantum::from_bars(4)),
     };
@@ -223,7 +223,7 @@ fn quantum_snap_produces_positive_offset() {
         ch.offset.0 < 2_000_001,
         "snap offset {:?} exceeds one-quantum span at 120 BPM", ch.offset
     );
-    // Also: the offset shouldn't accidentally saturate MAX_SHIFT
-    // (which would indicate unit confusion — MAX_SHIFT is 300 ms).
-    let _ = MAX_SHIFT; // referenced to keep the import; bound-check documented above.
+    // Also: the offset shouldn't accidentally saturate MAX_DELAY
+    // (which would indicate unit confusion — MAX_DELAY is 300 ms).
+    let _ = MAX_DELAY; // referenced to keep the import; bound-check documented above.
 }

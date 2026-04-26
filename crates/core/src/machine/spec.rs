@@ -3,28 +3,30 @@
 //! Grammar: `key=val[,key=val]*`. Whitespace tolerated; `=` and `,`
 //! separate; values may be quoted `"..."` to embed spaces or commas.
 //!
-//! Required keys: `div`, `dev`. Optional keys: `id`, `out`, `swing`
-//! (i8 tick offset), `swing-res` (binary resolution, default `t16`),
-//! `shift-ms`, `offset-ms`, `snap-quantum-us`. Unknown keys are hard
-//! errors so typos are caught early.
+//! Required keys: `grid`, `dev`. Optional keys: `id`, `out`, `delay`
+//! (latency compensation in ms), `snap-quantum-us`. Unknown keys are
+//! hard errors so typos are caught early.
+//!
+//! The `grid` value is currently a plain grid name (`t16`, `t8q`,
+//! etc.) parsed via `Grid::from_str`. When the DSL parser lands
+//! (Plan 16), it will accept full DSL expressions with lattice ops,
+//! swing, and offset (`T16~T16:80@-5`).
 //!
 //! [`ChannelSpec`] holds the parsed form; [`ChannelSpec::into_channel`]
 //! converts to a [`Channel`] at the CLI argv boundary, where the only
-//! `f64` fields (`shift_ms`, `offset_ms`) cross via the `F64F06` Conn
-//! per CLAUDE.md float exception 4.
+//! `f64` field (`delay_ms`) crosses via the `F64F06` Conn per CLAUDE.md
+//! float exception 4.
 
 use std::fmt::{self, Display};
 
-use crate::channel::transform::MAX_SHIFT;
+use crate::channel::transform::MAX_DELAY;
 use crate::channel::{Channel, ChannelMode};
 use crate::fxp::{Extended, ExtendedFloat, F64F06, Micro};
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
 use crate::time::tbase::TBase;
 
-/// Parsed `--ch` spec. Lossless: a `Channel` round-trips through
-/// `ChannelSpec::into_channel().into_spec()` only if every field
-/// was set explicitly (defaults aren't recoverable from a `Channel`).
+/// Parsed `--ch` spec.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChannelSpec {
     /// Optional human-readable identifier. Free-form string.
@@ -33,20 +35,12 @@ pub struct ChannelSpec {
     pub dev: ChannelDev,
     /// Device-specific routing target (port name, channel index).
     pub out: Option<String>,
-    /// Tempo divider. Required. Any 36-element `Grid` value is
-    /// allowed (`t4`, `t16`, `t8q`, `t32t`, `t2p`, …).
-    pub div: Grid,
-    /// `SwingConfig::amount` — signed `i8` tick offset on the
-    /// resolution grid. Default 0 (no swing).
-    pub swing: i8,
-    /// `SwingConfig::resolution` — binary subdivision the swing
-    /// grid lives on. Default `TBase::T16`.
-    pub swing_res: TBase,
-    /// Positive shift in milliseconds. Clamped to MAX_SHIFT (300 ms)
-    /// in `into_channel`.
-    pub shift_ms: f64, // argv boundary
-    /// Signed offset in milliseconds.
-    pub offset_ms: f64, // argv boundary
+    /// Grid expression. Currently a plain `Grid` name; Plan 16 will
+    /// upgrade this to a full DSL expression (grid + swing + offset).
+    pub grid: Grid,
+    /// Positive delay compensation in milliseconds. Clamped to
+    /// MAX_DELAY (300 ms) in `into_channel`.
+    pub delay_ms: f64, // argv boundary
     /// Optional quantum snap, in microseconds (Link-aware channels).
     pub snap_to_quantum_micro: Option<i64>,
 }
@@ -99,11 +93,8 @@ impl ChannelSpec {
         let mut id: Option<String> = None;
         let mut dev: Option<ChannelDev> = None;
         let mut out: Option<String> = None;
-        let mut div: Option<Grid> = None;
-        let mut swing: i8 = 0;
-        let mut swing_res: TBase = TBase::T16;
-        let mut shift_ms: f64 = 0.0; // argv boundary
-        let mut offset_ms: f64 = 0.0; // argv boundary
+        let mut grid: Option<Grid> = None;
+        let mut delay_ms: f64 = 0.0; // argv boundary
         let mut snap_to_quantum_micro: Option<i64> = None;
 
         for (k, v) in pairs {
@@ -119,45 +110,23 @@ impl ChannelSpec {
                     });
                 }
                 "out" => out = Some(v),
-                "div" => {
-                    div = Some(
+                "grid" => {
+                    grid = Some(
                         v.parse::<Grid>()
-                            .map_err(|e| ChannelSpecError::BadValue("div", e.to_string()))?,
+                            .map_err(|e| ChannelSpecError::BadValue("grid", e.to_string()))?,
                     );
                 }
-                "swing" => {
-                    swing = v
-                        .parse::<i8>()
-                        .map_err(|e| ChannelSpecError::BadValue("swing", e.to_string()))?;
-                }
-                "swing-res" => {
-                    swing_res = v
-                        .parse::<TBase>()
-                        .map_err(|e| ChannelSpecError::BadValue("swing-res", e.to_string()))?;
-                }
-                "shift-ms" => {
+                "delay" => {
                     let parsed = v
                         .parse::<f64>()
-                        .map_err(|e| ChannelSpecError::BadValue("shift-ms", e.to_string()))?;
+                        .map_err(|e| ChannelSpecError::BadValue("delay", e.to_string()))?;
                     if !parsed.is_finite() {
                         return Err(ChannelSpecError::BadValue(
-                            "shift-ms",
+                            "delay",
                             "must be finite".into(),
                         ));
                     }
-                    shift_ms = parsed;
-                }
-                "offset-ms" => {
-                    let parsed = v
-                        .parse::<f64>()
-                        .map_err(|e| ChannelSpecError::BadValue("offset-ms", e.to_string()))?;
-                    if !parsed.is_finite() {
-                        return Err(ChannelSpecError::BadValue(
-                            "offset-ms",
-                            "must be finite".into(),
-                        ));
-                    }
-                    offset_ms = parsed;
+                    delay_ms = parsed;
                 }
                 "snap-quantum-us" => {
                     snap_to_quantum_micro = Some(
@@ -174,38 +143,33 @@ impl ChannelSpec {
             id,
             dev: dev.ok_or(ChannelSpecError::MissingKey("dev"))?,
             out,
-            div: div.ok_or(ChannelSpecError::MissingKey("div"))?,
-            swing,
-            swing_res,
-            shift_ms,
-            offset_ms,
+            grid: grid.ok_or(ChannelSpecError::MissingKey("grid"))?,
+            delay_ms,
             snap_to_quantum_micro,
         })
     }
 
     /// Convert the parsed spec into the runtime [`Channel`] type. The
-    /// only `f64`s in this crate die here at the `// argv boundary`
+    /// only `f64` in this crate dies here at the `// argv boundary`
     /// via the `F64F06` Conn (per CLAUDE.md float exception 4).
     pub fn into_channel(self) -> Result<Channel, ChannelSpecError> {
         let mode = match self.dev {
             ChannelDev::Midi => ChannelMode::MidiClock,
             ChannelDev::Audio => return Err(ChannelSpecError::AudioDeferred),
         };
-        // argv boundary: shift-ms / offset-ms cross into Micro via F64F06.
-        // Shift-ms multiplied by 1e3 since F64F06 is seconds → micros.
-        let shift = micro_from_ms(self.shift_ms);
-        let offset = micro_from_ms(self.offset_ms);
-        let shift = Micro(shift.0.clamp(0, MAX_SHIFT.0));
+        // argv boundary: delay (ms) crosses into Micro via F64F06.
+        let delay = micro_from_ms(self.delay_ms);
+        let delay = Micro(delay.0.clamp(0, MAX_DELAY.0));
 
         Ok(Channel {
             mode,
-            divider: self.div,
+            divider: self.grid,
             shuffle: SwingConfig {
-                resolution: self.swing_res,
-                amount: self.swing,
+                resolution: TBase::T16,
+                amount: 0,
             },
-            shift,
-            offset,
+            delay,
+            offset: Micro::ZERO,
             snap_to_quantum: self
                 .snap_to_quantum_micro
                 .map(|m| crate::fxp::Quantum(Micro(m))),
@@ -230,30 +194,16 @@ fn micro_from_ms(ms: f64) -> Micro {
 }
 
 impl Display for ChannelSpec {
-    /// Serialise back into a parseable spec. `parse(spec.to_string())`
-    /// recovers the same spec for any valid `ChannelSpec`. Values
-    /// containing `,`, `=`, or whitespace are quoted so the
-    /// docker-style port name `out=IAC Bus 1` round-trips through
-    /// `Display` → `parse` correctly.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "dev={},div={}", self.dev, self.div)?;
+        write!(f, "dev={},grid={}", self.dev, self.grid)?;
         if let Some(id) = &self.id {
             write!(f, ",id={}", quote_if_needed(id))?;
         }
         if let Some(out) = &self.out {
             write!(f, ",out={}", quote_if_needed(out))?;
         }
-        if self.swing != 0 {
-            write!(f, ",swing={}", self.swing)?;
-        }
-        if self.swing_res != TBase::T16 {
-            write!(f, ",swing-res={}", self.swing_res)?;
-        }
-        if self.shift_ms != 0.0 {
-            write!(f, ",shift-ms={}", self.shift_ms)?;
-        }
-        if self.offset_ms != 0.0 {
-            write!(f, ",offset-ms={}", self.offset_ms)?;
+        if self.delay_ms != 0.0 {
+            write!(f, ",delay={}", self.delay_ms)?;
         }
         if let Some(q) = self.snap_to_quantum_micro {
             write!(f, ",snap-quantum-us={}", q)?;
@@ -264,14 +214,6 @@ impl Display for ChannelSpec {
 
 /// Wrap `v` in `"..."` if it contains any of the tokenizer's
 /// separators (`,`, `=`, whitespace) so the round-trip survives.
-/// Values without those characters are emitted verbatim. The parser
-/// has no escape sequence inside quoted values, so a value
-/// containing a literal `"` cannot round-trip — `Display` returns it
-/// verbatim and `parse` will still succeed if no separators are
-/// present, but a value like `name with " quote` will silently
-/// produce a `Malformed` error from `parse` later. v0.1 doesn't
-/// expose any code paths that produce such values; v0.2's preset
-/// I/O will need a real escaping convention.
 fn quote_if_needed(v: &str) -> String {
     if v.chars()
         .any(|c| c == ',' || c == '=' || c.is_whitespace())
@@ -367,104 +309,87 @@ mod tests {
 
     #[test]
     fn parse_full_spec() {
-        let s = "div=t32t,dev=midi,out=IAC Bus 1,swing=10,shift-ms=2.5,offset-ms=-1.0";
+        let s = "grid=t32t,dev=midi,out=IAC Bus 1,delay=2.5";
         let spec = ChannelSpec::parse(s).expect("parse");
-        assert_eq!(spec.div, Grid::T32T);
+        assert_eq!(spec.grid, Grid::T32T);
         assert_eq!(spec.dev, ChannelDev::Midi);
         assert_eq!(spec.out.as_deref(), Some("IAC Bus 1"));
-        assert_eq!(spec.swing, 10);
-        assert_eq!(spec.swing_res, TBase::T16);
-        assert!((spec.shift_ms - 2.5).abs() < 1e-9);
-        assert!((spec.offset_ms - -1.0).abs() < 1e-9);
+        assert!((spec.delay_ms - 2.5).abs() < 1e-9);
         assert_eq!(spec.snap_to_quantum_micro, None);
     }
 
     #[test]
-    fn parse_swing_res_default_t16() {
-        let spec = ChannelSpec::parse("dev=midi,div=t16,swing=80").unwrap();
-        assert_eq!(spec.swing_res, TBase::T16);
-        assert_eq!(spec.swing, 80);
-    }
-
-    #[test]
-    fn parse_swing_res_explicit() {
-        let spec =
-            ChannelSpec::parse("dev=midi,div=t8,swing=40,swing-res=t8").unwrap();
-        assert_eq!(spec.swing_res, TBase::T8);
-        assert_eq!(spec.swing, 40);
-    }
-
-    #[test]
-    fn parse_quintuplet_divider() {
-        let spec = ChannelSpec::parse("dev=midi,div=t8q").unwrap();
-        assert_eq!(spec.div, Grid::T8Q);
+    fn parse_quintuplet_grid() {
+        let spec = ChannelSpec::parse("dev=midi,grid=t8q").unwrap();
+        assert_eq!(spec.grid, Grid::T8Q);
     }
 
     #[test]
     fn parse_quoted_value_with_spaces_and_commas() {
-        let s = r#"dev=midi,div=t32t,out="IAC Bus 1, port 2""#;
+        let s = r#"dev=midi,grid=t32t,out="IAC Bus 1, port 2""#;
         let spec = ChannelSpec::parse(s).expect("parse");
         assert_eq!(spec.out.as_deref(), Some("IAC Bus 1, port 2"));
     }
 
     #[test]
     fn parse_rejects_unknown_key() {
-        let err = ChannelSpec::parse("dev=midi,div=t32t,unknown=x").unwrap_err();
+        let err = ChannelSpec::parse("dev=midi,grid=t32t,unknown=x").unwrap_err();
         assert_eq!(err, ChannelSpecError::UnknownKey("unknown".into()));
+    }
+
+    #[test]
+    fn parse_rejects_legacy_keys() {
+        // div, swing, swing-res are no longer accepted — use grid= with
+        // DSL syntax instead.
+        let err = ChannelSpec::parse("dev=midi,div=t32t").unwrap_err();
+        assert_eq!(err, ChannelSpecError::UnknownKey("div".into()));
+        let err = ChannelSpec::parse("dev=midi,grid=t32t,swing=80").unwrap_err();
+        assert_eq!(err, ChannelSpecError::UnknownKey("swing".into()));
+        let err = ChannelSpec::parse("dev=midi,grid=t32t,swing-res=t8").unwrap_err();
+        assert_eq!(err, ChannelSpecError::UnknownKey("swing-res".into()));
     }
 
     #[test]
     fn parse_rejects_missing_required() {
         let err = ChannelSpec::parse("dev=midi").unwrap_err();
-        assert_eq!(err, ChannelSpecError::MissingKey("div"));
-        let err = ChannelSpec::parse("div=t32t").unwrap_err();
+        assert_eq!(err, ChannelSpecError::MissingKey("grid"));
+        let err = ChannelSpec::parse("grid=t32t").unwrap_err();
         assert_eq!(err, ChannelSpecError::MissingKey("dev"));
     }
 
     #[test]
     fn parse_rejects_dev_audio_with_audio_deferred() {
-        let err = ChannelSpec::parse("dev=audio,div=t32t").unwrap_err();
+        let err = ChannelSpec::parse("dev=audio,grid=t32t").unwrap_err();
         assert_eq!(err, ChannelSpecError::AudioDeferred);
     }
 
     #[test]
-    fn parse_rejects_bad_div() {
-        let err = ChannelSpec::parse("dev=midi,div=t3").unwrap_err();
+    fn parse_rejects_bad_grid() {
+        let err = ChannelSpec::parse("dev=midi,grid=t3").unwrap_err();
         match err {
-            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "div"),
+            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "grid"),
             other => panic!("unexpected: {:?}", other),
         }
     }
 
     #[test]
-    fn parse_rejects_non_binary_swing_res() {
-        // `swing-res` is `TBase` (binary chain only) — quintuplet /
-        // triplet names must fail at parse time.
-        let err = ChannelSpec::parse("dev=midi,div=t16,swing-res=t8q").unwrap_err();
-        match err {
-            ChannelSpecError::BadValue(key, _) => assert_eq!(key, "swing-res"),
-            other => panic!("unexpected: {:?}", other),
-        }
+    fn into_channel_clamps_delay() {
+        // 500 ms exceeds MAX_DELAY (300 ms); clamped to 300 ms.
+        let spec = ChannelSpec::parse("dev=midi,grid=t32t,delay=500").unwrap();
+        let ch = spec.into_channel().unwrap();
+        assert_eq!(ch.delay, MAX_DELAY);
     }
 
     #[test]
-    fn into_channel_clamps_shift_ms() {
-        // 500 ms exceeds MAX_SHIFT (300 ms); clamped to 300 ms.
-        let spec = ChannelSpec::parse("dev=midi,div=t32t,shift-ms=500").unwrap();
+    fn into_channel_negative_delay_clamps_to_zero() {
+        let spec = ChannelSpec::parse("dev=midi,grid=t32t,delay=-50").unwrap();
         let ch = spec.into_channel().unwrap();
-        assert_eq!(ch.shift, MAX_SHIFT);
-    }
-
-    #[test]
-    fn into_channel_negative_shift_clamps_to_zero() {
-        let spec = ChannelSpec::parse("dev=midi,div=t32t,shift-ms=-50").unwrap();
-        let ch = spec.into_channel().unwrap();
-        assert_eq!(ch.shift, Micro(0));
+        assert_eq!(ch.delay, Micro(0));
     }
 
     #[test]
     fn display_round_trip_minimal() {
-        let spec = ChannelSpec::parse("dev=midi,div=t32t").unwrap();
+        let spec = ChannelSpec::parse("dev=midi,grid=t32t").unwrap();
         let s = spec.to_string();
         let reparsed = ChannelSpec::parse(&s).unwrap();
         assert_eq!(spec, reparsed);
@@ -472,7 +397,7 @@ mod tests {
 
     #[test]
     fn display_quotes_values_with_spaces() {
-        let spec = ChannelSpec::parse(r#"dev=midi,div=t32t,out="IAC Bus 1""#).unwrap();
+        let spec = ChannelSpec::parse(r#"dev=midi,grid=t32t,out="IAC Bus 1""#).unwrap();
         let s = spec.to_string();
         assert!(s.contains(r#"out="IAC Bus 1""#), "got: {s}");
         let reparsed = ChannelSpec::parse(&s).unwrap();
@@ -482,7 +407,7 @@ mod tests {
     #[test]
     fn display_quotes_values_with_commas() {
         let spec =
-            ChannelSpec::parse(r#"dev=midi,div=t32t,out="port,with,commas""#).unwrap();
+            ChannelSpec::parse(r#"dev=midi,grid=t32t,out="port,with,commas""#).unwrap();
         let s = spec.to_string();
         assert!(s.contains(r#"out="port,with,commas""#), "got: {s}");
         let reparsed = ChannelSpec::parse(&s).unwrap();
@@ -497,10 +422,6 @@ mod tests {
         prop::sample::select(Grid::ALL.as_slice())
     }
 
-    fn arb_tbase() -> impl Strategy<Value = TBase> {
-        prop::sample::select(TBase::ALL.as_slice())
-    }
-
     fn arb_spec() -> impl Strategy<Value = ChannelSpec> {
         let ident = r#"[a-zA-Z0-9 ,=_]{1,15}"#;
         (
@@ -508,35 +429,19 @@ mod tests {
             arb_grid(),
             prop::option::of(ident),
             prop::option::of(ident),
-            any::<i8>(),
-            arb_tbase(),
             (0u32..=300).prop_map(|n| n as f64),
-            (-100i32..=100).prop_map(|n| n as f64),
             prop::option::of(any::<i32>().prop_map(|n| n as i64)),
         )
-            .prop_map(
-                |(
-                    dev,
-                    div,
-                    id,
-                    out,
-                    swing,
-                    swing_res,
-                    shift_ms,
-                    offset_ms,
-                    snap_to_quantum_micro,
-                )| ChannelSpec {
+            .prop_map(|(dev, grid, id, out, delay_ms, snap_to_quantum_micro)| {
+                ChannelSpec {
                     id,
                     dev,
                     out,
-                    div,
-                    swing,
-                    swing_res,
-                    shift_ms,
-                    offset_ms,
+                    grid,
+                    delay_ms,
                     snap_to_quantum_micro,
-                },
-            )
+                }
+            })
     }
 
     proptest! {
