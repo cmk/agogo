@@ -124,7 +124,10 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     let channels: Vec<Channel> = named
         .into_iter()
-        .map(|(_, spec)| spec.into_channel().map_err(|e| format!("--ch: {e}")))
+        .map(|(id, spec)| {
+            spec.into_channel()
+                .map_err(|e| format!("--ch {id}: {e}"))
+        })
         .collect::<Result<_, _>>()?;
 
     // Static rate dispatch.
