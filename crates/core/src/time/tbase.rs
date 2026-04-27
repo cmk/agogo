@@ -10,7 +10,7 @@
 //! (finer grids — smaller tick counts — are lower under `Ple`),
 //! with `T1` (= bar) at the top and `T256` (= bar/256) at the bottom.
 
-use connections::lattice::Ple;
+use crate::preorder::Ple;
 
 use crate::time::tick::PPQN;
 

@@ -22,11 +22,16 @@
 //! `SampleTickConn` Conn-lookalike in `time::conn`.
 
 pub mod conn;
+pub mod decimal;
 pub mod envelope;
 pub mod grid;
+pub mod sample;
 pub mod swing;
 pub mod tbase;
 pub mod tick;
+
+#[cfg(test)]
+pub mod arb;
 
 #[cfg(test)]
 mod exact_rates;

@@ -209,7 +209,7 @@ impl LinkClock {
         // operates on; `Bot`/`Top` are unreachable for a finite
         // `Quantum` but the match keeps the result total.
         let q_f64 = match F64F06.inner(Extended::Finite(quantum.0)) {
-            ExtendedFloat::Finite(b) => b,
+            ExtendedFloat::Extend(b) => b,
             ExtendedFloat::Bot | ExtendedFloat::Top => return Micro::ZERO,
         };
         if q_f64 <= 0.0 || q_f64.is_nan() {

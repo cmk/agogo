@@ -14,7 +14,7 @@
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-use connections::lattice::Ple;
+use crate::preorder::Ple;
 
 use crate::time::grid::Grid;
 

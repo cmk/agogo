@@ -16,7 +16,8 @@
 //! `u8` to the newtype's `MAX`.
 
 use connections::conn::Conn;
-use connections::lattice::Ple;
+
+use crate::preorder::Ple;
 
 // ── U7 — 7-bit unsigned (0..=127). ──
 

@@ -20,17 +20,75 @@
 //!   contained, never stored, converted to fxp at the first
 //!   exit boundary.
 
-pub use connections::conn::fixed::{
-    Centi, Deci, F12F00, F12F03, F12F06, F12F09, F64F00, F64F01, F64F02,
-    F64F03, F64F06, F64F09, F64F12, HasResolution, Micro, Milli, Nano,
-    Pico, Uni,
-};
+// Float-boundary types (`ExtendedFloat<f64>`, `Extended<T>`) still
+// come from the connections crate — they're the algebra primitives
+// the time tier is built on.
 pub use connections::conn::float::ExtendedFloat;
-pub use connections::conn::sample::{
-    F12S44, F12S48, F12S88, F12S96, F12S176, F12S192,
-    S44, S48, S88, S96, S176, S192, SampleRate,
-};
 pub use connections::extended::Extended;
+
+// Time tier (decimal SI ladder + sample-indexed Q48.16) is now
+// vendored under `crate::time::{decimal, sample}`. Re-export the
+// agogo-local types under the same names every workspace caller
+// already uses.
+pub use crate::time::decimal::{
+    F064FD00, F064FD01, F064FD02, F064FD03, F064FD06, F064FD09, F064FD12, FD00, FD01, FD02, FD03,
+    FD06, FD09, FD12, FD12FD00, FD12FD03, FD12FD06, FD12FD09, HasResolution,
+};
+pub use crate::time::sample::{
+    FD12S044, FD12S048, FD12S088, FD12S096, FD12S176, FD12S192, Q48_16, S044, S048, S088, S096,
+    S176, S192, SampleRate,
+};
+
+// ────────────────────────────────────────────────────────────────────
+// Backward-compat aliases (Q1a transitional layer).
+//
+// Q1b will:
+// - Migrate every workspace call site to the new 4-character names.
+// - Remove every alias EXCEPT the three intentional domain aliases
+//   marked KEEP below.
+//
+// The KEEPs survive because they read as time-unit words at FFI
+// seams (host-link, scheduler) where `Micro(...)` is more meaningful
+// than `FD06(...)`. They are declared once here, with comments
+// explaining the rationale.
+// ────────────────────────────────────────────────────────────────────
+
+// Decimal SI tier — drop in Q1b except where marked KEEP.
+pub use crate::time::decimal::FD00 as Uni;
+pub use crate::time::decimal::FD01 as Deci;
+pub use crate::time::decimal::FD02 as Centi;
+pub use crate::time::decimal::FD03 as Milli;
+/// KEEP — domain alias for ns at FFI seams (Pico/Nano arithmetic in `sync::pll`).
+pub use crate::time::decimal::FD09 as Nano;
+/// KEEP — domain alias for µs at FFI seams (`Quantum(Micro)`, `host-link::session`).
+pub use crate::time::decimal::FD06 as Micro;
+/// KEEP — domain alias for ps in `pico_to_samples` and the cpal seam.
+pub use crate::time::decimal::FD12 as Pico;
+
+// Decimal F-ladder Conns — drop in Q1b.
+pub use crate::time::decimal::F064FD00 as F64F00;
+pub use crate::time::decimal::F064FD01 as F64F01;
+pub use crate::time::decimal::F064FD02 as F64F02;
+pub use crate::time::decimal::F064FD03 as F64F03;
+pub use crate::time::decimal::F064FD06 as F64F06;
+pub use crate::time::decimal::F064FD09 as F64F09;
+pub use crate::time::decimal::F064FD12 as F64F12;
+pub use crate::time::decimal::FD12FD00 as F12F00;
+pub use crate::time::decimal::FD12FD03 as F12F03;
+pub use crate::time::decimal::FD12FD06 as F12F06;
+pub use crate::time::decimal::FD12FD09 as F12F09;
+
+// Sample tier — drop S0xx aliases in Q1b.
+pub use crate::time::sample::S044 as S44;
+pub use crate::time::sample::S048 as S48;
+pub use crate::time::sample::S088 as S88;
+pub use crate::time::sample::S096 as S96;
+pub use crate::time::sample::FD12S044 as F12S44;
+pub use crate::time::sample::FD12S048 as F12S48;
+pub use crate::time::sample::FD12S088 as F12S88;
+pub use crate::time::sample::FD12S096 as F12S96;
+pub use crate::time::sample::FD12S176 as F12S176;
+pub use crate::time::sample::FD12S192 as F12S192;
 
 // ────────────────────────────────────────────────────────────────────
 // SampleTime — agogo-local convenience trait over the rate types.

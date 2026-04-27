@@ -16,7 +16,7 @@ use crate::channel::transform::{MAX_DELAY, ScheduledEvent, micro_to_samples};
 use crate::time::conn::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
-use connections::conn::fixed::Micro;
+use crate::fxp::Micro;
 
 /// Conservative upper bound on the number of [`ScheduledEvent`]s
 /// that can land in one buffer of `frames` samples.
