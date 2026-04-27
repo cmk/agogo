@@ -131,10 +131,10 @@ macro_rules! impl_sample_time {
     };
 }
 
-impl_sample_time!(S44);
-impl_sample_time!(S48);
-impl_sample_time!(S88);
-impl_sample_time!(S96);
+impl_sample_time!(S044);
+impl_sample_time!(S048);
+impl_sample_time!(S088);
+impl_sample_time!(S096);
 impl_sample_time!(S176);
 impl_sample_time!(S192);
 

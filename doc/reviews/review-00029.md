@@ -111,3 +111,67 @@ surface area).
   abs_diff`, `.0 as f64 / 1.0e6` reverse-direction (Q2).
 - Float surface area — `ChannelSpec.delay_ms`,
   `RunArgs.{bpm, link_quantum}` (Q3).
+
+## Local review (2026-04-27)
+
+**Branch:** plan/2026-04-27-01
+**Commits:** 3 (origin/main..plan/2026-04-27-01)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+
+Three commits, each atomic and correctly prefixed (`plan:`, `feat(core):`, `doc:`). The single implementation commit is large (2,410 lines) but justifiably so — it is mechanically inseparable: vendoring the two modules plus their arb strategies, rewiring imports, and bumping the rev all break each other if split. Commit messages are conventional and within 72 characters. No merge commits. No issues here.
+
+### Code Quality
+
+**`#[allow(unused_imports)] use ExtendedFloat as _;` in `time/arb.rs:303-305`**
+
+This is a code smell worth understanding. `ExtendedFloat` is imported at the module level because the comment says it would otherwise be flagged unused, but no function in `arb.rs` actually constructs `ExtendedFloat`. The real fix is to delete the `use connections::conn::float::ExtendedFloat;` import. Confidence: 80. Test-only file with no functional consequence, but will confuse Q1b authors.
+
+**Plan Verification table paragraph is stale**
+
+`plan-2026-04-27-01.md` lines 338-344 say arb strategies "live in `connections::property::arb` and continue to ship in connections post-decimal-removal." This is false — they were deleted upstream and are now vendored in `crates/core/src/time/arb.rs`. The paragraph contradicts what was implemented. Confidence: 85.
+
+**`impl_sample_time!` macro instantiations use old alias names (`S44`, `S48`, `S88`, `S96`)**
+
+`crates/core/src/fxp.rs` lines 134-139 invoke `impl_sample_time!(S44)`, etc. Works today via the aliases, but T5 explicitly says to use the canonical `S044`, `S048`, etc. Using transitional alias names inside the file that defines those aliases creates a forward-dependency: when Q1b removes the aliases, these four macro calls will break as collateral rather than being swept by the grep rename. Confidence: 85.
+
+**`check-floats.sh`: CLAUDE.md not updated to reflect new allowlist entries**
+
+CLAUDE.md states "the script encodes fourteen exception modules." The updated `scripts/check-floats.sh` now lists 16 files. CLAUDE.md count is wrong; script header (line 26) explicitly requires CLAUDE.md and the script stay in sync. Confidence: 90.
+
+**`preorder.rs` — vendoring a one-method trait: rationale is compelling.** `Grid`'s divisibility preorder is genuinely not the natural order on its fields. The U7/U4 case is documented as trait-bound uniformity for laws. No issue.
+
+**`fxp.rs` alias section — three KEEPs vs. eighteen transitional aliases.** Structure is appropriate for a staged migration. The alias block is 50 lines, manageable. No issue.
+
+### Test Coverage
+
+All verification table entries are satisfied: 21 decimal Galois batteries, 15 sample-rate Galois batteries, 6 FD12↔Sxxx batteries, 7 `F064FD??` float batteries, all spot-check tests present. Generator domains follow CLAUDE.md anti-pattern rule (full-domain for non-closure properties, bounded variant for closure). The `roundtrip_*_integer_ratio` runtime guard pattern is documented and acceptable.
+
+### Plan Conformance
+
+T1-T6 + T2.5 all implemented as specified. Out-of-plan additions (Ple trait, ExtendedFloat::Finite→Extend rename, three import re-routes, allowlist update) are documented in the plan's Review section. No unplanned scope creep beyond what's acknowledged.
+
+### Risks
+
+**Workspace members unchanged.** `host-cpal`, `host-link`, `host-midi` remain excluded but pin `agogo-core` via path dep. The `ExtendedFloat::Extend` rename was correctly applied to `host-link/src/link.rs`.
+
+**New transitive dependencies.** `Cargo.lock` shows `half`, `proptest`, `time` (0.3.45), `time-core`, `deranged`, `num-conv`, `powerfmt` as new entries. The `time` crate is connections's `F064DURN`/`F032DURN` Duration-bridge dep. Run `cargo deny check` before merge. Confidence: 82.
+
+No TODOs or stubs in vendored code. No unsafe. No stored f32/f64 outside allowlisted modules.
+
+### Recommendations
+
+**Must fix before push:**
+
+1. **CLAUDE.md float-exception count is wrong.** Update "fourteen exception modules" → "sixteen" and list the two new files (`crates/core/src/time/decimal.rs`, `crates/core/src/time/sample.rs`).
+
+2. **`impl_sample_time!` should use canonical names.** Change lines 134-137 of `crates/core/src/fxp.rs` from `S44/S48/S88/S96` to `S044/S048/S088/S096`. Same file, same place — but Q1b's grep sweep won't catch alias-shape uses inside the alias definition file.
+
+**Follow-up (future work):**
+
+1. Remove the dead `ExtendedFloat` import + the `as _` suppression from `time/arb.rs`. Track for Q1b cleanup.
+2. Stale paragraph in plan-2026-04-27-01.md Verification section (says arb still lives upstream — it doesn't anymore). Note for Q1b's plan doc.
+3. Confirm `time` crate (0.3.45) passes `cargo deny check`.

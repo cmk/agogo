@@ -125,14 +125,19 @@ core = ["dep:project-core"]
 
   `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
   lives outside the file-level allowlist (the script encodes
-  fourteen exception modules — the ten from Plan 13 plus four
+  sixteen exception modules — the ten from Plan 13, plus four
   added in Plan 14: `crates/core/src/machine.rs` (PCM ABI for
   `AudioIo` test construction), `crates/core/src/machine/spec.rs`
   (argv-boundary for `--ch delay`),
   `crates/host-link/src/source.rs` (PCM ABI for
   `PhaseSourceImpl::feed_samples`'s `&[f32]` slice param), and
   `crates/cli/src/run.rs` (argv parsers for `--bpm` and
-  `--link-quantum`)). The
+  `--link-quantum`); plus two added in Plan 24:
+  `crates/core/src/time/decimal.rs` and
+  `crates/core/src/time/sample.rs` — both vendored from
+  `connections` and intrinsically f64-internal in their
+  `F064FD??` / `FD12↔Sxxx` Conn machinery (the same files were
+  upstream-allowlisted for the same reason)). The
   annotation comments above are reviewer-oriented markers inside
   allowlisted files — they're not enforced by the grep gate itself,
   which would need a full Rust parser to classify each use. Pattern 9
