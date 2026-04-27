@@ -45,6 +45,14 @@ ALLOWED=(
   "crates/core/src/host.rs"
   "crates/core/src/machine.rs"
   "crates/core/src/machine/spec.rs"
+  # Vendored from connections — both modules ship with f64 inside
+  # their float→fixed Conn machinery (the F064FD?? family for
+  # decimal.rs; a similar pattern for sample.rs's FD12↔Sxxx
+  # adjoint walk). The f64 surface is intrinsic to the abstraction
+  # and was upstream-allowlisted for the same reason; the file move
+  # downstream brings the allowlist entry with it.
+  "crates/core/src/time/decimal.rs"
+  "crates/core/src/time/sample.rs"
   "crates/host-link/src/link.rs"
   "crates/host-link/src/source.rs"
   "crates/host-cpal/src/cpal.rs"

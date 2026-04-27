@@ -17,7 +17,7 @@ use core::num::{NonZeroU16, NonZeroU32};
 use crate::midi::{U4, U7};
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
-use connections::conn::fixed::Micro;
+use crate::fxp::Micro;
 
 /// Field set shared across all `Channel` variants. The
 /// scheduler / transform pipeline operates on this struct alone —

@@ -877,7 +877,7 @@ mod sync_trace {
         // layer already rejected NaN / ±∞, so a finite-wrap here is
         // safe; the `PosInf` match arm catches out-of-range values.
         let jitter_s = jitter_us * 1.0e-6;
-        let jitter: Pico = match F64F12.ceil(ExtendedFloat::Finite(jitter_s)) {
+        let jitter: Pico = match F64F12.ceil(ExtendedFloat::Extend(jitter_s)) {
             Extended::Finite(p) => p,
             Extended::NegInf | Extended::PosInf => Pico(0),
         };
@@ -975,7 +975,7 @@ pub mod channel_trace {
         // outside `Micro`'s ±i64 range (billions of years). Surface
         // that as an error rather than silently mapping to zero.
         let ms_to_micro = |flag: &str, ms: f64| -> Result<Micro, String> {
-            match F64F06.ceil(ExtendedFloat::Finite(ms * 1.0e-3)) {
+            match F64F06.ceil(ExtendedFloat::Extend(ms * 1.0e-3)) {
                 Extended::Finite(m) => Ok(m),
                 Extended::NegInf | Extended::PosInf => {
                     Err(format!("{flag} {ms} out of range"))

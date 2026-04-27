@@ -21,7 +21,7 @@ use crate::fxp::pico_to_samples;
 use crate::time::conn::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
-use connections::conn::fixed::{F12F06, Micro};
+use crate::fxp::{F12F06, Micro};
 
 /// Maximum positive delay before saturation: 300 ms = 300 000 µs.
 pub const MAX_DELAY: Micro = Micro(300_000);

@@ -406,7 +406,7 @@ impl SampleTickConn {
 mod tests {
     use super::*;
     use crate::arb::{arb_grid, arb_rational_nonneg, arb_small_time, arb_tick, arb_time};
-    use connections::lattice::Ple;
+    use crate::preorder::Ple;
     use proptest::prelude::*;
 
     // ── Spot checks ──────────────────────────────────────────────
@@ -1030,7 +1030,7 @@ mod tests {
 
     // ── Pico ↔ Sample agreement with SampleTickConn ──────────────
 
-    use connections::conn::fixed::Pico;
+    use crate::fxp::Pico;
 
     #[test]
     fn sample_tick_and_pico_to_samples_agree_at_120bpm_48k() {

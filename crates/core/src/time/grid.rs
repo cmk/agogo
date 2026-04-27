@@ -37,7 +37,9 @@
 //! - `Grid::T512P` is the p-track floor at `coord_n = T256, t = true,
 //!   q = true`, plan-name "T512P" (= 2 · 2^8 = 512).
 
-use connections::lattice::{Coheyting, Heyting, Join, Meet, Ple};
+use connections::lattice::{Coheyting, Heyting, Join, Meet};
+
+use crate::preorder::Ple;
 
 use crate::time::tbase::{BAR, TBase};
 

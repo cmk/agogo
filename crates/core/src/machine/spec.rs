@@ -507,7 +507,7 @@ fn parse_swing(v: &str) -> Result<SwingConfig, ChannelSpecError> {
 fn micro_from_ms(ms: f64) -> Option<Micro> {
     // argv boundary
     let seconds = ms * 1.0e-3; // argv boundary
-    match F64F06.ceil(ExtendedFloat::Finite(seconds)) {
+    match F64F06.ceil(ExtendedFloat::Extend(seconds)) {
         Extended::Finite(m) => Some(m),
         Extended::PosInf | Extended::NegInf => None,
     }
