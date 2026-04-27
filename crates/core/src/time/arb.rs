@@ -15,7 +15,6 @@
 //! drive the law-battery proptests inside `time::decimal::tests` and
 //! `time::sample::tests`.
 
-use connections::conn::float::ExtendedFloat;
 use connections::extended::Extended;
 use proptest::prelude::*;
 
@@ -314,9 +313,3 @@ pub fn pico_safe(num: i128) -> impl Strategy<Value = i64> {
 // `extended_float_f64` is intentionally NOT vendored — it still
 // ships in `connections::property::arb` and is imported directly
 // by `time::decimal::tests`.
-
-// Silence unused-import warnings: only consumed by sibling test
-// modules, but Rust evaluates `pub use` visibility before deciding
-// "unused".
-#[allow(unused_imports)]
-use ExtendedFloat as _;
