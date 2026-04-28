@@ -7,7 +7,22 @@
 # dependency graph. Yanked crates are a warning (sometimes unavoidable
 # transitively) rather than an error.
 yanked = "warn"
-ignore = []
+ignore = [
+    # RUSTSEC-2026-0009 — Denial of Service via Stack Exhaustion in
+    # `time` 0.3.x's RFC 2822 parser. Fixed in `time` 0.3.47, which
+    # requires Rust 1.88; agogo's MSRV is 1.85 (`rust-toolchain.toml`).
+    # The advisory triggers only when user-controlled input is parsed
+    # via `time`'s RFC 2822 routines (`Parsable::parse_from_str` with
+    # `format_description::well_known::Rfc2822`). agogo never parses
+    # RFC 2822 — `time` enters our graph via `connections`'s
+    # `F064DURN` / `F032DURN` Duration bridges, which only construct
+    # `Duration::new(secs, nanos)` from numeric inputs at the f64
+    # boundary. No code path reaches the vulnerable parser.
+    #
+    # Re-evaluate when MSRV bumps to 1.88+ (drop this entry and let
+    # `cargo update -p time` pull 0.3.47).
+    "RUSTSEC-2026-0009",
+]
 
 [bans]
 # Multiple versions of the same crate usually indicate a dependency

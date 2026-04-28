@@ -137,7 +137,7 @@ core = ["dep:project-core"]
   `crates/core/src/time/sample.rs` — both vendored from
   `connections` and intrinsically f64-internal in their
   `F064FD??` / `FD12↔Sxxx` Conn machinery (the same files were
-  upstream-allowlisted for the same reason)). The
+  upstream-allowlisted for the same reason). The
   annotation comments above are reviewer-oriented markers inside
   allowlisted files — they're not enforced by the grep gate itself,
   which would need a full Rust parser to classify each use. Pattern 9

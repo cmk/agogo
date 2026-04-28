@@ -12,7 +12,8 @@
 //!
 //! # Precision
 //!
-//! - **Integer range**: ±2⁴⁷ samples — at 48 kHz that is ±93 000 years.
+//! - **Integer range**: ±2⁴⁷ samples — at 48 kHz that is ±93 years
+//!   (`2⁴⁷ / 48_000 ≈ 2.93 × 10⁹ s`).
 //! - **Sub-sample resolution**: 2⁻¹⁶ of a sample ≈ 15 ppm of one sample
 //!   at any rate. Far below sample-accurate.
 //!
@@ -201,44 +202,35 @@ rate_conn!(S192S176, S192, S176, 160, 147);
 // ─────────────────────────────────────────────────────────────────
 // Rate ↔ FD12 connections
 //
-// For each rate R with sample period `1/R` seconds, one Q48.16 bit
-// of R-sample is `10^12 / (R · 2^16)` picoseconds. Ratio = NUM/DEN
-// after simplifying by gcd. FD12 has fewer bits per second than the
-// audio rates, so FD12 is Coarse and each Sxx is Fine.
-// ─────────────────────────────────────────────────────────────────
-
-// Simplified ratios computed once (see module docstring):
+// FD12 has 10¹² bits per second; an Sxxx rate has `R · 2¹⁶` bits per
+// second (where `R` is the kHz-side sample rate). FD12 is the finer
+// tier (more bits/sec), so the connections are `Conn<Fine=FD12,
+// Coarse=Sxx>` with the relation NUM · sample_bit = DEN · pico after
+// reducing by gcd. One Sxx-bit spans NUM/DEN picoseconds.
+//
+// Simplified ratios (computed once):
 //   S048:  gcd(10^12, 48_000·2^16) = 512_000
 //         num/den = (10^12 / 512_000) / ((48_000·2^16) / 512_000)
 //                 = 1_953_125 / 6144
 //   S096:  ratio = 1_953_125 / 12_288   (half of S048)
-//   S192: ratio = 1_953_125 / 24_576   (quarter of S048)
+//   S192:  ratio = 1_953_125 / 24_576   (quarter of S048)
 //   S044:  gcd(10^12, 44_100·2^16) = 102_400
 //         num/den = 9_765_625 / 28_224
 //   S088:  ratio = 9_765_625 / 56_448   (half of S044)
-//   S176: ratio = 9_765_625 / 112_896  (quarter of S044)
-//
-// The FD12 direction is SAMPLE → FD12. Sample has fewer bits/sec than
-// FD12 (which has 10^12 bits/sec). So FD12 is Fine, Sxx is Coarse.
-// Conn<Fine=FD12, Coarse=Sxx> with NUM·sample_bit = DEN·pico.
+//   S176:  ratio = 9_765_625 / 112_896  (quarter of S044)
+// ─────────────────────────────────────────────────────────────────
 
 macro_rules! pico_conn {
     ($CONN:ident, $Rate:ident, $num:expr, $den:expr) => {
         pub const $CONN: Conn<FD12, $Rate> = {
-            // 1 Rate-bit = NUM/DEN picoseconds. So:
-            //   inner: Rate → FD12. inner(r) = r_bits · NUM / DEN (lossy → floor_div).
-            //   ceil:  FD12 → Rate. ceil(p) = ceil_div(p · DEN, NUM).
-            //   floor: FD12 → Rate. floor(p) = floor_div(p·DEN + NUM−1? No —
-            //      floor_div((p+1)·DEN − 1, NUM) is the Galois floor.
-            //
-            // Wait — here we have Conn<FD12, Sxx> so Fine=FD12, Coarse=Sxx.
-            //   inner: Coarse=Sxx → Fine=FD12. Sxx ×NUM/DEN → FD12.
-            //   ceil,floor: FD12 → Sxx.
-            //
-            // So:
-            //   inner(s: Sxx) = floor_div(s_bits · NUM, DEN) picoseconds
-            //   ceil(p)  = ceil_div(p · DEN, NUM) Sxx-bits
-            //   floor(p) = floor_div(p · DEN + DEN − 1, NUM) Sxx-bits
+            // Conn<Fine=FD12, Coarse=Sxx>:
+            //   inner: Coarse → Fine. inner(s: Sxx) = floor_div(s_bits · NUM, DEN) picoseconds
+            //   ceil:  Fine → Coarse. ceil(p: FD12)  = ceil_div(p · DEN, NUM) Sxx-bits
+            //   floor: Fine → Coarse. floor(p: FD12) = floor_div(p · DEN + DEN − 1, NUM) Sxx-bits
+            // The `floor(p) = floor_div((p+1)·DEN − 1, NUM)` form is
+            // the Galois upper adjoint of a lossy `inner` (see module
+            // docs); it collapses to the familiar `floor_div(p, NUM)`
+            // when `DEN = 1`.
             const NUM: i128 = $num;
             const DEN: i128 = $den;
 
@@ -369,7 +361,8 @@ mod tests {
     //     which the Galois laws already bound)
     //
     // Strategies (`rate_coarse`, `rate_fine`, `rate_safe_fine`) live
-    // in `crate::property::arb`.
+    // in `crate::time::arb` (vendored from `connections @ d1ac1ead`'s
+    // `property::arb` alongside the type families they generate for).
     // ─────────────────────────────────────────────
 
     macro_rules! props_for_conn {
