@@ -41,7 +41,7 @@ pub struct SwingConfig {
 /// unified rule for every binary level: `t` must be aligned to the
 /// resolution grid AND its step index must be odd.
 pub fn is_swung_step(t: Tick, cfg: &SwingConfig) -> bool {
-    let tc = cfg.resolution.tick_count();
+    let tc = u64::from(cfg.resolution.tick_count());
     t.0 % tc == 0 && (t.0 / tc) & 1 == 1
 }
 
@@ -49,21 +49,23 @@ pub fn is_swung_step(t: Tick, cfg: &SwingConfig) -> bool {
 /// [`is_swung_step`]) shift by `+amount` ticks; other ticks pass
 /// through.
 ///
-/// Saturates at 0 if the shift would underflow, and at `u32::MAX` if
+/// Saturates at 0 if the shift would underflow, and at `u64::MAX` if
 /// it would overflow — both are out-of-range for any musical context,
 /// so property tests that bound inputs never exercise the saturation.
 pub fn effective_tick(cfg: &SwingConfig, t: Tick) -> Tick {
     if !is_swung_step(t, cfg) {
         return t;
     }
-    let shifted = i64::from(t.0) + i64::from(cfg.amount);
-    Tick(shifted.clamp(0, i64::from(u32::MAX)) as u32)
+    // Tick is u64; widen to i128 so `t.0 + amount` can't overflow in
+    // either direction. Clamp back into the non-negative u64 range.
+    let shifted = i128::from(t.0) + i128::from(cfg.amount);
+    Tick(shifted.clamp(0, i128::from(u64::MAX)) as u64)
 }
 
 /// Is the tick aligned to the `g` grid? Works for any `Grid` element
 /// (binary, triplet, quintuplet, p-track) — not just binary.
 pub fn is_aligned(t: Tick, g: Grid) -> bool {
-    t.0 % g.tick_count() == 0
+    t.0 % u64::from(g.tick_count()) == 0
 }
 
 #[cfg(test)]
@@ -143,8 +145,8 @@ mod tests {
     #[test]
     fn is_aligned_t1_only_multiples_of_bar() {
         assert!(is_aligned(Tick(0), Grid::T1));
-        assert!(is_aligned(Tick(BAR), Grid::T1));
-        assert!(!is_aligned(Tick(BAR / 2), Grid::T1));
+        assert!(is_aligned(Tick(u64::from(BAR)), Grid::T1));
+        assert!(!is_aligned(Tick(u64::from(BAR / 2)), Grid::T1));
     }
 
     #[test]
@@ -185,7 +187,7 @@ mod tests {
     #[test]
     fn effective_tick_amount_zero_is_identity() {
         let c = cfg(TBase::T16, 0);
-        for t in [0u32, 1, 240, 480, 1000, 100_000] {
+        for t in [0u64, 1, 240, 480, 1000, 100_000] {
             assert_eq!(effective_tick(&c, Tick(t)), Tick(t));
         }
     }
@@ -209,14 +211,15 @@ mod tests {
     // domain has a complementary coverage point.
 
     #[test]
-    fn effective_tick_saturates_at_u32_max() {
-        // T256 tick_count = 15; u32::MAX = 4_294_967_295 = 15 × 286_331_153.
-        // 286_331_153 is odd, so u32::MAX is a swung step under T256.
-        // amount = 127 (max positive i8): shifted = u32::MAX + 127 →
-        // clamps to u32::MAX, not wrap.
+    fn effective_tick_saturates_at_u64_max() {
+        // T256 tick_count = 15; u64::MAX = 18_446_744_073_709_551_615.
+        // 18_446_744_073_709_551_615 / 15 has remainder 0 (15 = 3 × 5
+        // and u64::MAX = (2^64 − 1) shares both factors), and the
+        // quotient is odd → u64::MAX is a swung step under T256.
+        // amount = 127 saturates at u64::MAX rather than wrapping.
         let c = cfg(TBase::T256, 127);
-        assert!(is_swung_step(Tick(u32::MAX), &c));
-        assert_eq!(effective_tick(&c, Tick(u32::MAX)), Tick(u32::MAX));
+        assert!(is_swung_step(Tick(u64::MAX), &c));
+        assert_eq!(effective_tick(&c, Tick(u64::MAX)), Tick(u64::MAX));
     }
 
     #[test]
@@ -263,16 +266,16 @@ mod tests {
 
         /// Plan property `swing_offset_is_exact_i8`. On a swung step,
         /// the displacement is exactly `cfg.amount` (no scaling, no
-        /// rounding) when the result stays within `u32` bounds.
+        /// rounding) when the result stays within `u64` bounds.
         #[test]
         fn swing_offset_is_exact_i8(
             c in arb_swing(),
             // bound t away from the saturation edges so the shift
             // never clamps; |amount| ≤ 127 leaves plenty of headroom.
-            t in (200u32..=10_000_000).prop_map(Tick),
+            t in (200u64..=10_000_000).prop_map(Tick),
         ) {
             if is_swung_step(t, &c) {
-                let expected = (i64::from(t.0) + i64::from(c.amount)) as u32;
+                let expected = (i128::from(t.0) + i128::from(c.amount)) as u64;
                 prop_assert_eq!(effective_tick(&c, t).0, expected);
             }
         }
@@ -285,7 +288,7 @@ mod tests {
             r in arb_tbase(),
         ) {
             let c = cfg(r, 0);
-            let tc = r.tick_count();
+            let tc = u64::from(r.tick_count());
             let expected = t.0 % tc == 0 && (t.0 / tc) & 1 == 1;
             prop_assert_eq!(is_swung_step(t, &c), expected);
         }
@@ -298,7 +301,7 @@ mod tests {
         #[test]
         fn swing_amount_bound_no_step_collision(
             r in arb_tbase(),
-            step in 1u32..=10_000,
+            step in 1u64..=10_000,
             amt_frac in -100i32..=100,
         ) {
             let tc = r.tick_count();
@@ -306,11 +309,11 @@ mod tests {
             let amount_i = (amt_frac * cap / 100).clamp(i8::MIN as i32, i8::MAX as i32);
             let amount = amount_i as i8;
             let c = cfg(r, amount);
-            let t = Tick(step.saturating_mul(tc));
+            let t = Tick(step.saturating_mul(u64::from(tc)));
             if is_swung_step(t, &c) {
-                let s = effective_tick(&c, t).0 as i64;
-                let lo = i64::from(t.0) - i64::from(tc);
-                let hi = i64::from(t.0) + i64::from(tc);
+                let s = i128::from(effective_tick(&c, t).0);
+                let lo = i128::from(t.0) - i128::from(tc);
+                let hi = i128::from(t.0) + i128::from(tc);
                 prop_assert!(s > lo && s < hi,
                     "swung tick {s} not strictly in ({lo}, {hi}) for amount {amount}, tc {tc}");
             }
@@ -323,7 +326,7 @@ mod tests {
         #[test]
         fn swing_coarse_binary_aligned_unswung(
             r in arb_tbase(),
-            k in 0u32..=10_000,
+            k in 0u64..=10_000,
             amount in any::<i8>(),
         ) {
             // Pick a coarser resolution r' with r'.exp() < r.exp().
@@ -333,7 +336,7 @@ mod tests {
             }
             let r_prime_exp = r.exp() - 1;
             let r_prime = TBase::from_exp(r_prime_exp).unwrap();
-            let t = Tick(k.saturating_mul(r_prime.tick_count()));
+            let t = Tick(k.saturating_mul(u64::from(r_prime.tick_count())));
             let c = cfg(r, amount);
             if is_aligned(t, Grid::from_tbase(r_prime)) {
                 prop_assert!(!is_swung_step(t, &c),
@@ -378,18 +381,14 @@ mod tests {
         #[ignore = "pre-existing off-by-one in effective_tick for T1-resolution + negative amount; see saved seed b9e83f4f"]
         fn swing_is_bar_periodic(
             c in arb_swing(),
-            t in (0u32..=100_000).prop_map(Tick),
-            k in 0u32..=10,
+            t in (0u64..=100_000).prop_map(Tick),
+            k in 0u64..=10,
         ) {
-            let k_bar = u64::from(k) * u64::from(BAR);
-            let t_shifted = u64::from(t.0) + k_bar;
-            let eff_shifted = u64::from(effective_tick(&c, t).0) + k_bar;
-            // Both must fit in u32 for the test to be applicable.
-            if t_shifted > u64::from(u32::MAX) || eff_shifted > u64::from(u32::MAX) {
-                return Ok(());
-            }
-            let lhs = effective_tick(&c, Tick(t_shifted as u32));
-            let rhs = Tick(eff_shifted as u32);
+            let k_bar = k * u64::from(BAR);
+            let t_shifted = t.0 + k_bar;
+            let eff_shifted = effective_tick(&c, t).0 + k_bar;
+            let lhs = effective_tick(&c, Tick(t_shifted));
+            let rhs = Tick(eff_shifted);
             prop_assert_eq!(lhs, rhs);
         }
 
@@ -399,7 +398,7 @@ mod tests {
         fn swing_density_per_bar(r in arb_tbase()) {
             let c = cfg(r, 0);
             let tc = r.tick_count();
-            let count = (0..BAR).filter(|&t| is_swung_step(Tick(t), &c)).count() as u32;
+            let count = (0..BAR).filter(|&t| is_swung_step(Tick(u64::from(t)), &c)).count() as u32;
             let expected = BAR / (2 * tc);
             prop_assert_eq!(count, expected);
         }
@@ -411,8 +410,8 @@ mod tests {
             r in arb_tbase(),
             // bound amount inside the safety window
             amount_frac in -50i32..=50,
-            t1 in (0u32..=10_000_000).prop_map(Tick),
-            delta in 0u32..=100_000,
+            t1 in (0u64..=10_000_000).prop_map(Tick),
+            delta in 0u64..=100_000,
         ) {
             let tc = r.tick_count();
             let cap = (tc / 2) as i32;
@@ -436,12 +435,12 @@ mod tests {
         #[test]
         fn is_swung_step_factors_through_quantize_at_resolution(
             r in arb_tbase(),
-            k1 in 0u32..=10_000,
-            k2 in 0u32..=10_000,
+            k1 in 0u64..=10_000,
+            k2 in 0u64..=10_000,
         ) {
             let g = Grid::from_tbase(r);
-            let t1 = Tick(k1.saturating_mul(r.tick_count()));
-            let t2 = Tick(k2.saturating_mul(r.tick_count()));
+            let t1 = Tick(k1.saturating_mul(u64::from(r.tick_count())));
+            let t2 = Tick(k2.saturating_mul(u64::from(r.tick_count())));
             let c = cfg(r, 0);
             let q = quantize_at(g);
             if q.floor(t1) == q.floor(t2) {
@@ -456,7 +455,7 @@ mod tests {
             t in arb_tick(),
             g in arb_grid(),
         ) {
-            prop_assert_eq!(is_aligned(t, g), t.0 % g.tick_count() == 0);
+            prop_assert_eq!(is_aligned(t, g), t.0 % u64::from(g.tick_count()) == 0);
         }
     }
 
@@ -476,9 +475,9 @@ mod tests {
         let c = cfg(TBase::T16, 80);
         // One beat at 960 PPQN = 4 T16 steps: 0, 240, 480, 720.
         let beat_steps = [Tick(0), Tick(240), Tick(480), Tick(720)];
-        let total: i64 = beat_steps
+        let total: i128 = beat_steps
             .iter()
-            .map(|&t| i64::from(effective_tick(&c, t).0) - i64::from(t.0))
+            .map(|&t| i128::from(effective_tick(&c, t).0) - i128::from(t.0))
             .sum();
         assert_eq!(total, 0);
     }

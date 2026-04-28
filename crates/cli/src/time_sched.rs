@@ -86,7 +86,7 @@ pub fn schedule_ticks(args: &ScheduleArgs) -> Vec<Tick> {
 
     (0..total_steps)
         .map(|step| {
-            let nominal = Tick(step * step_tc);
+            let nominal = Tick(u64::from(step) * u64::from(step_tc));
             swing::effective_tick(&cfg, nominal)
         })
         .collect()
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(ticks.len(), 32);
         // Straight T16 schedule at 960 PPQN: 0, 240, 480, ..., 7440.
         for (i, t) in ticks.iter().enumerate() {
-            assert_eq!(t.0, (i as u32) * 240);
+            assert_eq!(t.0, (i as u64) * 240);
         }
     }
 
@@ -173,10 +173,10 @@ mod tests {
         // 16 steps. Off-beats (indices 1, 3, 5, …, 15) shifted by +19
         // ticks: (0.54 - 0.5) × 480 = 19.2 → 19. Drum-machine sign
         // convention: positive amount delays the off-beat.
-        let expected: Vec<u32> = (0..16u32)
+        let expected: Vec<u64> = (0..16u64)
             .map(|i| if i % 2 == 1 { i * 240 + 19 } else { i * 240 })
             .collect();
-        let got: Vec<u32> = ticks.iter().map(|t| t.0).collect();
+        let got: Vec<u64> = ticks.iter().map(|t| t.0).collect();
         assert_eq!(got, expected);
     }
 

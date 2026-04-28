@@ -21,11 +21,13 @@ use crate::time::grid::Grid;
 /// Ticks per quarter note. 960 PPQN master resolution.
 pub const PPQN: u32 = 960;
 
-/// Master tick counter. Opaque `u32` newtype; one tick is `1/960` of a
-/// quarter note.
+/// Master tick counter. Opaque `u64` newtype; one tick is `1/960` of a
+/// quarter note. The width is `u64` so `time_to_tick`'s
+/// `beats: u32 × tick_count: u32` arithmetic can never overflow — the
+/// product of two `u32` values fits in `u64` with ~32 bits of headroom.
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Default)]
-pub struct Tick(pub u32);
+pub struct Tick(pub u64);
 
 impl Ple for Tick {
     fn ple(&self, other: &Self) -> bool {
@@ -46,48 +48,38 @@ pub struct Time {
     pub base: Grid,
 }
 
-/// Convert a musical `Time` to absolute ticks. Exact: no rounding.
-///
-/// # Panics
-///
-/// Panics if `beats * tick_count` overflows `u32`. The largest
-/// possible product is `u32::MAX * 3840`, so callers constructing
-/// `Time` with beats ≤ `u32::MAX / 3840 = 1_118_481` are always
-/// safe. `arb_time` bounds beats well inside that. This path backs
-/// `Time`'s `Eq`/`Ord`/`Hash`, so silent wrap would corrupt
-/// equivalence-class semantics — a checked multiply fails loudly
-/// instead.
+/// Convert a musical `Time` to absolute ticks. Exact: no rounding,
+/// no overflow — the product `beats × tick_count` is `u32 × u32`
+/// which fits in `Tick`'s `u64` with ~32 bits of headroom.
 pub fn time_to_tick(t: Time) -> Tick {
-    Tick(
-        t.beats
-            .checked_mul(t.base.tick_count())
-            .expect("time_to_tick overflow: beats * tick_count exceeds u32::MAX"),
-    )
+    Tick(u64::from(t.beats) * u64::from(t.base.tick_count()))
 }
 
-/// Round `n` up to the nicest `Time` representation.
+/// Round `n` up to the nicest `Time` representation, when one exists.
 ///
 /// At 960 PPQN with the full 36-element lattice, the bottom is
 /// `Grid::T512P` = 1 tick, so every input is already aligned. The
 /// `from_ticks` ceiling reduces to a pure canonicalisation: pick the
 /// coarsest `Grid` whose tick count divides `n` exactly.
 ///
-/// For `n = u32::MAX` we still need to handle overflow defensively —
-/// the precision floor is 1, so `rounded_up = n`, no risk of overflow,
-/// but we keep the same shape for symmetry with possible future
-/// changes.
-pub fn from_ticks(n: Tick) -> Time {
+/// Returns `None` when no representable `Time` exists — i.e. when the
+/// chosen `(base, beats)` would have `beats > u32::MAX`. Concretely:
+/// `n > u32::MAX × Grid::T1.tick_count() = ~1.65×10¹³` or, at fine
+/// bases (`tick_count` = 1), `n > u32::MAX`. Runtime callers (e.g.
+/// transport) are free to interpret `None` as "wrap to 0:00.00";
+/// the [`ticks`](crate::time::conn::ticks) Conn unwraps under a
+/// documented precondition.
+pub fn from_ticks(n: Tick) -> Option<Time> {
     let prec = u64::from(Grid::T512P.tick_count()); // = 1 at 960 PPQN
-    let rounded_up = u64::from(n.0).div_ceil(prec) * prec;
-    let max_aligned = (u64::from(u32::MAX) / prec) * prec;
-    nicest_from_tick_count(rounded_up.min(max_aligned) as u32)
+    let rounded_up = n.0.div_ceil(prec) * prec;
+    nicest_from_tick_count(rounded_up)
 }
 
 /// Round `n` down to the nicest `Time` representation (floor side of
-/// the `ticks` Galois connection). At 960 PPQN with `T512P = 1` this
-/// equals [`from_ticks`] for every input.
-pub fn from_ticks_floor(n: Tick) -> Time {
-    let prec = Grid::T512P.tick_count();
+/// the `ticks` Galois connection), when one exists. At 960 PPQN with
+/// `T512P = 1` this equals [`from_ticks`] for every input.
+pub fn from_ticks_floor(n: Tick) -> Option<Time> {
+    let prec = u64::from(Grid::T512P.tick_count());
     let aligned = (n.0 / prec) * prec;
     nicest_from_tick_count(aligned)
 }
@@ -97,19 +89,19 @@ pub fn from_ticks_floor(n: Tick) -> Time {
 /// (binary T1→T256, then triplet, then quintuplet, then p), so the
 /// first divisor wins.
 ///
-/// For `n = 0` this returns `Time { beats: 0, base: T1 }` (every tick
-/// count divides 0).
-fn nicest_from_tick_count(n: u32) -> Time {
+/// For `n = 0` this returns `Some(Time { beats: 0, base: T1 })` (every
+/// tick count divides 0). Returns `None` if `n / tc` exceeds
+/// `u32::MAX` for the chosen divisor — `Time.beats` is `u32`, so
+/// values past that horizon have no representation.
+fn nicest_from_tick_count(n: u64) -> Option<Time> {
     for g in Grid::ALL {
-        let tc = g.tick_count();
+        let tc = u64::from(g.tick_count());
         if n % tc == 0 {
-            return Time {
-                beats: n / tc,
-                base: g,
-            };
+            let beats = n / tc;
+            return u32::try_from(beats).ok().map(|beats| Time { beats, base: g });
         }
     }
-    unreachable!("Grid::T512P (tick_count = 1) divides every u32 value");
+    unreachable!("Grid::T512P (tick_count = 1) divides every u64 value");
 }
 
 // Equality / ordering / hashing by tick count, not structurally.
@@ -185,10 +177,10 @@ mod tests {
     fn from_ticks_240_is_one_sixteenth() {
         assert_eq!(
             from_ticks(Tick(240)),
-            Time {
+            Some(Time {
                 beats: 1,
                 base: Grid::T16
-            }
+            })
         );
     }
 
@@ -197,10 +189,10 @@ mod tests {
         // T8Q = 192 ticks (5-per-quarter quintuplet).
         assert_eq!(
             from_ticks(Tick(192)),
-            Time {
+            Some(Time {
                 beats: 1,
                 base: Grid::T8Q
-            }
+            })
         );
     }
 
@@ -208,10 +200,10 @@ mod tests {
     fn from_ticks_160_is_one_triplet_sixteenth() {
         assert_eq!(
             from_ticks(Tick(160)),
-            Time {
+            Some(Time {
                 beats: 1,
                 base: Grid::T16T
-            }
+            })
         );
     }
 
@@ -219,10 +211,10 @@ mod tests {
     fn from_ticks_960_is_one_quarter() {
         assert_eq!(
             from_ticks(Tick(960)),
-            Time {
+            Some(Time {
                 beats: 1,
                 base: Grid::T4
-            }
+            })
         );
     }
 
@@ -231,10 +223,10 @@ mod tests {
         // 1 tick = T512P. Coarsest divisor is T512P itself.
         assert_eq!(
             from_ticks(Tick(1)),
-            Time {
+            Some(Time {
                 beats: 1,
                 base: Grid::T512P
-            }
+            })
         );
     }
 
@@ -242,9 +234,9 @@ mod tests {
     fn from_ticks_unaligned_round_trip_at_t512p_grid() {
         // At PPQN=960, every tick aligns to T512P (= 1), so floor and
         // ceiling collapse — every tick is its own canonical form.
-        for n in [0, 1, 2, 50, 100, 1000, 1234, 100_000] {
+        for n in [0u64, 1, 2, 50, 100, 1000, 1234, 100_000] {
             assert_eq!(from_ticks(Tick(n)), from_ticks_floor(Tick(n)));
-            assert_eq!(time_to_tick(from_ticks(Tick(n))).0, n);
+            assert_eq!(time_to_tick(from_ticks(Tick(n)).unwrap()).0, n);
         }
     }
 
@@ -253,11 +245,39 @@ mod tests {
         // 0 % 3840 == 0, so the coarsest grid wins.
         assert_eq!(
             from_ticks(Tick(0)),
-            Time {
+            Some(Time {
                 beats: 0,
                 base: Grid::T1
-            }
+            })
         );
+    }
+
+    #[test]
+    fn from_ticks_some_at_horizon() {
+        // u32::MAX × Grid::T1.tick_count() is the largest tick count
+        // that has a representable Time (`beats: u32::MAX, base: T1`).
+        let n = u64::from(u32::MAX) * u64::from(Grid::T1.tick_count());
+        assert_eq!(
+            from_ticks(Tick(n)),
+            Some(Time {
+                beats: u32::MAX,
+                base: Grid::T1
+            })
+        );
+    }
+
+    #[test]
+    fn from_ticks_none_above_horizon() {
+        // One tick past the horizon: not divisible by T1 (3840), so
+        // the algorithm falls through to T512P (tc=1) and tries
+        // beats = n/1, which exceeds u32::MAX → None.
+        let n = u64::from(u32::MAX) * u64::from(Grid::T1.tick_count()) + 1;
+        assert_eq!(from_ticks(Tick(n)), None);
+    }
+
+    #[test]
+    fn from_ticks_none_at_u64_max() {
+        assert_eq!(from_ticks(Tick(u64::MAX)), None);
     }
 
     #[test]
@@ -303,35 +323,43 @@ mod tests {
     // ── Property tests ───────────────────────────────────────────
 
     proptest! {
-        /// `time_to_tick` is exact by definition.
+        /// `time_to_tick` is exact by definition. With `Tick: u64`,
+        /// `beats: u32 × tick_count: u32` cannot overflow.
         #[test]
-        fn time_to_tick_exact(beats in 0u32..=100_000, base in arb_grid()) {
+        fn time_to_tick_exact(beats in any::<u32>(), base in arb_grid()) {
             prop_assert_eq!(
                 time_to_tick(Time { beats, base }).0,
-                beats * base.tick_count()
+                u64::from(beats) * u64::from(base.tick_count())
             );
+        }
+
+        /// `time_to_tick` never panics for any `(beats: u32, base: Grid)` —
+        /// regression for the old `checked_mul().expect()` panic path.
+        #[test]
+        fn time_to_tick_never_panics(beats in any::<u32>(), base in arb_grid()) {
+            let _ = time_to_tick(Time { beats, base });
         }
 
         /// `from_ticks` on aligned ticks (every tick at 960 PPQN since
         /// T512P = 1) round-trips exactly.
         #[test]
-        fn from_ticks_round_trip_on_aligned(q in 0u32..=1_000_000) {
+        fn from_ticks_round_trip_on_aligned(q in 0u64..=1_000_000) {
             // T512P = 1, so q itself is the tick count.
             let n = Tick(q);
-            prop_assert_eq!(time_to_tick(from_ticks(n)), n);
+            prop_assert_eq!(time_to_tick(from_ticks(n).unwrap()), n);
         }
 
         /// `from_ticks` is the identity on tick counts at 960 PPQN.
         #[test]
         fn from_ticks_is_identity_on_ticks(n in arb_tick()) {
-            prop_assert_eq!(time_to_tick(from_ticks(n)).0, n.0);
+            prop_assert_eq!(time_to_tick(from_ticks(n).unwrap()).0, n.0);
         }
 
         /// At 960 PPQN, `from_ticks` rounds by 0 (T512P = 1).
         #[test]
         fn from_ticks_rounds_within_t512p(n in arb_tick()) {
-            let delta = time_to_tick(from_ticks(n)).0 - n.0;
-            prop_assert!(delta < Grid::T512P.tick_count());
+            let delta = time_to_tick(from_ticks(n).unwrap()).0 - n.0;
+            prop_assert!(delta < u64::from(Grid::T512P.tick_count()));
         }
 
         /// The chosen `base` is the coarsest `Grid` whose tick count
@@ -339,12 +367,12 @@ mod tests {
         /// `Grid::ALL`'s coarsest-first order) divides it.
         #[test]
         fn from_ticks_picks_coarsest_base(n in arb_tick()) {
-            let t = from_ticks(n);
+            let t = from_ticks(n).unwrap();
             let aligned = time_to_tick(t).0;
             for g in Grid::ALL {
                 if g == t.base { break; }
                 prop_assert!(
-                    aligned % g.tick_count() != 0,
+                    aligned % u64::from(g.tick_count()) != 0,
                     "{g:?} (tc={}) also divides {aligned}; should have been picked before {:?} (tc={})",
                     g.tick_count(), t.base, t.base.tick_count()
                 );
@@ -355,8 +383,8 @@ mod tests {
         /// representative of the equivalence class.
         #[test]
         fn from_ticks_idempotent(n in arb_tick()) {
-            let t1 = from_ticks(n);
-            let t2 = from_ticks(time_to_tick(t1));
+            let t1 = from_ticks(n).unwrap();
+            let t2 = from_ticks(time_to_tick(t1)).unwrap();
             prop_assert_eq!(t1, t2);
         }
 

@@ -30,7 +30,7 @@ pub struct TraceArgs {
 pub struct TraceRow {
     pub buffer_index: u32,
     pub sample_index: u64,
-    pub tick: u32,
+    pub tick: u64,
 }
 
 /// Pure CPU scheduling trace — useful for testing without capturing

@@ -30,22 +30,23 @@ use crate::time::tick::Tick;
 /// Linear ramp `t/n` rendered as `u8`. Endpoints: `linear_u8(0, n) = 0`,
 /// `linear_u8(n, n) = 255`. Degenerate `n = 0` returns 255 (treat
 /// "no span" as fully open — matches `opening(0, 0) = 255`).
-pub fn linear_u8(t: u32, n: u32) -> u8 {
+pub fn linear_u8(t: u64, n: u64) -> u8 {
     if n == 0 {
         return 255;
     }
     if t >= n {
         return 255;
     }
-    // round-nearest: (t * 255 + n/2) / n
-    let num = u64::from(t) * 255 + u64::from(n) / 2;
-    (num / u64::from(n)) as u8
+    // round-nearest: (t * 255 + n/2) / n. Widen to u128 so `t * 255`
+    // can't overflow at the top of `Tick`'s u64 range.
+    let num = u128::from(t) * 255 + u128::from(n) / 2;
+    (num / u128::from(n)) as u8
 }
 
 /// Hermite smoothstep `3x² − 2x³` rendered as `u8` with
 /// `x = t/n ∈ [0, 1]`. Endpoints: `smoothstep_u8(0, n) = 0`,
 /// `smoothstep_u8(n, n) = 255`. Degenerate `n = 0` returns 255.
-pub fn smoothstep_u8(t: u32, n: u32) -> u8 {
+pub fn smoothstep_u8(t: u64, n: u64) -> u8 {
     if n == 0 {
         return 255;
     }
@@ -157,7 +158,7 @@ mod tests {
     fn arb_env_range() -> impl Strategy<Value = (Tick, Tick)> {
         // Equal-sized ranges keep interior (`t < n`), boundary (`t == n`),
         // and saturation (`t > n`) each well-represented, roughly 50/ε/50.
-        (1u32..=10_000, 0u32..=10_000).prop_map(|(n, t)| (Tick(t), Tick(n)))
+        (1u64..=10_000, 0u64..=10_000).prop_map(|(n, t)| (Tick(t), Tick(n)))
     }
 
     // ── Property tests ───────────────────────────────────────────
@@ -166,7 +167,7 @@ mod tests {
         /// Plan property `envelope_endpoint`: endpoints always saturate
         /// correctly. Covers all three envelopes in one sweep.
         #[test]
-        fn envelope_endpoint(n in 1u32..=10_000) {
+        fn envelope_endpoint(n in 1u64..=10_000) {
             prop_assert_eq!(opening(Tick(0), Tick(n)), 0);
             prop_assert_eq!(opening(Tick(n), Tick(n)), 255);
             prop_assert_eq!(closing(Tick(0), Tick(n)), 255);
@@ -256,24 +257,24 @@ mod tests {
 
     proptest! {
         #[test]
-        fn smoothstep_u8_endpoints(n in 1u32..u32::MAX) {
+        fn smoothstep_u8_endpoints(n in 1u64..u64::MAX) {
             prop_assert_eq!(smoothstep_u8(0, n), 0);
             prop_assert_eq!(smoothstep_u8(n, n), 255);
         }
 
         #[test]
-        fn smoothstep_u8_monotone(t1 in 0u32..=1_000_000, n in 1u32..=1_000_000) {
+        fn smoothstep_u8_monotone(t1 in 0u64..=1_000_000, n in 1u64..=1_000_000) {
             let t2 = t1.saturating_add(1);
             let (t1, t2) = if t1 <= n && t2 <= n { (t1, t2) } else { (0, 1.min(n)) };
             prop_assert!(smoothstep_u8(t1, n) <= smoothstep_u8(t2, n));
         }
 
         #[test]
-        fn smoothstep_u8_symmetric(t in 0u32..=10_000, n_extra in 0u32..=10_000) {
+        fn smoothstep_u8_symmetric(t in 0u64..=10_000, n_extra in 0u64..=10_000) {
             let n = t + n_extra;
             if n == 0 { return Ok(()); }
-            let a = smoothstep_u8(t, n) as u32;
-            let b = smoothstep_u8(n - t, n) as u32;
+            let a = u32::from(smoothstep_u8(t, n));
+            let b = u32::from(smoothstep_u8(n - t, n));
             // Hermite is symmetric around x=0.5, so s(t) + s(n-t) = 255,
             // modulo ±1 ULP rounding.
             let sum = a + b;
@@ -287,13 +288,13 @@ mod tests {
         }
 
         #[test]
-        fn linear_u8_endpoints(n in 1u32..u32::MAX) {
+        fn linear_u8_endpoints(n in 1u64..u64::MAX) {
             prop_assert_eq!(linear_u8(0, n), 0);
             prop_assert_eq!(linear_u8(n, n), 255);
         }
 
         #[test]
-        fn linear_u8_monotone(t1 in 0u32..=1_000_000, n in 1u32..=1_000_000) {
+        fn linear_u8_monotone(t1 in 0u64..=1_000_000, n in 1u64..=1_000_000) {
             let t2 = t1.saturating_add(1);
             let (t1, t2) = if t1 <= n && t2 <= n { (t1, t2) } else { (0, 1.min(n)) };
             prop_assert!(linear_u8(t1, n) <= linear_u8(t2, n));
