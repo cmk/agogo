@@ -1,6 +1,9 @@
 //! Shared proptest strategies and synthetic test signals.
 
-use crate::fxp::{Pico, SampleRate, SampleTime, Tempo, pico_to_f64_seconds, tempo_to_f64_bpm};
+use crate::boundary::{pico_to_f64_seconds, tempo_to_f64_bpm};
+use crate::time::decimal::Pico;
+use crate::time::sample::{SampleRate, SampleTime};
+use crate::time::tempo::Tempo;
 use rand::SeedableRng;
 use rand_distr::{Distribution, Normal};
 
@@ -100,7 +103,8 @@ pub fn pulse_train<R: SampleTime>(
 
 #[cfg(any(test, feature = "testkit"))]
 mod strategies {
-    use crate::fxp::{Tempo, Pico};
+    use crate::time::decimal::Pico;
+    use crate::time::tempo::Tempo;
     use num_rational::Rational64;
     use proptest::prelude::*;
 
@@ -231,12 +235,12 @@ pub use strategies::{
 fn _sample_rate_sealed() -> u32 {
     S048_HZ
 }
-const S048_HZ: u32 = <crate::fxp::S048 as SampleRate>::HZ;
+const S048_HZ: u32 = <crate::time::sample::S048 as SampleRate>::HZ;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fxp::S048;
+    use crate::time::sample::S048;
     use proptest::prelude::*;
 
     #[test]

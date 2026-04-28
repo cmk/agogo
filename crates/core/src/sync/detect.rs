@@ -8,7 +8,7 @@
 //! on `&[f32]` PCM blocks (cpal ABI), and emits `Peak<R>` so downstream
 //! consumers don't confuse two rates at compile time.
 
-use crate::fxp::SampleTime;
+use crate::time::sample::SampleTime;
 use core::marker::PhantomData;
 
 /// A detected pulse with sub-sample arrival precision.
@@ -155,7 +155,10 @@ impl<R: SampleTime> PeakDetector<R> {
 mod tests {
     use super::*;
     use crate::arb::{arb_bpm, pulse_train};
-    use crate::fxp::{Pico, S048, SampleRate, SampleTime, Tempo, tempo_to_hz};
+    use crate::boundary::tempo_to_hz;
+    use crate::time::decimal::Pico;
+    use crate::time::sample::{S048, SampleRate, SampleTime};
+    use crate::time::tempo::Tempo;
     use proptest::prelude::*;
 
     /// Stamp a Hann-bell pulse into `buf`. Mirrors `pulse_train`'s

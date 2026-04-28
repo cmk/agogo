@@ -26,7 +26,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::channel::scheduler::tick_stream_into;
 use crate::channel::{Channel, ScheduledEvent};
-use crate::fxp::{SampleTime, Tempo};
+use crate::time::sample::SampleTime;
+use crate::time::tempo::Tempo;
 use crate::host::AudioIo;
 use crate::out::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::sync::PhaseSource;
@@ -380,7 +381,8 @@ impl<R: SampleTime> Machine<R> {
 mod tests {
     use super::*;
     use crate::channel::{ChannelCommon, MidiRole};
-    use crate::fxp::{Micro, S048};
+    use crate::time::decimal::Micro;
+    use crate::time::sample::S048;
     use crate::out::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;

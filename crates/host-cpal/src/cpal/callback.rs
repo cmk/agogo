@@ -12,7 +12,7 @@
 //! integer arithmetic and one ring-buffer push per emitted event.
 
 use crate::cpal::control::RtProducer;
-use agogo_core::fxp::SampleTime;
+use agogo_core::time::sample::SampleTime;
 use agogo_core::host::AudioIo;
 use agogo_core::machine::Machine;
 
@@ -59,7 +59,9 @@ mod tests {
     use super::*;
     use crate::cpal::control::spsc;
     use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
-    use agogo_core::fxp::{Micro, S048, Tempo};
+    use agogo_core::time::decimal::Micro;
+    use agogo_core::time::sample::S048;
+    use agogo_core::time::tempo::Tempo;
     use agogo_core::machine::TransportPolicy;
     use agogo_core::sync::PhaseSource;
     use agogo_core::time::grid::Grid;

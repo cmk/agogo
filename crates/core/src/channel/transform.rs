@@ -17,11 +17,11 @@
 //!    offset.
 
 use crate::channel::role::{ChannelCommon, CvRole, DinRole, MidiRole};
-use crate::fxp::pico_to_samples;
+use crate::boundary::pico_to_samples;
 use crate::sync::sample_tick::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
-use crate::fxp::{FD12FD06, Micro};
+use crate::time::decimal::{FD12FD06, Micro};
 
 /// Maximum positive delay before saturation: 300 ms = 300 000 µs.
 pub const MAX_DELAY: Micro = Micro(300_000);
@@ -153,7 +153,7 @@ mod tests {
     use proptest::prelude::*;
 
     fn stc_120_48k() -> SampleTickConn {
-        SampleTickConn::new(48_000, crate::fxp::Tempo::from_bpm_integer(120), 960)
+        SampleTickConn::new(48_000, crate::time::tempo::Tempo::from_bpm_integer(120), 960)
     }
 
     /// Bare `ChannelCommon` for transform-pipeline tests — the

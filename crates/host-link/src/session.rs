@@ -4,7 +4,9 @@
 //! Stubbed in T0; filled out in T4 once tempo-push (T1) and the FSM
 //! (T2) + quantum snap (T3) are in place.
 
-use agogo_core::fxp::{Micro, Phase, Tempo};
+use agogo_core::sync::phase::Phase;
+use agogo_core::time::decimal::Micro;
+use agogo_core::time::tempo::Tempo;
 // Required for `LinkClock::phase_at_sample` (trait-provided method
 // called by the `phase_at_sample` shim below). Copilot flagged this
 // as unused on PR #16 round 1 — false positive: removing it breaks

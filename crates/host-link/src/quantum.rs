@@ -20,7 +20,7 @@
 //! Default-feature builds get the type for free; the gating is on
 //! the actual `rusty_link` integration, not on the parameter shape.
 
-use agogo_core::fxp::Micro;
+use agogo_core::time::decimal::Micro;
 
 /// Link quantum in microbeats. `Quantum::from_bars(4)` = one bar in
 /// 4/4 = 4 000 000 microbeats.

@@ -1,7 +1,9 @@
 //! Unified phase source: internal free-running clock or external PLL.
 
-use crate::fxp::{Tempo, Phase, SampleTime};
 use crate::sync::detect::PeakDetector;
+use crate::sync::phase::Phase;
+use crate::time::sample::SampleTime;
+use crate::time::tempo::Tempo;
 use crate::sync::pll::Pll;
 
 /// Extension trait for user-provided phase sources.
@@ -113,7 +115,9 @@ impl<R: SampleTime> PhaseSource<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fxp::{Tempo, Pico, S048, SampleRate};
+    use crate::time::decimal::Pico;
+    use crate::time::sample::{S048, SampleRate};
+    use crate::time::tempo::Tempo;
     use crate::sync::detect::DetectorConfig;
     use crate::sync::pll::PllSettings;
     use proptest::prelude::*;

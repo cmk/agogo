@@ -34,7 +34,10 @@ use crate::channel::role::{ChannelCommon, MidiClickAccent, MidiClickConfig, Midi
 use crate::channel::transform::MAX_DELAY;
 use crate::channel::Channel;
 use crate::dsl;
-use crate::fxp::{Extended, ExtendedFloat, F064FD06, Micro};
+use crate::time::decimal::Micro;
+use crate::time::float::F064FD06;
+use connections::extended::Extended;
+use connections::float::ExtendedFloat;
 use crate::midi::{U4, U7};
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
