@@ -430,7 +430,7 @@ mod tests {
 
     use crate::channel::{Channel, scheduler::tick_stream};
     use crate::fxp::{Micro, Tempo};
-    use crate::time::conn::SampleTickConn;
+    use crate::sync::sample_tick::SampleTickConn;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;

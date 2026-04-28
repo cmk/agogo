@@ -12,8 +12,10 @@
 
 pub mod detect;
 pub mod pll;
+pub mod sample_tick;
 pub mod source;
 
 pub use detect::{DetectorConfig, Peak, PeakDetector};
 pub use pll::{Pll, PllOutput, PllSettings, PllState};
+pub use sample_tick::SampleTickConn;
 pub use source::{PhaseSource, PhaseSourceImpl};

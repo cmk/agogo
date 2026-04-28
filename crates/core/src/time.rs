@@ -18,8 +18,9 @@
 //!   helpers.
 //! - Linear and Hermite-smoothstep envelopes.
 //!
-//! No I/O, no audio, no tempo coupling. `Tick ↔ Samples` is the
-//! `SampleTickConn` Conn-lookalike in `time::conn`.
+//! No I/O, no audio, no tempo coupling. `Tick ↔ Samples` is
+//! `crate::sync::sample_tick::SampleTickConn` (it reads `Tempo`, so
+//! it lives under `sync`, not `time`).
 
 pub mod conn;
 pub mod decimal;
@@ -33,6 +34,3 @@ pub mod tick;
 
 #[cfg(test)]
 pub mod arb;
-
-#[cfg(test)]
-mod exact_rates;

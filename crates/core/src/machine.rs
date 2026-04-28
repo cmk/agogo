@@ -30,7 +30,7 @@ use crate::fxp::{SampleTime, Tempo};
 use crate::host::AudioIo;
 use crate::out::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::sync::PhaseSource;
-use crate::time::conn::SampleTickConn;
+use crate::sync::sample_tick::SampleTickConn;
 
 pub use spec::{ChannelSpec, ChannelSpecError, parse_channels};
 
