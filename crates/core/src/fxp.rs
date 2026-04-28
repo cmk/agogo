@@ -291,20 +291,19 @@ pub fn bits_q48_16_to_seconds(bits: i64, sr: u32) -> f64 {
 
 /// Pico → whole sample count at a runtime sample rate.
 ///
-/// Dispatches on `sr` to the upstream lawful `F12Sxx` Conn for that
-/// rate, calls its `ceil` (Pico → Q48.16), then rounds to the
-/// nearest integer sample. Returns `None` for non-audio rates —
-/// the supported set is the six standard rates enumerated upstream
-/// (44.1, 48, 88.2, 96, 176.4, 192 kHz).
+/// Dispatches on `sr` to the lawful `FD12Sxxx` Conn for that rate
+/// (defined in `crate::time::sample`, re-exported above), calls
+/// its `ceil` (Pico → Q48.16), then rounds to the nearest integer
+/// sample. Returns `None` for non-audio rates — the supported set
+/// is the six standard rates `{S044, S048, S088, S096, S176, S192}`.
 ///
 /// Replaces the runtime `PicoSampleConn` Conn-lookalike: since the
 /// set of audio sample rates is small and compile-time known, a
 /// match dispatch to the lawful pre-composed constants is cleaner
-/// than a runtime-parameterised struct, and it reuses the
-/// connections crate's own proptest battery for each rate instead
-/// of duplicating it downstream.
+/// than a runtime-parameterised struct, and each `FD12Sxxx` carries
+/// its own per-rate Galois-law battery (in `crate::time::sample::tests`).
 pub fn pico_to_samples(p: Pico, sr: u32) -> Option<i64> {
-    // Each `F12Sxx.ceil(pico)` returns the rate-specific Sxx
+    // Each `FD12Sxxx.ceil(pico)` returns the rate-specific Sxxx
     // newtype; `.0` unwraps to the underlying `Q48_16`, `.round()`
     // snaps to a whole-sample Q48_16, and `.to_num::<i64>()`
     // extracts the integer sample count.
@@ -580,10 +579,12 @@ mod tests {
     }
 
     // `pico_to_samples` is a hand-written `match` dispatching on `sr`
-    // to the upstream `F12Sxx` conns. Upstream's per-rate proptests
-    // catch arithmetic bugs inside each `F12Sxx`, but nothing there
-    // catches a local wiring mistake like "oops, the 96k arm calls
-    // FD12S088 by accident." These tests lock in the dispatch table.
+    // to the lawful `FD12Sxxx` conns from `crate::time::sample`.
+    // Each conn's own per-rate Galois-law battery
+    // (`time::sample::tests::p_fd12s0??`) catches arithmetic bugs
+    // inside the conn itself, but nothing there catches a local
+    // wiring mistake like "oops, the 96k arm calls FD12S088 by
+    // accident." These tests lock in the dispatch table.
 
     #[test]
     fn pico_to_samples_one_second_maps_to_sr() {
