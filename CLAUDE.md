@@ -366,6 +366,19 @@ designed to avoid. `/reply-reviews` enforces
 this: it refuses to run if HEAD is not ahead of `origin/<branch>` while
 unreplied threads still exist.
 
+**Do not merge before pushing the amended fix commit.** Per
+`doc/workflow.md`'s state machine, the merge transition is
+`gh_review → merged` — there is no edge from `replies_amended → merged`.
+Merging from `replies_amended` (the state after `/reply-reviews`
+amends but before push) silently drops the local commit because
+`gh pr merge` is GitHub-side and doesn't see local state. Use
+`scripts/safe_merge.sh <pr-args>` instead of `gh pr merge` —
+the wrapper refuses to invoke the merge while the local branch
+is ahead of origin. Recovery (if a merge already dropped a fix
+commit): cherry-pick the stranded SHA into the next plan branch's
+first commit per the bundle-into-next-plan convention; don't open
+a tiny standalone PR.
+
 `/pull-reviews <N>` remains available as a lower-level primitive for
 fetching comments without posting. Use it standalone only to refresh
 the doc right before the final pre-merge push, to capture any trailing

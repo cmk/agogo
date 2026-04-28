@@ -167,13 +167,21 @@ the amend.
 
 ## Step 7: Report and hand off to the user
 
-Print a one-paragraph summary:
+Print a one-paragraph summary that **names the FSM state from
+`doc/workflow.md`** so the read-out reflects what's actually true on
+the wire:
 
 - Number of threads replied to
 - Whether the fix commit was amended (yes → mirror folded in; no → no
   new doc content to fold)
+- **State:** `replies_amended` (mid-cycle, NOT mergeable). The merge
+  transition starts from `gh_review`, which requires push.
 - **Next step for the user:** `git push` (or `git push -u origin
-  <branch>` if this is the first push for the branch)
+  <branch>` if this is the first push for the branch). Then merge
+  via `scripts/safe_merge.sh <pr-args>` rather than `gh pr merge` —
+  the wrapper refuses to invoke the merge while the local branch is
+  ahead of origin, which is the only protection against silently
+  dropping an unpushed amend.
 
 Do **not** push. The user runs the push explicitly as the last step.
 

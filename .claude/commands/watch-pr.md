@@ -153,18 +153,41 @@ contract).
 
 ## Step 5: Report
 
-Print a structured summary, ≤ 15 lines:
+Print a structured summary, ≤ 15 lines. The heading names the FSM
+state from `doc/workflow.md` so the read-out reflects what's actually
+true on the wire — **`replies_amended` is mid-cycle, not mergeable**.
+Picking the right heading is load-bearing because the user reads it
+to decide whether the PR is ready to merge.
+
+If a fix commit was made and amended (auto-fix items existed):
 
 ```
-watch-pr PR #<N> — round complete
+watch-pr PR #<N> — paused at replies_amended (fix unpushed)
   auto-fixed:  <count>   (e.g., "unused import, typo in doc")
   pushed-back: <count>   (e.g., "proposed rename conflicts with crate boundary")
   deferred:    <count>
   needs you:   <count>   ← these stay open; read them
     - path:line — one-line summary
     - path:line — one-line summary
-  fix commit:  <sha>     (or: "no commit — all push-back/defer")
-  next step:   review the commit, then `git push`
+  fix commit:  <sha>     (unpushed)
+  next step:   git push to advance to gh_review (mergeable).
+               DO NOT merge from replies_amended — local commit
+               would be silently dropped. Use scripts/safe_merge.sh
+               which refuses to invoke `gh pr merge` while ahead of
+               origin.
+```
+
+If no fix commit was made (all items push-back / defer / ask):
+
+```
+watch-pr PR #<N> — round complete at gh_review (no commit needed)
+  auto-fixed:  0
+  pushed-back: <count>
+  deferred:    <count>
+  needs you:   <count>
+    - path:line — one-line summary
+  fix commit:  none — replies posted, no code changes
+  next step:   PR is mergeable when reviewers stop posting.
 ```
 
 Do not push. Do not start another round synchronously.
