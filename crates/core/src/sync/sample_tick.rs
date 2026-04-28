@@ -179,18 +179,21 @@ mod tests {
         }
 
         /// Pathological inputs deliberately fish for the u128→u64
-        /// narrow inside `SampleTickConn::inner`. `Tick(u32::MAX)`
-        /// with tiny `bpm_µ` and `ppqn` pushes the numerator past
-        /// `u64::MAX`. With the saturating clamp, `inner` returns
-        /// `u64::MAX`; without it the wrap modulo `2⁶⁴` returns
-        /// garbage. The generator is intentionally bounded
-        /// (`tick` near `u32::MAX`, `bpm_µ` ∈ `1..=100`, `ppqn` ∈
-        /// `1..=8`) to *target* the overflow region — the realistic-
-        /// input region is covered by the `arb_integer_stc()`-driven
-        /// proptests above. Per CLAUDE.md the anti-pattern is
-        /// bounding to *avoid* boundaries; here the bounds are set
-        /// to *reach* the wrap, which is the legitimate inverse of
-        /// the rule.
+        /// narrow inside `SampleTickConn::inner`. With `Tick(u32::MAX)`
+        /// (≈ 4.3×10⁹), `sr = 192 kHz`, and tiny `bpm_µ` / `ppqn`,
+        /// `num = tick × sr × 60×10⁶ ≈ 5×10²²`. Even at the largest
+        /// `bpm_µ × ppqn = 800` denominator, the exact quotient
+        /// (~6×10¹⁹) exceeds `u64::MAX` (~1.84×10¹⁹), so every
+        /// sampled point hits the saturation branch — without the
+        /// clamp the u128→u64 narrow would wrap modulo 2⁶⁴ and
+        /// return garbage. Per CLAUDE.md the anti-pattern is bounding
+        /// to *avoid* boundaries; here the bounds are set to *reach*
+        /// the wrap, which is the legitimate inverse of the rule.
+        ///
+        /// The realistic-input region is covered by the
+        /// `arb_integer_stc()`-driven proptests above. The Tick u64
+        /// horizon (values past `u32::MAX`) is exercised by the
+        /// `sample_tick_inner_saturates_at_u64_horizon` spot check.
         #[test]
         fn sample_tick_inner_saturates_on_overflow(
             tick in u64::from(u32::MAX / 2)..=u64::from(u32::MAX),
@@ -208,8 +211,28 @@ mod tests {
             let denom = u128::from(bpm_u) * u128::from(ppqn);
             let exact = (num + denom / 2) / denom;
             let expected = exact.min(u128::from(u64::MAX)) as u64;
+            // For this input region, the exact quotient strictly
+            // exceeds u64::MAX, so every case must saturate.
+            prop_assert_eq!(result, u64::MAX);
             prop_assert_eq!(result, expected);
         }
+    }
+
+    /// Tick widening to u64 (Plan 2026-04-28-07 T1) opened a new
+    /// horizon above `u32::MAX`. Spot-check that `inner` saturates
+    /// cleanly there — without the clamp, `Tick(u64::MAX)` would
+    /// wrap modulo 2⁶⁴ inside the u128→u64 narrow.
+    #[test]
+    fn sample_tick_inner_saturates_at_u64_horizon() {
+        let stc = SampleTickConn::new(192_000, Tempo(1), 1);
+        // Tick(u64::MAX) × 192_000 × 60 × 1e6 / 1 vastly exceeds
+        // u64::MAX after the u128 multiply — saturation is mandatory.
+        assert_eq!(stc.inner(Tick(u64::MAX)), u64::MAX);
+        // Realistic-tempo case at the same tick — still saturates,
+        // but the math is closer to the boundary so a regression
+        // narrowing too aggressively would be caught here.
+        let stc_120 = SampleTickConn::new(48_000, Tempo::from_bpm_integer(120), 960);
+        assert_eq!(stc_120.inner(Tick(u64::MAX)), u64::MAX);
     }
 
     // ── Pico ↔ Sample agreement with SampleTickConn ──────────────

@@ -246,6 +246,28 @@ mod tests {
         }
     }
 
+    /// Plan 07 verification property: the new `<=` agrees with the
+    /// pre-T2 `Ple` impl on every pair. `Ple` was defined as
+    /// `a.exp() >= b.exp()`; the new `Ord` flips `exp().cmp` so `<=`
+    /// must satisfy the same predicate. Exhaustive 9×9 check rather
+    /// than the chain-only `divisibility_chain_strictly_ascending` —
+    /// a buggy `cmp` returning the wrong direction on equal-exp pairs
+    /// could pass the chain test alone.
+    #[test]
+    fn tbase_le_matches_old_ple() {
+        for a in TBase::ALL {
+            for b in TBase::ALL {
+                assert_eq!(
+                    a <= b,
+                    a.exp() >= b.exp(),
+                    "({a:?} <= {b:?}) != ({}.exp() >= {}.exp())",
+                    a.exp(),
+                    b.exp(),
+                );
+            }
+        }
+    }
+
     /// Divisibility chain: `T256 < T128 < … < T1`.
     #[test]
     fn divisibility_chain_strictly_ascending() {
