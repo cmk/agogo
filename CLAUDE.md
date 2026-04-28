@@ -150,22 +150,18 @@ core = ["dep:project-core"]
   only allowed for types that can't be expressed as a lawful
   `Conn` (e.g. `Phase` is a wrapping quotient onto a torus, not a
   monotone map — the bespoke `f64_phase_to_phase` is the one
-  legitimate exception). Naming follows the Haskell `fXYfZW`
-  6-char convention: each pair of tier codes names a `Conn<A, B>`
-  where `A` and `B` are the two tiers. Direction then depends on
-  which method you call:
-
-  - `F12F06: Conn<Pico, Micro>`. `F12F06.ceil(Pico) → Micro` and
-    `F12F06.floor(Pico) → Micro` round a Pico value up / down to
-    the nearest Micro. `F12F06.inner(Micro) → Pico` is the exact
-    embed going the other direction.
-  - `F64F06: Conn<ExtendedFloat<f64>, Extended<Micro>>`. Same
-    pattern — `.ceil(ExtendedFloat::Finite(seconds)) → Extended<Micro>`.
-  - `F12S48: Conn<Pico, S48>`. `.ceil(Pico) → S48 (Q48.16)`,
-    `.inner(S48) → Pico`.
-
-  The crate-level doc in `connections/src/lib.rs` spells out the
-  full legend.
+  legitimate exception). Naming follows the conventions in the 
+  upstream library:
+  - The total identifier is **exactly 8 ASCII chars**. Names shorter
+    than 8 chars (e.g. the legacy `S88S44`) are not permitted.
+  - Each side is **exactly 4 chars**, picking one of `{A123, AB12,
+    ABC1, ABCD}` independently. Sides shorter or longer than 4 chars
+    are not permitted.
+  - Digits are zero-padded to fill the digit count for the side's
+    shape (e.g. `S048`, not `S48`).
+  - Letters and digits only — no underscores, hyphens, or other
+    separators inside the name.
+  - The CLAUDE.md in the upstream repository spells this out in detail.
 
 - **Cross-conversions compose existing `Conn`s — they are not
   hardcoded.** If `A → C` is needed and `Conn<A, B>` + `Conn<B, C>`
