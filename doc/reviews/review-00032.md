@@ -117,3 +117,43 @@ deferrals:
 | L | **closed by Q3 (this PR) for RunArgs; subcommand `*Args` deferred** |
 | M (M1-M7) | mostly closed by Q2 (PR #31); user-unit-shifts documented as exceptions; FFI-parity rounding documented as exception |
 | N (N1-N5) | mostly closed by Q2; N2 was a misdiagnosis |
+
+## Local review (2026-04-27)
+
+**Branch:** plan/2026-04-27-04
+**Commits:** 3 (origin/main..plan/2026-04-27-04)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+Three commits (plan/refactor/doc), conventional, atomic.
+
+### Code Quality
+All four planned changes implemented correctly. Bpaf parsers correctly placed inside `mod run`. Integer-ms exact-parse fallback uses `checked_mul` for overflow safety. The `unreachable!()` arms are appropriate given the full-domain proptests prove they hold.
+
+### Test Coverage
+`spec_round_trip` proptest catches the integer-ms drift; new regression seed pinned at `delay: FD06(51000)`.
+
+### Plan Conformance
+T1-T5 all completed, with three documented deviations (Plan's Review section).
+
+### Risks
+`unreachable!()` panics if upstream Conn drift; acceptable given proptest coverage. `args.link_quantum.unwrap_or(Quantum::from_bars(4))` equivalent to old `f64_beats_to_quantum(4.0)`.
+
+### Must fix before push
+
+1. **Display loses sign for `Micro(-500)`** — `delay=0.500` instead of `delay=-0.500`. Currently dormant (clamped before output) but Display should be total. **Addressed in this round** — added explicit `ms_int == 0 && us < 0` guard with comment.
+
+### Follow-up (future work)
+
+1. ~~`parse_bpm_to_tempo` / `parse_quantum_from_beats` lack proptests.~~ **Addressed in this round** — added 11 unit tests + 2 proptests (`parse_bpm_to_tempo_ok_iff_in_range`, `parse_quantum_from_beats_ok_iff_in_range`) covering the validation contract over `prop::num::f64::ANY`.
+2. Subcommand `*Args` migration (channel_trace/midi_trace/demo) — already in plan's Recommendations.
+
+### Bug discovered while writing the proptests
+
+`parse_bpm_to_tempo("5000")` returned `Ok(Tempo(u32::MAX))` instead of `Err(out of range)`. Root cause: `tempo_to_f64_bpm(Tempo(u32::MAX))` does NOT return `~4294.967295` — it returns `~9.22 × 10¹²`. The `I064U032.inner(u32::MAX)` step saturates u32::MAX up to `i64::MAX` (per the upstream Conn contract), so the F-ladder inverse computes `i64::MAX / 10⁶`. Using `tempo_to_f64_bpm(Tempo(u32::MAX))` as "max valid BPM" is semantically wrong.
+
+Fix: added `Tempo::MAX_BPM_F64: f64 = (u32::MAX as f64) / 1_000_000.0` const in `agogo_core::fxp` and use it from both bpaf parsers in `run.rs` and the legacy `parse_cli_bpm` in `main.rs`. Documented inline why this open-coded `× 10⁻⁶` is a one-off domain-boundary constant rather than the M-family violation it superficially looks like.
+
+The new `parse_bpm_to_tempo_ok_iff_in_range` proptest catches this — without it, the bug would have shipped silently.

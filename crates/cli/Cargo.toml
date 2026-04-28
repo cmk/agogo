@@ -35,6 +35,9 @@ agogo-host-midi = { path = "../host-midi", optional = true }
 bpaf = { workspace = true }
 ctrlc = { version = "3", optional = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
 # Plan 14: explicit binary entry. `agogo` is the user-facing name
 # (matches `doc/versions/version-0.1.md` acceptance literal). The
 # default `agogo-cli` binary stays available for the v0.1 release

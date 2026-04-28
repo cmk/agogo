@@ -583,13 +583,23 @@ impl Display for ChannelSpec {
         if self.delay != Micro::ZERO {
             // Print as decimal milliseconds (parser-stable).
             // Sub-µs precision was already lost through F064FD06.ceil
-            // at parse time; this round-trips bit-exactly through
-            // micro_from_ms.
+            // at parse time; the integer-ms parse path round-trips
+            // bit-exactly. The `ms_int == 0 && us < 0` arm covers
+            // sub-millisecond negative values (`Micro(-500)` →
+            // `delay=-0.500`, not `delay=0.500` which would lose
+            // the sign because Rust integer division truncates
+            // toward zero). Negative delay is clamped to 0 in
+            // `into_channel`, so this case never reaches the MIDI
+            // pipeline — but Display is a total function, so the
+            // sign must survive any spec → Display → parse cycle
+            // a test or arb extension might exercise.
             let us = self.delay.0;
             let ms_int = us / 1_000;
             let frac = us.unsigned_abs() % 1_000;
             if frac == 0 {
                 write!(f, ",delay={ms_int}")?;
+            } else if ms_int == 0 && us < 0 {
+                write!(f, ",delay=-0.{frac:03}")?;
             } else {
                 write!(f, ",delay={ms_int}.{frac:03}")?;
             }
