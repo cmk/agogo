@@ -157,3 +157,77 @@ T1-T5 all completed, with three documented deviations (Plan's Review section).
 Fix: added `Tempo::MAX_BPM_F64: f64 = (u32::MAX as f64) / 1_000_000.0` const in `agogo_core::fxp` and use it from both bpaf parsers in `run.rs` and the legacy `parse_cli_bpm` in `main.rs`. Documented inline why this open-coded `× 10⁻⁶` is a one-off domain-boundary constant rather than the M-family violation it superficially looks like.
 
 The new `parse_bpm_to_tempo_ok_iff_in_range` proptest catches this — without it, the bug would have shipped silently.
+
+<!-- gh-id: 3151526222 -->
+### Copilot on [`crates/core/src/machine/spec.rs:76`](https://github.com/cmk/agogo/pull/32#discussion_r3151526222) (2026-04-28 04:17 UTC)
+
+The field/doc comment says "Positive delay compensation", but the parser accepts negative values (i64 path) and `micro_from_ms` can produce negative `Micro` (and `Display` has explicit negative handling). Either reject negative delays at parse time (and simplify Display) or update the docs to state that negative inputs are accepted but clamped to 0 in `into_channel`.
+
+<!-- gh-id: 4185817366 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-28 04:17 UTC](https://github.com/cmk/agogo/pull/32#pullrequestreview-4185817366))
+
+## Pull request overview
+
+Removes remaining public-surface `f64` storage from CLI/runtime config types by moving parsing/validation to argv-boundary helpers and storing fixed-point/time values (`Tempo`, `Quantum`, `Micro`) end-to-end.
+
+**Changes:**
+- CLI: `RunArgs.bpm` becomes `Tempo`, `RunArgs.link_quantum` becomes `Option<Quantum>`, with new bpaf parsers + added unit/proptests.
+- Core: `ChannelSpec.delay_ms: f64` becomes `ChannelSpec.delay: Micro`, parsing integer-ms exactly to avoid drift; `into_channel` now clamps typed delay.
+- Core: tighten `tempo_to_f64_bpm` / `pico_to_f64_seconds` Bot/Top arms to `unreachable!()` and add a `Tempo::MAX_BPM_F64` bound constant; commit a proptest regression seed.
+
+### Reviewed changes
+
+Copilot reviewed 8 out of 9 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00032.md | Adds review record summarizing Q3 sweep, verification, and follow-ups. |
+| doc/plans/plan-2026-04-27-04.md | Adds Q3 plan/notes for float surface-area sweep tasks K/L/M. |
+| crates/core/src/machine/spec.rs | Migrates `delay_ms: f64` to `delay: Micro`, updates parse/Display/tests accordingly. |
+| crates/core/src/fxp.rs | Adds `Tempo::MAX_BPM_F64`; switches Bot/Top fallbacks to `unreachable!()`. |
+| crates/core/proptest-regressions/machine/spec.txt | Adds regression seed for the integer-ms exact-parse contract. |
+| crates/cli/src/run.rs | Introduces bpaf parsers for `Tempo`/`Quantum`, updates run path, and adds parser tests. |
+| crates/cli/src/main.rs | Updates legacy `parse_cli_bpm` to use `Tempo::MAX_BPM_F64`. |
+| crates/cli/Cargo.toml | Adds `proptest` as a dev-dependency for new CLI parser property tests. |
+| Cargo.lock | Locks new dev-dependency resolution (`proptest`). |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3151526236 -->
+### Copilot on [`crates/cli/src/run.rs:257`](https://github.com/cmk/agogo/pull/32#discussion_r3151526236) (2026-04-28 04:17 UTC)
+
+The comment describing the default quantum is incorrect/unclear: `Quantum::from_bars(4)` is "one bar in 4/4" (i.e., 4 beats = 4_000_000 microbeats), not "4 bars" and not "4 microbeats". Please adjust the wording so it matches the `Quantum` doc/units and avoids confusing bars vs beats.
+```suggestion
+                // at parse time. Fallback `Quantum::from_bars(4)` is
+                // one bar in 4/4, i.e. 4 beats = 4_000_000 microbeats.
+```
+
+<!-- gh-id: 3151526249 -->
+### Copilot on [`doc/plans/plan-2026-04-27-04.md:62`](https://github.com/cmk/agogo/pull/32#discussion_r3151526249) (2026-04-28 04:17 UTC)
+
+The plan’s example for the `--bpm` upper bound uses `tempo_to_f64_bpm(Tempo(u32::MAX))`, but that function does not represent the maximum *representable* BPM for `Tempo` (it can return ~9.22×10^12 due to Conn saturation semantics). Update the snippet/text to use the correct bound (e.g., `Tempo::MAX_BPM_F64`) to keep the plan accurate and consistent with the implementation described later in the PR.
+```suggestion
+            f, max = Tempo::MAX_BPM_F64,
+```
+
+<!-- gh-id: 3151703164 -->
+#### ↳ cmk ([2026-04-28 05:09 UTC](https://github.com/cmk/agogo/pull/32#discussion_r3151703164))
+
+Fixed in d8fc09c — picked the explicit-error path: parser now rejects negative delay (`delay=-50` returns Err with "negative" in the message), the spec field is documented as "Non-negative", into_channel only clamps the upper bound, and Display drops its negative-handling branch in favor of a debug_assert! that the spec invariant holds. Updated the formerly-misnamed `into_channel_negative_delay_clamps_to_zero` test → `parse_rejects_negative_delay` to assert the new contract.
+
+<!-- gh-id: 3151703358 -->
+#### ↳ cmk ([2026-04-28 05:09 UTC](https://github.com/cmk/agogo/pull/32#discussion_r3151703358))
+
+Fixed in d8fc09c — comment now reads "Fallback Quantum::from_bars(4) is one bar in 4/4, i.e. 4 beats = 4_000_000 microbeats" so the units match the Quantum doc.
+
+<!-- gh-id: 3151703590 -->
+#### ↳ cmk ([2026-04-28 05:09 UTC](https://github.com/cmk/agogo/pull/32#discussion_r3151703590))
+
+Fixed in d8fc09c — plan's parse_bpm_to_tempo sketch now uses `Tempo::MAX_BPM_F64` for the upper bound, matching the implementation. (The wrong reference is exactly the bug this PR's local-review caught + that the new `parse_bpm_to_tempo_ok_iff_in_range` proptest pins.)

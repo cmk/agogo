@@ -254,7 +254,8 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
                 };
                 // `args.link_quantum` is already `Option<Quantum>` —
                 // bpaf's `parse_quantum_from_beats` consumed the f64
-                // at parse time. Default 4 bars of 4/4 = 4 microbeats.
+                // at parse time. Fallback `Quantum::from_bars(4)` is
+                // one bar in 4/4, i.e. 4 beats = 4_000_000 microbeats.
                 let default_quantum = args.link_quantum.unwrap_or(Quantum::from_bars(4));
                 let config = LinkWriteConfig {
                     enable_start_stop_sync: args.link_enable_start_stop,
