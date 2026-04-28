@@ -69,10 +69,11 @@ pub struct ChannelSpec {
     pub swing: SwingConfig,
     /// Musical offset in ticks (signed). Default: 0.
     pub offset_ticks: i32,
-    /// Positive delay compensation. Clamped to MAX_DELAY (300 ms)
-    /// in `into_channel`. Stored as `Micro` (i64 µs) so the f64
-    /// surface area is contained to the parser's first line —
-    /// audit P0b / Q3 closure for finding K.
+    /// Non-negative delay compensation. Parser rejects negative
+    /// inputs (Q3 round-1 fix); `into_channel` further clamps to
+    /// MAX_DELAY (300 ms) on the upper bound. Stored as `Micro`
+    /// (i64 µs) so the f64 surface area is contained to the
+    /// parser's first line — audit P0b / Q3 closure for finding K.
     pub delay: Micro,
     /// Optional quantum snap, in microseconds (Link-aware channels).
     pub snap_to_quantum_micro: Option<i64>,
@@ -267,8 +268,11 @@ impl ChannelSpec {
                     // round-trip drift (`micro_from_ms(51.0)` would
                     // ceil to 51_001 µs because `0.051 × 10⁶`
                     // overshoots in f64). Fall back to f64 for
-                    // fractional ms inputs like "10.5".
-                    delay = if let Ok(ms_int) = v.parse::<i64>() {
+                    // fractional ms inputs like "10.5". Negative
+                    // delay is rejected here rather than silently
+                    // clamped in into_channel — the user almost
+                    // certainly typed it by mistake.
+                    let candidate = if let Ok(ms_int) = v.parse::<i64>() {
                         let us = ms_int.checked_mul(1_000).ok_or_else(|| {
                             ChannelSpecError::BadValue(
                                 "delay",
@@ -287,6 +291,13 @@ impl ChannelSpec {
                             )
                         })?
                     };
+                    if candidate.0 < 0 {
+                        return Err(ChannelSpecError::BadValue(
+                            "delay",
+                            format!("{} ms negative (delay must be ≥ 0)", v),
+                        ));
+                    }
+                    delay = candidate;
                 }
                 "snap-quantum-us" => {
                     snap_to_quantum_micro = Some(
@@ -581,25 +592,26 @@ impl Display for ChannelSpec {
             write!(f, ",offset={}", self.offset_ticks)?;
         }
         if self.delay != Micro::ZERO {
+            // Parser rejects negative delay (audit Q3 round-1 fix);
+            // the spec layer guarantees `self.delay.0 >= 0`. Assert
+            // here so a future path that constructs ChannelSpec
+            // directly (test code, arb extension) surfaces the
+            // invariant violation rather than silently corrupting
+            // the Display output.
+            debug_assert!(
+                self.delay.0 >= 0,
+                "ChannelSpec.delay invariant violated: {:?} < 0",
+                self.delay
+            );
             // Print as decimal milliseconds (parser-stable).
             // Sub-µs precision was already lost through F064FD06.ceil
             // at parse time; the integer-ms parse path round-trips
-            // bit-exactly. The `ms_int == 0 && us < 0` arm covers
-            // sub-millisecond negative values (`Micro(-500)` →
-            // `delay=-0.500`, not `delay=0.500` which would lose
-            // the sign because Rust integer division truncates
-            // toward zero). Negative delay is clamped to 0 in
-            // `into_channel`, so this case never reaches the MIDI
-            // pipeline — but Display is a total function, so the
-            // sign must survive any spec → Display → parse cycle
-            // a test or arb extension might exercise.
+            // bit-exactly.
             let us = self.delay.0;
             let ms_int = us / 1_000;
-            let frac = us.unsigned_abs() % 1_000;
+            let frac = (us % 1_000) as u64;
             if frac == 0 {
                 write!(f, ",delay={ms_int}")?;
-            } else if ms_int == 0 && us < 0 {
-                write!(f, ",delay=-0.{frac:03}")?;
             } else {
                 write!(f, ",delay={ms_int}.{frac:03}")?;
             }
@@ -891,10 +903,18 @@ mod tests {
     }
 
     #[test]
-    fn into_channel_negative_delay_clamps_to_zero() {
-        let spec = ChannelSpec::parse("dev=midi,delay=-50", &[]).unwrap();
-        let ch = spec.into_channel().unwrap();
-        assert_eq!(ch.common().delay, Micro(0));
+    fn parse_rejects_negative_delay() {
+        // Q3 round-1 fix: negative delay is rejected at parse
+        // time rather than silently clamped to 0 in into_channel
+        // — the user almost certainly typed it by mistake, and
+        // the spec's `delay` field is documented as non-negative.
+        let err = ChannelSpec::parse("dev=midi,delay=-50", &[])
+            .expect_err("negative delay should be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("negative") && msg.contains("delay"),
+            "expected negative-delay error, got: {msg}",
+        );
     }
 
     // ── Display round-trip ───────────────────────────────────────
