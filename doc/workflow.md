@@ -12,8 +12,8 @@ show up as real graphs on the PR page.
 ## Review round lifecycle
 
 One sprint from `main` through merge, covering Tier 1 (local) review,
-Tier 2 (GitHub) rounds, and the fix → reply → mirror → amend → push
-motion that `/reply-reviews` enforces.
+Tier 2 (GitHub) rounds, and the fix-edits → reply → mirror → commit →
+push motion that `/reply-reviews` enforces.
 
 ```mermaid
 stateDiagram-v2
@@ -27,25 +27,27 @@ stateDiagram-v2
     local_reviewed --> pushed: clean, git push
     pushed --> gh_review: CI runs + reviewers post
     gh_review --> items_pulled: /pull-reviews
-    items_pulled --> fix_unpushed: address items, local fix commit
-    fix_unpushed --> replies_amended: /reply-reviews (post + mirror + amend)
-    replies_amended --> gh_review: git push (mandatory before merge)
+    items_pulled --> round_unpushed: edit working tree + /reply-reviews (post + mirror + atomic commit)
+    round_unpushed --> gh_review: git push (mandatory before merge)
     gh_review --> merged: no more items, scripts/safe_merge.sh (rebase + ff)
     merged --> [*]
 ```
 
 **Legend:**
-- `fix_unpushed` is the load-bearing state. `/reply-reviews` refuses
-  to run outside it, so the reply mirror never ends up stranded in the
-  working tree.
-- The `gh_review → items_pulled → fix_unpushed → replies_amended → gh_review`
-  cycle runs once per review round. Pushing before the amend breaks
-  the cycle — it forces either a wasted `doc:` commit (extra CI
-  round-trip) or a disallowed force-push.
-- **Never merge from `replies_amended`.** There is no
-  `replies_amended → merged` edge in the FSM — only `gh_review →
+- `round_unpushed` is the load-bearing state — one atomic commit
+  containing both the code fix and the mirrored reply doc, sitting
+  unpushed on the local branch. `/reply-reviews` produces it in a
+  single shot: post replies → mirror via `pull_reviews.py` → `git
+  add -A && git commit`. There is no `--amend` step and no prior fix
+  commit to amend onto; replies and code arrive together by
+  construction.
+- The `gh_review → items_pulled → round_unpushed → gh_review` cycle
+  runs once per review round. The transition out of `round_unpushed`
+  is `git push` — that's the only way to advance to mergeability.
+- **Never merge from `round_unpushed`.** There is no
+  `round_unpushed → merged` edge in the FSM — only `gh_review →
   merged`. `gh pr merge` is GitHub-side and doesn't see local state,
-  so a merge with an unpushed amend silently drops the local commit.
+  so a merge with an unpushed round silently drops the local commit.
   Use `scripts/safe_merge.sh <pr-args>` instead of `gh pr merge` —
   it refuses to invoke the merge while the local branch is ahead of
   origin. (Equivalent local check: `git log origin/<branch>..HEAD
@@ -61,10 +63,11 @@ stateDiagram-v2
   silent PR merge without an extra round-trip — `gh pr create`
   feeds GitHub a direct copy via `scripts/extract_pr_body.sh`.
 
-**Recovery: stranded fix commit after merge from `replies_amended`.**
+**Recovery: stranded round commit after merge from `round_unpushed`.**
 
-If a merge happened while the round was at `replies_amended` and a
-local fix commit got stranded, the round-2 work isn't lost — it's
+If a merge happened while the round was at `round_unpushed` (i.e.
+`safe_merge.sh` was bypassed and `gh pr merge` was used directly) and
+the local commit got stranded, the round-2 work isn't lost — it's
 sitting on the local feature branch's tip. Don't open a tiny
 standalone PR for it; per repo convention, fold the stranded commit
 into the next plan branch's first commit:
@@ -80,6 +83,25 @@ The previously-posted GitHub replies remain accurate (they reference
 the right SHAs at the time of posting). The next PR's review file
 should reference the prior PR's `gh-id` URLs in a `### History`
 section so the chain isn't orphaned.
+
+**Recovery: partial reply-post failure mid-`/reply-reviews`.**
+
+If `scripts/reply_review.py` fails partway through the post loop
+(network, rate limit, auth), `/reply-reviews` aborts before the
+mirror+commit step. Some replies are on GitHub, some aren't; the
+working tree still has the uncommitted code edits but no mirrored
+doc changes. Recovery is a re-run of `/reply-reviews`:
+
+1. Step 1's `pull_reviews.py` mirrors the already-posted replies into
+   the doc.
+2. Step 2's "unreplied threads" filter skips threads with mirrored
+   replies — so we only post the missing ones.
+3. The rest of the run completes normally.
+
+`reply_review.py` is **not** idempotent server-side — calling it
+twice with the same `in_reply_to_id` posts twice. Idempotency comes
+from the "skip already-replied threads" filter, which depends on the
+mirror happening *before* the post loop. Don't bypass Step 1.
 
 ## `/watch-pr` dynamic-mode loop
 

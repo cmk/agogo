@@ -1,5 +1,5 @@
 ---
-description: Poll a PR for new review comments; auto-address the trivially-clear ones, run the full /reply-reviews flow, and stop before push. Designed for /loop-driven automation (e.g., `/loop 10m /watch-pr 17`). Never pushes. Refuses if a prior round's fix commit is still unpushed.
+description: Poll a PR for new review comments; auto-address the trivially-clear ones, run the full /reply-reviews flow, and stop before push. Designed for /loop-driven automation (e.g., `/loop 10m /watch-pr 17`). Never pushes. Refuses if a prior round's commit is still unpushed (state `round_unpushed` per doc/workflow.md).
 argument-hint: <pr-number>
 ---
 
@@ -91,7 +91,7 @@ new top-level thread, classify it into exactly one bucket:
 wrong code; a miscategorized ask only delays a round by one loop tick
 until the user resolves it.
 
-## Step 3: Apply the auto-fix items
+## Step 3: Apply the auto-fix items (no commit yet)
 
 For each **auto-fix** item:
 
@@ -102,27 +102,16 @@ For each **auto-fix** item:
 3. If multiple auto-fix items touch the same file, batch the edits
    before running tests (faster feedback).
 
-Once all auto-fix edits are staged:
+**Do not commit yet.** The whole round (code fix + replies + mirrored
+doc) is committed once in Step 4 as a single atomic commit. This
+matches the FSM in `doc/workflow.md`: `items_pulled → round_unpushed`
+is a single transition; there is no intermediate `fix_unpushed` state.
 
-```
-git add <edited files>
-git commit -m "fix: Address review feedback on PR #<N>"
-```
+If no auto-fix items apply (all push-back / defer / ask), the working
+tree stays clean and Step 4's commit will be `doc:`-prefixed (mirror
+only).
 
-The pre-commit hook runs `cargo fmt --check`, `scripts/check-pii.sh`,
-`cargo test --workspace`, and `cargo clippy --all-targets -- -D
-warnings`. If it fails:
-
-- Read the failure. If it's a single fix causing the failure, revert
-  that specific edit and reclassify the corresponding thread as
-  **push-back** with an explanation of why the suggestion breaks the
-  build.
-- Retry the commit.
-- If the commit fails twice: abort the round. Revert all uncommitted
-  edits (`git checkout -- <files>`), log what went wrong, exit. The
-  user will investigate on the next loop tick.
-
-## Step 4: Complete the round (inline /reply-reviews)
+## Step 4: Post replies, mirror, and commit the round atomically
 
 For each **auto-fix**, **push-back**, and **defer** thread from Step 2,
 compose a 1–3 sentence reply per the rules in
@@ -138,55 +127,67 @@ for each thread: scripts/reply_review.py <N> <in_reply_to_id> "<body>"
 # Mirror replies back into the review doc
 scripts/pull_reviews.py <N>
 
-# Fold the doc update into the fix commit
-git add doc/reviews/review-NNNNN.md
-git commit --amend --no-edit
+# Single atomic commit: code edits (if any) + mirrored doc
+git add -A
+git commit -m "fix: Address review feedback on PR #<N>"   # or doc: if no code edits
 ```
 
-The amend is safe because Step 0d confirmed the fix commit is unpushed.
+The pre-commit hook runs `cargo fmt --check`, `scripts/check-pii.sh`,
+`cargo test --workspace`, and `cargo clippy --all-targets -- -D
+warnings`. If it fails:
 
-If Step 3 made no commit (all items were push-back / defer / ask) the
-reply-post still happens, but there's no commit to amend. In that case
-leave `review-NNNNN.md` modified-but-uncommitted — the next round's fix
-commit will fold it in (matching `/pull-reviews`'s standalone-use
-contract).
+- Read the failure. If a specific auto-fix caused the breakage, revert
+  that one edit and reclassify the corresponding thread as
+  **push-back** with an explanation. Retry `git commit`.
+- If the commit fails twice: abort the round. Replies are already on
+  GitHub (Step 4's post loop is destructive); leave the working tree
+  dirty so the next loop tick exits at Step 0c and surfaces the issue
+  to the user. Do not `git checkout --` — that would discard the
+  fixes the replies reference.
+
+If `reply_review.py` fails partway through the post loop (network /
+rate limit), abort before mirror+commit. Re-running this step is
+clean: the next tick's Step 1 mirrors the already-posted replies, the
+"unreplied threads" filter skips them, and the missing posts go
+through. (Same as `/reply-reviews`'s Recovery section.)
 
 ## Step 5: Report
 
 Print a structured summary, ≤ 15 lines. The heading names the FSM
 state from `doc/workflow.md` so the read-out reflects what's actually
-true on the wire — **`replies_amended` is mid-cycle, not mergeable**.
+true on the wire — **`round_unpushed` is mid-cycle, not mergeable**.
 Picking the right heading is load-bearing because the user reads it
 to decide whether the PR is ready to merge.
 
-If a fix commit was made and amended (auto-fix items existed):
+If Step 4's commit succeeded (whether code+doc or doc-only):
 
 ```
-watch-pr PR #<N> — paused at replies_amended (fix unpushed)
+watch-pr PR #<N> — paused at round_unpushed (commit unpushed)
   auto-fixed:  <count>   (e.g., "unused import, typo in doc")
   pushed-back: <count>   (e.g., "proposed rename conflicts with crate boundary")
   deferred:    <count>
   needs you:   <count>   ← these stay open; read them
     - path:line — one-line summary
     - path:line — one-line summary
-  fix commit:  <sha>     (unpushed)
+  round commit: <sha>    (unpushed — fix: or doc:)
   next step:   git push to advance to gh_review (mergeable).
-               DO NOT merge from replies_amended — local commit
+               DO NOT merge from round_unpushed — local commit
                would be silently dropped. Use scripts/safe_merge.sh
                which refuses to invoke `gh pr merge` while ahead of
                origin.
 ```
 
-If no fix commit was made (all items push-back / defer / ask):
+If Step 4 produced no commit (no auto-fix items AND no replies
+posted — all items were `ask`):
 
 ```
 watch-pr PR #<N> — round complete at gh_review (no commit needed)
   auto-fixed:  0
-  pushed-back: <count>
-  deferred:    <count>
+  pushed-back: 0
+  deferred:    0
   needs you:   <count>
     - path:line — one-line summary
-  fix commit:  none — replies posted, no code changes
+  round commit: none — all items classified as `ask`, no replies posted
   next step:   PR is mergeable when reviewers stop posting.
 ```
 

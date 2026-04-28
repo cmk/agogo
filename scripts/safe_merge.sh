@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# safe_merge.sh — guard `gh pr merge` against the `replies_amended`
+# safe_merge.sh — guard `gh pr merge` against the `round_unpushed`
 # trap.
 #
-# `doc/workflow.md`'s state machine has no edge from `replies_amended`
-# to `merged`. The only path is `replies_amended → push → gh_review →
+# `doc/workflow.md`'s state machine has no edge from `round_unpushed`
+# to `merged`. The only path is `round_unpushed → push → gh_review →
 # merged`. But `gh pr merge` is a GitHub-side operation; it doesn't
 # know about local state. Merging while a fix commit sits unpushed on
 # the local branch silently drops it on the floor — the merge takes
@@ -88,7 +88,7 @@ Unpushed commits would be silently dropped by the merge:
 $ahead
 
 Per doc/workflow.md, the merge transition starts from gh_review (push
-complete), not replies_amended. Push first, then re-run:
+complete), not round_unpushed. Push first, then re-run:
 
     git push origin $head_ref
     $0 $*
