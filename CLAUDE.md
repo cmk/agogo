@@ -139,8 +139,11 @@ core = ["dep:project-core"]
   inherits its predecessor's allowlist eligibility (same exception
   classes, same boundaries, just split into sibling modules). The
   current allowlist is the 20 entries in
-  `scripts/check-floats.sh::ALLOWED`; see that script's header for
-  a one-line justification per file.
+  `scripts/check-floats.sh::ALLOWED` (Plan 2026-04-28-06 T3 swapped
+  `machine/spec.rs` for `machine/spec/parser.rs` when the kitchen
+  sink split — same `delay=ms` argv boundary, just lives in the
+  parser submodule now); see that script's header for a one-line
+  justification per file.
   The annotation comments above (`// PI-exempt`, `// PCM ABI`,
   `// argv boundary`, `// ABI-local`, `// Link FFI`) are
   reviewer-oriented markers inside allowlisted files — they're not
