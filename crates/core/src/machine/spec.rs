@@ -269,7 +269,7 @@ impl ChannelSpec {
                 "delay" => {
                     // argv boundary: ms (string) → Micro at this
                     // line. Try i64 ms first — exact, no f64
-                    // round-trip drift (`micro_from_ms(51.0)` would
+                    // round-trip drift (`micro_from_user_ms(51.0)` would
                     // ceil to 51_001 µs because `0.051 × 10⁶`
                     // overshoots in f64). Fall back to f64 for
                     // fractional ms inputs like "10.5". Negative
@@ -288,7 +288,7 @@ impl ChannelSpec {
                         let ms_f64 = v
                             .parse::<f64>()
                             .map_err(|e| ChannelSpecError::BadValue("delay", e.to_string()))?;
-                        micro_from_ms(ms_f64).ok_or_else(|| {
+                        micro_from_user_ms(ms_f64).ok_or_else(|| {
                             ChannelSpecError::BadValue(
                                 "delay",
                                 format!("{ms_f64} out of range or non-finite"),
@@ -414,7 +414,7 @@ impl ChannelSpec {
         // validation already happened in `parse`, so `self.mode` is
         // the ready-to-use MidiRole (Clock or Click(MidiClickConfig)).
         // delay is already typed as Micro at the spec layer (Q3
-        // closure for audit K). The parser body called micro_from_ms
+        // closure for audit K). The parser body called micro_from_user_ms
         // — into_channel just clamps to MAX_DELAY.
         let delay = Micro(self.delay.0.clamp(0, MAX_DELAY.0));
 
@@ -531,7 +531,7 @@ fn parse_swing(v: &str) -> Result<SwingConfig, ChannelSpecError> {
 /// is rooted in seconds, not in arbitrary user-input units.
 /// Documented argv-boundary per CLAUDE.md exception 4 — the `f64`
 /// dies on the same line via `F064FD06.ceil`.
-fn micro_from_ms(ms: f64) -> Option<Micro> {
+fn micro_from_user_ms(ms: f64) -> Option<Micro> {
     // argv boundary: ms → canonical seconds for F064FD06's input.
     let seconds = ms * 1.0e-3;
     match F064FD06.ceil(ExtendedFloat::Extend(seconds)) {
