@@ -24,6 +24,7 @@
 pub mod conn;
 pub mod decimal;
 pub mod envelope;
+pub mod float;
 pub mod grid;
 pub mod sample;
 pub mod swing;
