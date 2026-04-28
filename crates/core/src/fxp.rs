@@ -36,6 +36,12 @@
 pub use connections::conn::float::ExtendedFloat;
 pub use connections::extended::Extended;
 
+// Saturating i64 → u32 narrowing Conn used inside `f64_bpm_to_tempo`
+// and `tempo_to_f64_bpm` to lawfully cross the `Tempo`'s u32 backing.
+// `I064U032.ceil(-1) = 0`, `I064U032.ceil(i64::MAX) = u32::MAX`,
+// `I064U032.inner: u32 → i64` is lossless.
+use connections::conn::std::u32::I064U032;
+
 // Time tier (decimal SI ladder + sample-indexed Q48.16) is now
 // vendored under `crate::time::{decimal, sample}`. Re-export the
 // agogo-local types under the same names every workspace caller
@@ -76,8 +82,8 @@ pub use crate::time::decimal::FD12 as Pico;
 // can construct and read any rate type without a match arm.
 // ────────────────────────────────────────────────────────────────────
 
-/// Common Q48.16-bits interface over the `Sxx` rate types from
-/// `connections::conn::sample`. Lets generic DSP code accept an arbitrary
+/// Common Q48.16-bits interface over the `Sxxx` rate types from
+/// [`crate::time::sample`]. Lets generic DSP code accept an arbitrary
 /// `R: SampleTime` rather than committing to a single rate.
 pub trait SampleTime: SampleRate + Copy + Default + Ord + core::fmt::Debug {
     /// Construct from raw Q48.16 bits.
@@ -93,6 +99,19 @@ pub trait SampleTime: SampleRate + Copy + Default + Ord + core::fmt::Debug {
     /// Integer sample part (arithmetic shift, rounds toward −∞ for negatives).
     fn sample(self) -> i64 {
         self.to_bits_q48_16() >> 16
+    }
+
+    /// Q48.16 sample position as `f64` — integer sample count plus
+    /// sub-sample fraction. The `bits / 2^16` arithmetic is the
+    /// standard binary-fixed → float conversion; the `1u64 << 16`
+    /// divisor is intrinsic to the Q48.16 representation, not an
+    /// SI unit shift, so it doesn't fall under the M-family
+    /// "open-coded unit arithmetic" prohibition. Wrapped here as a
+    /// named method so call sites read as intent ("fractional sample
+    /// position") rather than open-coded scale division.
+    fn samples_f64(self) -> f64 {
+        // PI-exempt: Q48.16 → f64 (binary scale, not SI).
+        self.to_bits_q48_16() as f64 / (1u64 << 16) as f64
     }
 }
 
@@ -164,6 +183,14 @@ impl Tempo {
             None => panic!("Tempo::from_bpm_integer: n must be ≤ 4294"),
         }
     }
+
+    /// `|self - other|` as `u32` via `u32::abs_diff` — no
+    /// sign-flipping through i64. Replaces four open-coded
+    /// `(a.0 as i64 - b.0 as i64).unsigned_abs()` sites in
+    /// `sync::pll`.
+    pub const fn abs_diff(self, other: Tempo) -> u32 {
+        self.0.abs_diff(other.0)
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -207,6 +234,17 @@ impl Quantum {
 /// mistake.
 pub fn f64_beats_to_quantum(q: f64) -> Quantum {
     // argv boundary — called from the CLI handler's first lines.
+    //
+    // **Round-to-nearest, not Conn-composed.** Link's C++ side does
+    // `std::llround(q × 1e6)` (round-half-away-from-zero) on every
+    // microbeat construction; agogo's `Quantum` must agree
+    // bit-for-bit at the FFI seam. `F064FD06.ceil` and `.floor` are
+    // Galois adjoints (round up / round down), but
+    // round-half-away-from-zero is **not** a Galois adjoint and has
+    // no `Conn` equivalent. The `* 1_000_000.0` unit shift is
+    // documented here as an **FFI-parity exception** to the
+    // Conn-discipline rule. The `f64qnt_matches_link_beats`
+    // proptest pins the bit-exact agreement.
     if !q.is_finite() {
         return Quantum::ZERO;
     }
@@ -246,17 +284,64 @@ pub fn f64_phase_to_phase(p: f64) -> Phase {
 }
 
 /// f64 BPM → `Tempo` with round-to-nearest. Negative or NaN
-/// inputs saturate to `ZERO`.
+/// inputs saturate to `ZERO`; out-of-u32-range to `Tempo(u32::MAX)`.
+///
+/// **Round-to-nearest, not Conn-composed.** Same FFI-parity
+/// reasoning as `f64_beats_to_quantum`: agogo's `Tempo` is the
+/// internal counterpart of Link's microBPM ABI, and the
+/// `f64_bpm_roundtrip` proptest pins agreement to within ±5e-7
+/// BPM (one µBPM ULP). `F064FD06.ceil` would shift the rounding
+/// direction by up to 1 µBPM at the half-step, breaking that
+/// contract. The `* 1_000_000.0` unit shift is the same
+/// FFI-parity exception documented above. The `i64 → u32`
+/// narrowing IS lawful and goes through `I064U032.ceil`
+/// (closes N5 — the `as u32` saturation cast is now named).
 pub fn f64_bpm_to_tempo(b: f64) -> Tempo {
-    // PI-exempt.
+    // PI-exempt; FFI-parity exception per fn-doc above.
     if !b.is_finite() || b <= 0.0 {
         return Tempo::ZERO;
     }
     let scaled = (b * 1_000_000.0).round();
-    if scaled >= u32::MAX as f64 {
-        Tempo(u32::MAX)
-    } else {
-        Tempo(scaled as u32)
+    if scaled > i64::MAX as f64 {
+        return Tempo(u32::MAX);
+    }
+    if scaled < 0.0 {
+        return Tempo::ZERO;
+    }
+    Tempo(I064U032.ceil(scaled as i64))
+}
+
+/// `Tempo` (u32 microBPM) → f64 BPM via the lawful `F064FD06`
+/// Conn-inverse. The `× 10⁻⁶` unit shift lives inside `F064FD06`'s
+/// definition (`crate::time::decimal`); the `u32 → i64` widening
+/// is `I064U032.inner` (lossless). Open-coding either step was
+/// M5/M6/N1.
+///
+/// Total: `Tempo`'s u32 backing fits losslessly in `i64`, and
+/// `F064FD06.inner(Extended::Finite(...))` always lifts a finite
+/// rung to `ExtendedFloat::Extend(_)`. The `Bot/Top` arms are
+/// unreachable but kept for totality.
+pub fn tempo_to_f64_bpm(t: Tempo) -> f64 {
+    // PI-exempt.
+    let widened = I064U032.inner(t.0);
+    match F064FD06.inner(Extended::Finite(FD06(widened))) {
+        ExtendedFloat::Extend(b) => b,
+        ExtendedFloat::Bot => f64::NEG_INFINITY,
+        ExtendedFloat::Top => f64::INFINITY,
+    }
+}
+
+/// `Pico` (i64 picoseconds) → f64 seconds via the lawful `F064FD12`
+/// Conn-inverse. The `× 10⁻¹²` unit shift lives inside `F064FD12`'s
+/// definition (`crate::time::decimal`). Open-coding it was M7 (in
+/// the Pico-construction direction) and the `Pico.0 as f64 / 1.0e12`
+/// pattern that recurs in arb / sync / cpal-aware code.
+pub fn pico_to_f64_seconds(p: Pico) -> f64 {
+    // PI-exempt.
+    match F064FD12.inner(Extended::Finite(p)) {
+        ExtendedFloat::Extend(s) => s,
+        ExtendedFloat::Bot => f64::NEG_INFINITY,
+        ExtendedFloat::Top => f64::INFINITY,
     }
 }
 
@@ -273,12 +358,14 @@ pub fn f64_bpm_to_tempo(b: f64) -> Tempo {
 
 /// Pulse frequency in Hz given tempo and pulses-per-quarter.
 ///
-/// `hz = (bpm_µ / 10⁶) × ppq / 60`, executed entirely in f64 because
-/// the PI-controller state is f64 by design. The integer-fxp rounding
-/// contracts don't apply here — the PI law is continuous.
+/// `hz = bpm × ppq / 60`, executed in f64 because the PI-controller
+/// state is f64 by design. The `Tempo → f64` conversion is lawful
+/// via [`tempo_to_f64_bpm`]; only the `× ppq / 60` multiplication
+/// stays open-coded (it's PI-exempt continuous arithmetic, not an
+/// SI unit shift).
 pub fn tempo_to_hz(bpm: Tempo, ppq: u32) -> f64 {
     // PI-exempt.
-    (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0
+    tempo_to_f64_bpm(bpm) * ppq as f64 / 60.0
 }
 
 /// Q48.16-bit sample count → seconds at the given rate. Used by the
@@ -506,6 +593,11 @@ mod tests {
         #[test]
         fn f64_bpm_roundtrip(b in 30.0_f64..=400.0) {
             let u = f64_bpm_to_tempo(b);
+            // Independent reference for the round-trip — calling
+            // `tempo_to_f64_bpm` here would compare production code
+            // to itself. The hand-coded `* 1.0e-6` is the regression
+            // gate that proves both `f64_bpm_to_tempo` (forward) and
+            // `tempo_to_f64_bpm` (reverse) agree with the f64 spec.
             let roundtrip = u.0 as f64 * 1.0e-6;
             // µBPM quantisation: ±5e-7 worst case.
             prop_assert!(
@@ -641,7 +733,12 @@ mod tests {
         #[test]
         fn f64qnt_matches_link_beats(q in -1_000_000.0_f64..=1_000_000.0) {
             let got = f64_beats_to_quantum(q).0.0;
-            // Reference: round-half-away-from-zero, saturating cast.
+            // Independent reference: round-half-away-from-zero,
+            // saturating cast — exactly what Link's C++ side does
+            // via `std::llround(q * 1e6)`. Hand-coded here (not via
+            // F064FD06) so the proptest is a true regression gate
+            // for `f64_beats_to_quantum`'s composition body, not a
+            // tautology comparing the function to itself.
             let scaled = (q * 1_000_000.0).round();
             let expected = if scaled > i64::MAX as f64 {
                 i64::MAX

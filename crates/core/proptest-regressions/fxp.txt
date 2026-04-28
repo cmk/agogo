@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 4a6580b02d324a7f73fbf5e43d01d8c208d3c7a022f396bb597cb32ec3961f64 # shrinks to b = 374.80008
+cc 40d7c58080968472b34eeb7be33835e092567e626aaa5d58cf14515244eaad76 # shrinks to q = 944307.2541834672

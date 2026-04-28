@@ -155,7 +155,7 @@ impl<R: SampleTime> PeakDetector<R> {
 mod tests {
     use super::*;
     use crate::arb::{arb_bpm, pulse_train};
-    use crate::fxp::{Tempo, Pico, S048, SampleRate};
+    use crate::fxp::{Pico, S048, SampleRate, SampleTime, Tempo, tempo_to_hz};
     use proptest::prelude::*;
 
     /// Stamp a Hann-bell pulse into `buf`. Mirrors `pulse_train`'s
@@ -206,7 +206,7 @@ mod tests {
         let peaks = det.process(&buf, 0);
         assert_eq!(peaks.len(), centres.len(), "peak count");
         for (p, &truth) in peaks.iter().zip(centres.iter()) {
-            let got = p.sample_index.to_bits_q48_16() as f64 / 65_536.0;
+            let got = p.sample_index.samples_f64();
             assert!(
                 (got - truth).abs() < 0.1,
                 "detected {} vs truth {} (err {})",
@@ -229,7 +229,7 @@ mod tests {
         let mut all = det.process(&buf[..512], 0);
         all.extend(det.process(&buf[512..], 512));
         assert_eq!(all.len(), 1);
-        let got = all[0].sample_index.to_bits_q48_16() as f64 / 65_536.0;
+        let got = all[0].sample_index.samples_f64();
         assert!((got - 510.0).abs() < 0.1);
     }
 
@@ -249,7 +249,7 @@ mod tests {
             let ppq = 24u32;
             let (samples, truth): (Vec<f32>, Vec<S048>) =
                 pulse_train::<S048>(bpm, ppq, Pico(0), n_pulses, seed);
-            let pulse_rate_hz = (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0;
+            let pulse_rate_hz = tempo_to_hz(bpm, ppq);
             let spacing_samples = sr as f64 / pulse_rate_hz;
             let hold = (spacing_samples * 0.5) as u32;
             let mut det = PeakDetector::<S048>::new(DetectorConfig {
@@ -266,7 +266,9 @@ mod tests {
             );
             for (d, &t) in detected.iter().zip(truth.iter()) {
                 let err_bits = (d.sample_index.to_bits_q48_16() - t.to_bits_q48_16()).abs();
-                let err = err_bits as f64 / 65_536.0;
+                // PI-exempt: Q48.16 bit-difference → fractional samples
+                // (binary scale, intrinsic to the representation).
+                let err = err_bits as f64 / (1u64 << 16) as f64;
                 prop_assert!(
                     err < spacing_samples * 0.5,
                     "peak err {} exceeded spacing/2 = {}",
@@ -287,7 +289,7 @@ mod tests {
             let ppq = 24u32;
             let (samples, truth): (Vec<f32>, Vec<S048>) =
                 pulse_train::<S048>(bpm, ppq, Pico(0), n_pulses, seed);
-            let pulse_rate_hz = (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0;
+            let pulse_rate_hz = tempo_to_hz(bpm, ppq);
             let spacing_samples = sr as f64 / pulse_rate_hz;
             let hold = (spacing_samples * 0.5) as u32;
             let mut det = PeakDetector::<S048>::new(DetectorConfig {
@@ -298,7 +300,9 @@ mod tests {
             prop_assert_eq!(detected.len(), truth.len());
             for (d, &t) in detected.iter().zip(truth.iter()) {
                 let err_bits = (d.sample_index.to_bits_q48_16() - t.to_bits_q48_16()).abs();
-                let err = err_bits as f64 / 65_536.0;
+                // PI-exempt: Q48.16 bit-difference → fractional samples
+                // (binary scale, intrinsic to the representation).
+                let err = err_bits as f64 / (1u64 << 16) as f64;
                 prop_assert!(
                     err <= 0.1,
                     "subsample err {} > 0.1 (bpm={})",
@@ -332,7 +336,7 @@ mod tests {
                 "expected 1 peak with hold={} > gap={}, got {}",
                 hold, gap_samples, peaks.len()
             );
-            let got = peaks[0].sample_index.to_bits_q48_16() as f64 / 65_536.0;
+            let got = peaks[0].sample_index.samples_f64();
             prop_assert!((got - first_centre).abs() < 0.5);
         }
 

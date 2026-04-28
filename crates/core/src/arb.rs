@@ -1,6 +1,6 @@
 //! Shared proptest strategies and synthetic test signals.
 
-use crate::fxp::{Tempo, Pico, SampleRate, SampleTime};
+use crate::fxp::{Pico, SampleRate, SampleTime, Tempo, pico_to_f64_seconds, tempo_to_f64_bpm};
 use rand::SeedableRng;
 use rand_distr::{Distribution, Normal};
 
@@ -42,15 +42,18 @@ pub fn pulse_train<R: SampleTime>(
     }
 
     // Test-fixture f64 derived quantities. These don't escape this
-    // function; the returned peaks are already in Q48.16.
-    let bpm_f = bpm.0 as f64 / 1.0e6;
+    // function; the returned peaks are already in Q48.16. All
+    // unit-shift conversions go through the lawful Conn-inverse
+    // helpers (`tempo_to_f64_bpm` and `pico_to_f64_seconds`),
+    // not open-coded `× 10⁻⁶` / `× 10⁻¹²`.
+    let bpm_f = tempo_to_f64_bpm(bpm);
     let sr = R::HZ;
     let pulse_rate_hz = bpm_f * ppq as f64 / 60.0;
     let spacing_samples = sr as f64 / pulse_rate_hz;
-    let width_samples = (sr as f64 * (PULSE_WIDTH_PS.0 as f64 / 1.0e12)).max(4.0);
+    let width_samples = (sr as f64 * pico_to_f64_seconds(PULSE_WIDTH_PS)).max(4.0);
     let half_width = width_samples * 0.5;
-    // σ in samples: sigma_ps / 10^12 × sr.
-    let sigma_samples = jitter_sigma.0 as f64 / 1.0e12 * sr as f64;
+    // σ in samples: σ-seconds × sr (Conn-inverse for the Pico → f64).
+    let sigma_samples = pico_to_f64_seconds(jitter_sigma) * sr as f64;
 
     let last_nominal = spacing_samples * n_pulses as f64;
     let pad = half_width + 6.0 * sigma_samples + 256.0;

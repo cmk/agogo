@@ -201,7 +201,7 @@ impl<R: SampleTime> Pll<R> {
 mod tests {
     use super::*;
     use crate::arb::pulse_train;
-    use crate::fxp::{Pico, S048, SampleRate};
+    use crate::fxp::{FD06, FD12FD06, Pico, S048, SampleRate};
     use proptest::prelude::*;
 
     /// PLL initialised at the true BPM under jitter — tracks the rate
@@ -216,7 +216,7 @@ mod tests {
         for &p in &peaks {
             last = pll.step(Some(p)).bpm;
         }
-        let err = (last.0 as i64 - bpm.0 as i64).unsigned_abs();
+        let err = last.abs_diff(bpm);
         assert!(
             err < 50_000,
             "bpm err {err} µBPM > 50_000 (last={} µBPM, target={} µBPM)",
@@ -236,7 +236,7 @@ mod tests {
         for &p in &peaks {
             last = pll.step(Some(p)).bpm;
         }
-        let err = (last.0 as i64 - 120_000_000).unsigned_abs();
+        let err = last.abs_diff(Tempo(120_000_000));
         assert!(err < 1_000, "{last:?}");
     }
 
@@ -284,7 +284,7 @@ mod tests {
             seed in any::<u64>(),
         ) {
             let bpm = Tempo(bpm_mbpm);
-            let jitter = Pico(jitter_us as i64 * 1_000_000);
+            let jitter = FD12FD06.inner(FD06(jitter_us as i64));
             let ppq = 24u32;
             let n_pulses = 64u32;
             let (_, peaks): (Vec<f32>, Vec<S048>) =
@@ -294,7 +294,7 @@ mod tests {
             for &p in &peaks {
                 last = pll.step(Some(p)).bpm;
             }
-            let err = (last.0 as i64 - bpm.0 as i64).unsigned_abs();
+            let err = last.abs_diff(bpm);
             prop_assert!(
                 err < 50_000,
                 "bpm err {} µBPM > 50_000 (last={} µBPM, target={} µBPM, jitter_us={})",
@@ -309,7 +309,7 @@ mod tests {
             seed in any::<u64>(),
         ) {
             let bpm = Tempo(bpm_mbpm);
-            let jitter = Pico(jitter_us as i64 * 1_000_000);
+            let jitter = FD12FD06.inner(FD06(jitter_us as i64));
             let ppq = 24u32;
             let n_pulses = 64u32;
             let (_, peaks): (Vec<f32>, Vec<S048>) =
@@ -361,7 +361,7 @@ mod tests {
             for &p in &peaks[40..] {
                 last_post = pll.step(Some(p)).bpm;
             }
-            let drift = (last_post.0 as i64 - pre_bpm.0 as i64).unsigned_abs();
+            let drift = last_post.abs_diff(pre_bpm);
             // 0.5 BPM = 500_000 µBPM.
             prop_assert!(
                 drift < 500_000,
@@ -403,7 +403,7 @@ mod tests {
             let mut pll = Pll::<S048>::new(cfg, nominal, ppq);
             for (i, &p) in peaks.iter().enumerate() {
                 let out = pll.step(Some(p));
-                let err = (out.bpm.0 as i64 - actual.0 as i64).unsigned_abs();
+                let err = out.bpm.abs_diff(actual);
                 if err < 500_000 {
                     // 0.5 BPM
                     return i;
