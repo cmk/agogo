@@ -82,7 +82,7 @@ pub fn tick_stream_into(
     // stc.inner(swung_tick) + delay_samples + offset_samples. For an
     // event to land in [start, end), the swung_tick's natural sample
     // must land in [start - delta, end - delta). Same
-    // `F12F06 ∘ pico_to_samples` composition as `transform`,
+    // `FD12FD06 ∘ pico_to_samples` composition as `transform`,
     // routed through `micro_to_samples` so the two stages are
     // impossible to drift.
     let delay_clamped = Micro(common.delay.0.clamp(0, MAX_DELAY.0));

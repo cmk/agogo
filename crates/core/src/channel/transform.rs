@@ -10,7 +10,7 @@
 //!    earlier by `amount × multiplier`; on-beats pass through).
 //! 3. **Tick → Sample** via [`SampleTickConn::inner`].
 //! 4. **Delay** — add `clamp(delay, 0, MAX_DELAY)` → Pico → Sample
-//!    via `F12F06 ∘ pico_to_samples`. Plan 03 does not implement
+//!    via `FD12FD06 ∘ pico_to_samples`. Plan 03 does not implement
 //!    negative delay (needs a forward-look ring buffer, deferred to
 //!    v0.2).
 //! 5. **Offset** — same composition chain for the signed calibration
@@ -21,7 +21,7 @@ use crate::fxp::pico_to_samples;
 use crate::time::conn::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
-use crate::fxp::{F12F06, Micro};
+use crate::fxp::{FD12FD06, Micro};
 
 /// Maximum positive delay before saturation: 300 ms = 300 000 µs.
 pub const MAX_DELAY: Micro = Micro(300_000);
@@ -85,7 +85,7 @@ pub struct ScheduledEvent {
 }
 
 /// Convert a `Micro` offset into a whole-sample count at `sr` via
-/// the adjoint-law composition `F12F06 ∘ pico_to_samples`. Shared
+/// the adjoint-law composition `FD12FD06 ∘ pico_to_samples`. Shared
 /// by `transform` and `scheduler`.
 ///
 /// # Panics
@@ -99,7 +99,7 @@ pub struct ScheduledEvent {
 /// rate allowlist is a separate invariant enforced at the CLI /
 /// config boundary.
 pub(crate) fn micro_to_samples(m: Micro, sr: u32) -> i64 {
-    let pico = F12F06.inner(m);
+    let pico = FD12FD06.inner(m);
     pico_to_samples(pico, sr).unwrap_or_else(|| {
         panic!("channel: unsupported sample rate {sr} (expected 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000); validate `sr` at the CLI / config boundary before constructing the channel pipeline")
     })

@@ -1,13 +1,23 @@
 //! Fixed-point arithmetic for agogo DSP.
 //!
-//! Re-exports the decimal time ladder (`Uni / Deci / Centi / Milli /
-//! Micro / Nano / Pico`) and rate-typed sample tier (`S44 / S48 /
-//! S88 / S96 / S176 / S192`) from the sibling `connections` crate.
-//! Adds two agogo-local fixed-point types — `Phase` (Q0.32 cycles,
-//! wrapping-add = modular reduction) and `Tempo` (BPM × 10⁶) —
-//! plus integer `linear_u8` / `smoothstep_u8` primitives and a
-//! handful of narrow f32/f64 → fxp conversions for the CLI-parser
-//! and PI-controller boundaries.
+//! Re-exports the decimal time ladder (`FD00..FD12`) and the
+//! rate-typed sample tier (`S044 / S048 / S088 / S096 / S176 /
+//! S192`) from agogo's own vendored modules at
+//! [`crate::time::{decimal, sample}`]. Adds two agogo-local
+//! fixed-point types — `Phase` (Q0.32 cycles, wrapping-add =
+//! modular reduction) and `Tempo` (BPM × 10⁶) — plus integer
+//! `linear_u8` / `smoothstep_u8` primitives and a handful of
+//! narrow f32/f64 → fxp conversions for the CLI-parser and
+//! PI-controller boundaries.
+//!
+//! Two intentional **domain aliases** for time-unit readability
+//! at the FFI seams:
+//! - [`Micro`] = [`FD06`] — used in `host-link`, `channel::scheduler`,
+//!   `Quantum(Micro)`, and `ChannelCommon::{delay, offset}`.
+//! - [`Pico`] = [`FD12`] — used in `pico_to_samples`, the cpal seam,
+//!   `arb::pulse_train`, `sync::pll` jitter math.
+//!
+//! Use the canonical `FDxx` / `Sxxx` names everywhere else.
 //!
 //! Everything else in the workspace should consume these types
 //! rather than `f32`/`f64` directly, with the exceptions documented
@@ -40,55 +50,23 @@ pub use crate::time::sample::{
 };
 
 // ────────────────────────────────────────────────────────────────────
-// Backward-compat aliases (Q1a transitional layer).
+// Domain aliases.
 //
-// Q1b will:
-// - Migrate every workspace call site to the new 4-character names.
-// - Remove every alias EXCEPT the three intentional domain aliases
-//   marked KEEP below.
-//
-// The KEEPs survive because they read as time-unit words at FFI
-// seams (host-link, scheduler) where `Micro(...)` is more meaningful
-// than `FD06(...)`. They are declared once here, with comments
-// explaining the rationale.
+// Two time-unit words kept alongside the canonical FD06 / FD12
+// names because they read more naturally at FFI seams (host-link
+// session arming, channel::scheduler delay/offset arithmetic, the
+// cpal seam, jitter math). Every other workspace site uses the
+// canonical FDxx / Sxxx names directly.
 // ────────────────────────────────────────────────────────────────────
 
-// Decimal SI tier — drop in Q1b except where marked KEEP.
-pub use crate::time::decimal::FD00 as Uni;
-pub use crate::time::decimal::FD01 as Deci;
-pub use crate::time::decimal::FD02 as Centi;
-pub use crate::time::decimal::FD03 as Milli;
-/// KEEP — domain alias for ns at FFI seams (Pico/Nano arithmetic in `sync::pll`).
-pub use crate::time::decimal::FD09 as Nano;
-/// KEEP — domain alias for µs at FFI seams (`Quantum(Micro)`, `host-link::session`).
+/// Domain alias for µs. Used at FFI seams: `Quantum(Micro)`,
+/// `host-link::session`, `ChannelCommon::{delay, offset}`,
+/// `channel::scheduler` arithmetic.
 pub use crate::time::decimal::FD06 as Micro;
-/// KEEP — domain alias for ps in `pico_to_samples` and the cpal seam.
+
+/// Domain alias for ps. Used in `pico_to_samples`, the cpal seam,
+/// `arb::pulse_train`, `sync::pll` jitter math.
 pub use crate::time::decimal::FD12 as Pico;
-
-// Decimal F-ladder Conns — drop in Q1b.
-pub use crate::time::decimal::F064FD00 as F64F00;
-pub use crate::time::decimal::F064FD01 as F64F01;
-pub use crate::time::decimal::F064FD02 as F64F02;
-pub use crate::time::decimal::F064FD03 as F64F03;
-pub use crate::time::decimal::F064FD06 as F64F06;
-pub use crate::time::decimal::F064FD09 as F64F09;
-pub use crate::time::decimal::F064FD12 as F64F12;
-pub use crate::time::decimal::FD12FD00 as F12F00;
-pub use crate::time::decimal::FD12FD03 as F12F03;
-pub use crate::time::decimal::FD12FD06 as F12F06;
-pub use crate::time::decimal::FD12FD09 as F12F09;
-
-// Sample tier — drop S0xx aliases in Q1b.
-pub use crate::time::sample::S044 as S44;
-pub use crate::time::sample::S048 as S48;
-pub use crate::time::sample::S088 as S88;
-pub use crate::time::sample::S096 as S96;
-pub use crate::time::sample::FD12S044 as F12S44;
-pub use crate::time::sample::FD12S048 as F12S48;
-pub use crate::time::sample::FD12S088 as F12S88;
-pub use crate::time::sample::FD12S096 as F12S96;
-pub use crate::time::sample::FD12S176 as F12S176;
-pub use crate::time::sample::FD12S192 as F12S192;
 
 // ────────────────────────────────────────────────────────────────────
 // SampleTime — agogo-local convenience trait over the rate types.
@@ -331,12 +309,12 @@ pub fn pico_to_samples(p: Pico, sr: u32) -> Option<i64> {
     // snaps to a whole-sample Q48_16, and `.to_num::<i64>()`
     // extracts the integer sample count.
     Some(match sr {
-        44_100 => F12S44.ceil(p).0.round().to_num(),
-        48_000 => F12S48.ceil(p).0.round().to_num(),
-        88_200 => F12S88.ceil(p).0.round().to_num(),
-        96_000 => F12S96.ceil(p).0.round().to_num(),
-        176_400 => F12S176.ceil(p).0.round().to_num(),
-        192_000 => F12S192.ceil(p).0.round().to_num(),
+        44_100 => FD12S044.ceil(p).0.round().to_num(),
+        48_000 => FD12S048.ceil(p).0.round().to_num(),
+        88_200 => FD12S088.ceil(p).0.round().to_num(),
+        96_000 => FD12S096.ceil(p).0.round().to_num(),
+        176_400 => FD12S176.ceil(p).0.round().to_num(),
+        192_000 => FD12S192.ceil(p).0.round().to_num(),
         _ => return None,
     })
 }
@@ -605,12 +583,12 @@ mod tests {
     // to the upstream `F12Sxx` conns. Upstream's per-rate proptests
     // catch arithmetic bugs inside each `F12Sxx`, but nothing there
     // catches a local wiring mistake like "oops, the 96k arm calls
-    // F12S88 by accident." These tests lock in the dispatch table.
+    // FD12S088 by accident." These tests lock in the dispatch table.
 
     #[test]
     fn pico_to_samples_one_second_maps_to_sr() {
         // 1 second = 10¹² pico = `sr` samples at every supported rate.
-        // Any cross-wired arm (e.g. 96k → F12S88) would return 88_200
+        // Any cross-wired arm (e.g. 96k → FD12S088) would return 88_200
         // instead of 96_000 and fail here.
         let one_second = Pico(1_000_000_000_000);
         for sr in [44_100, 48_000, 88_200, 96_000, 176_400, 192_000] {

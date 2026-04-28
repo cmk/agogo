@@ -342,7 +342,7 @@ fn main() {
         }) => {
             #[cfg(feature = "core")]
             {
-                if sr != <agogo_core::fxp::S48 as agogo_core::fxp::SampleRate>::HZ {
+                if sr != <agogo_core::fxp::S048 as agogo_core::fxp::SampleRate>::HZ {
                     eprintln!(
                         "error: sync trace is pinned to 48 kHz this sprint (got --sr {sr}); \
                          multi-rate support deferred"
@@ -839,7 +839,7 @@ pub mod link_commands {
 mod sync_trace {
     use agogo_core::arb::pulse_train;
     use agogo_core::fxp::{
-        Extended, F64F12, ExtendedFloat, Pico, S48, SampleRate, SampleTime, Tempo,
+        Extended, F064FD12, ExtendedFloat, Pico, S048, SampleRate, SampleTime, Tempo,
         f64_bpm_to_tempo,
     };
     use agogo_core::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
@@ -855,7 +855,7 @@ mod sync_trace {
     /// `sample = bits >> 16`, `frac = bits & 0xFFFF` as needed.
     #[derive(Debug, Clone, Copy)]
     pub struct TraceRow {
-        /// Peak position as raw Q48.16 bits at S48's 48 kHz.
+        /// Peak position as raw Q48.16 bits at S048's 48 kHz.
         pub bits_q48_16: i64,
         /// PLL smoothed BPM × 10⁶.
         pub tempo_ubpm: u32,
@@ -872,25 +872,25 @@ mod sync_trace {
     ) -> Vec<TraceRow> {
         // argv-boundary conversions. f64 dies on these two lines.
         let bpm: Tempo = f64_bpm_to_tempo(bpm_f64);
-        // µs → seconds → Pico via upstream `F64F12` (lawful conn over
+        // µs → seconds → Pico via upstream `F064FD12` (lawful conn over
         // `ExtendedFloat<f64>`). `parse_non_negative_f64` at the bpaf
         // layer already rejected NaN / ±∞, so a finite-wrap here is
         // safe; the `PosInf` match arm catches out-of-range values.
         let jitter_s = jitter_us * 1.0e-6;
-        let jitter: Pico = match F64F12.ceil(ExtendedFloat::Extend(jitter_s)) {
+        let jitter: Pico = match F064FD12.ceil(ExtendedFloat::Extend(jitter_s)) {
             Extended::Finite(p) => p,
             Extended::NegInf | Extended::PosInf => Pico(0),
         };
 
-        let (samples, _truth): (Vec<f32>, Vec<S48>) =
-            pulse_train::<S48>(bpm, ppq, jitter, pulses, seed);
+        let (samples, _truth): (Vec<f32>, Vec<S048>) =
+            pulse_train::<S048>(bpm, ppq, jitter, pulses, seed);
         let pulse_rate_hz = agogo_core::fxp::tempo_to_hz(bpm, ppq);
-        let spacing_samples = (S48::HZ as f64 / pulse_rate_hz) as u32;
-        let mut detector = PeakDetector::<S48>::new(DetectorConfig {
+        let spacing_samples = (S048::HZ as f64 / pulse_rate_hz) as u32;
+        let mut detector = PeakDetector::<S048>::new(DetectorConfig {
             threshold_q15: 16_384, // 0.5 Q0.15
             hold_samples: spacing_samples / 2,
         });
-        let mut pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, ppq);
+        let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, ppq);
         let peaks = detector.process(&samples, 0);
         peaks
             .into_iter()
@@ -909,7 +909,7 @@ mod sync_trace {
 #[cfg(feature = "core")]
 pub mod channel_trace {
     use agogo_core::channel::{ChannelCommon, tick_stream};
-    use agogo_core::fxp::{Extended, ExtendedFloat, F64F06, Micro, Tempo};
+    use agogo_core::fxp::{Extended, ExtendedFloat, F064FD06, Micro, Tempo};
     use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
@@ -967,7 +967,7 @@ pub mod channel_trace {
             }
         }
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
-        // argv-boundary: ms (f64) → Micro via the upstream `F64F06`
+        // argv-boundary: ms (f64) → Micro via the upstream `F064FD06`
         // lawful conn. Out-of-range saturations are user errors, not
         // silent defaults — `parse_non_negative_f64` already validated
         // finiteness, so an `Extended::PosInf` /
@@ -975,7 +975,7 @@ pub mod channel_trace {
         // outside `Micro`'s ±i64 range (billions of years). Surface
         // that as an error rather than silently mapping to zero.
         let ms_to_micro = |flag: &str, ms: f64| -> Result<Micro, String> {
-            match F64F06.ceil(ExtendedFloat::Extend(ms * 1.0e-3)) {
+            match F064FD06.ceil(ExtendedFloat::Extend(ms * 1.0e-3)) {
                 Extended::Finite(m) => Ok(m),
                 Extended::NegInf | Extended::PosInf => {
                     Err(format!("{flag} {ms} out of range"))
@@ -1344,7 +1344,7 @@ pub mod demo {
     //! `Machine`.
 
     use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
-    use agogo_core::fxp::{Micro, S48, SampleRate, Tempo};
+    use agogo_core::fxp::{Micro, S048, SampleRate, Tempo};
     use agogo_core::host::{AudioHost, Config};
     use agogo_core::machine::{Machine, TransportPolicy};
     use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
@@ -1408,10 +1408,10 @@ pub mod demo {
                 ));
             }
         }
-        // Plan 13 T5 instantiates `CallbackState<S48>` only —
+        // Plan 13 T5 instantiates `CallbackState<S048>` only —
         // multi-rate dispatch via a static `match args.sr { ... }`
         // arrives with `agogo run` in Plan 14.
-        if args.sr != S48::HZ {
+        if args.sr != S048::HZ {
             return Err(format!(
                 "--sr {} not yet supported by `agogo demo` (only 48000 in Plan 13 T5; \
                  wider rate dispatch lands with `agogo run` in Plan 14)",
@@ -1420,7 +1420,7 @@ pub mod demo {
         }
 
         // PhaseSource: Internal | External(Pll).
-        let phase_source: PhaseSource<S48> = match args.source.as_str() {
+        let phase_source: PhaseSource<S048> = match args.source.as_str() {
             "internal" => PhaseSource::Internal { bpm },
             "external" => {
                 // Detector + PLL defaults — calibrated for click-track
@@ -1428,11 +1428,11 @@ pub mod demo {
                 // knob; `agogo sync trace` is the debugging surface
                 // for tuning. `hold_samples = sr / 4` allows up to
                 // ~240 BPM clicks without spurious double-detections.
-                let detector = PeakDetector::<S48>::new(DetectorConfig {
+                let detector = PeakDetector::<S048>::new(DetectorConfig {
                     threshold_q15: 16_384, // 0.5 in Q0.15
                     hold_samples: args.sr / 4,
                 });
-                let pll = Pll::<S48>::new(PllSettings::DEFAULT, bpm, DEMO_PPQ);
+                let pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, DEMO_PPQ);
                 PhaseSource::External { detector, pll }
             }
             other => {
@@ -1486,7 +1486,7 @@ pub mod demo {
             },
             role: MidiRole::Clock,
         };
-        let machine = Machine::<S48>::new(
+        let machine = Machine::<S048>::new(
             vec![channel],
             phase_source,
             args.sr,
@@ -1497,7 +1497,7 @@ pub mod demo {
             },
             args.buffer_frames as usize,
         );
-        let mut state = CallbackState::<S48> { machine, producer };
+        let mut state = CallbackState::<S048> { machine, producer };
 
         // Open audio host.
         let host = if args.audio_in == "default" {

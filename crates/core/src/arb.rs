@@ -120,7 +120,7 @@ mod strategies {
 
     /// Sample rate strategy: standard audio rates only. (u32 so it can
     /// be used by callers that pick a rate type at the callsite; the
-    /// typed variants S44/S48/... expose the same values via
+    /// typed variants S044/S048/... expose the same values via
     /// `SampleRate::HZ`.)
     pub fn arb_sample_rate() -> impl Strategy<Value = u32> {
         prop_oneof![
@@ -228,19 +228,19 @@ pub use strategies::{
 fn _sample_rate_sealed() -> u32 {
     S48_HZ
 }
-const S48_HZ: u32 = <crate::fxp::S48 as SampleRate>::HZ;
+const S48_HZ: u32 = <crate::fxp::S048 as SampleRate>::HZ;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fxp::S48;
+    use crate::fxp::S048;
     use proptest::prelude::*;
 
     #[test]
     fn pulse_train_shape_basic() {
         let bpm = Tempo::from_bpm_integer(120);
-        let (samples, peaks): (Vec<f32>, Vec<S48>) =
-            pulse_train::<S48>(bpm, 24, Pico(0), 4, 1);
+        let (samples, peaks): (Vec<f32>, Vec<S048>) =
+            pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
         assert_eq!(peaks.len(), 4);
         // 120 BPM × 24 PPQ = 48 pps → 1000 samples between pulses at 48 kHz.
         let expected_spacing_bits = 1000i64 << 16;
@@ -259,8 +259,8 @@ mod tests {
 
     #[test]
     fn pulse_train_zero_pulses_is_empty() {
-        let (samples, peaks): (Vec<f32>, Vec<S48>) =
-            pulse_train::<S48>(Tempo::from_bpm_integer(120), 24, Pico(0), 0, 0);
+        let (samples, peaks): (Vec<f32>, Vec<S048>) =
+            pulse_train::<S048>(Tempo::from_bpm_integer(120), 24, Pico(0), 0, 0);
         assert!(samples.is_empty());
         assert!(peaks.is_empty());
     }
@@ -269,8 +269,8 @@ mod tests {
     fn pulse_train_is_deterministic_in_seed() {
         let bpm = Tempo::from_bpm_integer(140);
         let jitter = Pico(100_000_000); // 100 µs
-        let a: (Vec<f32>, Vec<S48>) = pulse_train::<S48>(bpm, 24, jitter, 8, 42);
-        let b: (Vec<f32>, Vec<S48>) = pulse_train::<S48>(bpm, 24, jitter, 8, 42);
+        let a: (Vec<f32>, Vec<S048>) = pulse_train::<S048>(bpm, 24, jitter, 8, 42);
+        let b: (Vec<f32>, Vec<S048>) = pulse_train::<S048>(bpm, 24, jitter, 8, 42);
         assert_eq!(a.0, b.0);
         assert_eq!(a.1, b.1);
     }

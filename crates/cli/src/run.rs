@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use agogo_core::channel::Channel;
 use agogo_core::fxp::{
-    S44, S48, S88, S96, S176, S192, SampleRate, SampleTime, Tempo, f64_bpm_to_tempo,
+    S044, S048, S088, S096, S176, S192, SampleRate, SampleTime, Tempo, f64_bpm_to_tempo,
 };
 use agogo_core::host::{AudioHost, AudioIo, Config};
 use agogo_core::machine::{Machine, MachineStopHandle, TransportPolicy};
@@ -142,10 +142,10 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     // Static rate dispatch.
     match args.sr {
-        rate if rate == S44::HZ => run_with_rate::<S44>(args, bpm, channels, midi_port_request),
-        rate if rate == S48::HZ => run_with_rate::<S48>(args, bpm, channels, midi_port_request),
-        rate if rate == S88::HZ => run_with_rate::<S88>(args, bpm, channels, midi_port_request),
-        rate if rate == S96::HZ => run_with_rate::<S96>(args, bpm, channels, midi_port_request),
+        rate if rate == S044::HZ => run_with_rate::<S044>(args, bpm, channels, midi_port_request),
+        rate if rate == S048::HZ => run_with_rate::<S048>(args, bpm, channels, midi_port_request),
+        rate if rate == S088::HZ => run_with_rate::<S088>(args, bpm, channels, midi_port_request),
+        rate if rate == S096::HZ => run_with_rate::<S096>(args, bpm, channels, midi_port_request),
         rate if rate == S176::HZ => run_with_rate::<S176>(args, bpm, channels, midi_port_request),
         rate if rate == S192::HZ => run_with_rate::<S192>(args, bpm, channels, midi_port_request),
         other => Err(format!(

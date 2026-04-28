@@ -113,7 +113,7 @@ impl<R: SampleTime> PhaseSource<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fxp::{Tempo, Pico, S48, SampleRate};
+    use crate::fxp::{Tempo, Pico, S048, SampleRate};
     use crate::sync::detect::DetectorConfig;
     use crate::sync::pll::PllSettings;
     use proptest::prelude::*;
@@ -122,7 +122,7 @@ mod tests {
     fn internal_120bpm_at_half_beat() {
         // At 120 BPM and 48 kHz, a beat is 24 000 samples; half a beat
         // is 12 000 samples → phase = 0.5 → Phase = 2^31.
-        let mut src = PhaseSource::<S48>::Internal {
+        let mut src = PhaseSource::<S048>::Internal {
             bpm: Tempo::from_bpm_integer(120),
         };
         let p_half = src.phase_at_sample(12_000);
@@ -134,13 +134,13 @@ mod tests {
 
     #[test]
     fn external_feed_samples_advances_pll() {
-        let detector = PeakDetector::<S48>::new(DetectorConfig {
+        let detector = PeakDetector::<S048>::new(DetectorConfig {
             threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::<S48>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
-        let mut src = PhaseSource::<S48>::External { detector, pll };
-        let (samples, _): (Vec<f32>, Vec<S48>) = crate::arb::pulse_train::<S48>(
+        let pll = Pll::<S048>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
+        let mut src = PhaseSource::<S048>::External { detector, pll };
+        let (samples, _): (Vec<f32>, Vec<S048>) = crate::arb::pulse_train::<S048>(
             Tempo::from_bpm_integer(120),
             24,
             Pico(0),
@@ -154,19 +154,19 @@ mod tests {
 
     #[test]
     fn external_phase_at_sample_projects_analytically() {
-        let detector = PeakDetector::<S48>::new(DetectorConfig {
+        let detector = PeakDetector::<S048>::new(DetectorConfig {
             threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::<S48>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
-        let mut src = PhaseSource::<S48>::External { detector, pll };
+        let pll = Pll::<S048>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
+        let mut src = PhaseSource::<S048>::External { detector, pll };
         let bpm = Tempo::from_bpm_integer(120);
-        let (samples, peaks): (Vec<f32>, Vec<S48>) =
-            crate::arb::pulse_train::<S48>(bpm, 24, Pico(0), 4, 1);
+        let (samples, peaks): (Vec<f32>, Vec<S048>) =
+            crate::arb::pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
         src.feed_samples(&samples, 0);
 
         let last_samples = peaks.last().unwrap().to_bits_q48_16() as f64 / 65_536.0;
-        let spacing = S48::HZ as f64 / (120.0 * 24.0 / 60.0);
+        let spacing = S048::HZ as f64 / (120.0 * 24.0 / 60.0);
         let halfway = (last_samples + spacing * 0.5) as u64;
         let p_half = src.phase_at_sample(halfway);
         let p_half_frac = p_half.0 as f64 / (1u64 << 32) as f64;
@@ -188,12 +188,12 @@ mod tests {
 
     #[test]
     fn external_phase_zero_before_first_pulse() {
-        let detector = PeakDetector::<S48>::new(DetectorConfig {
+        let detector = PeakDetector::<S048>::new(DetectorConfig {
             threshold_q15: 16_384,
             hold_samples: 500,
         });
-        let pll = Pll::<S48>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
-        let mut src = PhaseSource::<S48>::External { detector, pll };
+        let pll = Pll::<S048>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
+        let mut src = PhaseSource::<S048>::External { detector, pll };
         assert_eq!(src.phase_at_sample(0).0, 0);
         assert_eq!(src.phase_at_sample(48_000).0, 0);
     }
@@ -211,14 +211,14 @@ mod tests {
             // difference `p(n+1) - p(n)` may vary by ±1 Q0.32 ULP around
             // the "ideal" increment. Assert that tolerance.
             let bpm = Tempo(bpm_mbpm);
-            let mut src = PhaseSource::<S48>::Internal { bpm };
+            let mut src = PhaseSource::<S048>::Internal { bpm };
             let p1 = src.phase_at_sample(n);
             let p2 = src.phase_at_sample(n + 1);
             let diff = p2.0.wrapping_sub(p1.0);
             // Ideal per-sample increment:
             //   inc = (µBPM · 2^32) / (60·10^6 · HZ).
             let ideal_inc: u128 =
-                (bpm.0 as u128 * (1u128 << 32)) / (60_000_000u128 * S48::HZ as u128);
+                (bpm.0 as u128 * (1u128 << 32)) / (60_000_000u128 * S048::HZ as u128);
             let err = (diff as u128).abs_diff(ideal_inc);
             prop_assert!(
                 err <= 1,
@@ -261,7 +261,7 @@ mod tests {
             last_n: Arc::clone(&last_n),
         };
 
-        let mut src = PhaseSource::<S48>::Custom(Box::new(mock));
+        let mut src = PhaseSource::<S048>::Custom(Box::new(mock));
         assert_eq!(src.phase_at_sample(42), Phase(0x4000_0000));
         assert_eq!(src.phase_at_sample(100), Phase(0x4000_0000));
         src.feed_samples(&[0.1, 0.2], 7);
