@@ -189,14 +189,20 @@ impl ChannelSpec {
                 }
                 "delay" => {
                     // argv boundary: ms (string) → Micro at this
-                    // line. Try i64 ms first — exact, no f64
-                    // round-trip drift (`micro_from_user_ms(51.0)` would
-                    // ceil to 51_001 µs because `0.051 × 10⁶`
-                    // overshoots in f64). Fall back to f64 for
-                    // fractional ms inputs like "10.5". Negative
-                    // delay is rejected here rather than silently
-                    // clamped in into_channel — the user almost
-                    // certainly typed it by mistake.
+                    // line. Three paths in falling priority:
+                    //   1. Bare i64 ms ("51")            — exact.
+                    //   2. Decimal `int.frac` ("51.123") — exact via
+                    //      string split + integer parse, sidesteps
+                    //      f64's inability to represent decimal
+                    //      fractions exactly. This is the form
+                    //      `Display for ChannelSpec` emits, so the
+                    //      Display→parse round-trip lives here.
+                    //   3. f64 fallback                 — covers
+                    //      scientific notation ("1e-3") and other
+                    //      non-canonical user input. Negative delay
+                    //      is rejected here rather than clamped at
+                    //      into_channel — the user almost certainly
+                    //      typed it by mistake.
                     let candidate = if let Ok(ms_int) = v.parse::<i64>() {
                         let us = ms_int.checked_mul(1_000).ok_or_else(|| {
                             ChannelSpecError::BadValue(
@@ -205,6 +211,8 @@ impl ChannelSpec {
                             )
                         })?;
                         Micro(us)
+                    } else if let Some(micro) = parse_decimal_ms(&v) {
+                        micro
                     } else {
                         let ms_f64 = v
                             .parse::<f64>()
@@ -404,6 +412,52 @@ fn micro_from_user_ms(ms: f64) -> Option<Micro> {
         Extended::Finite(m) => Some(m),
         Extended::PosInf | Extended::NegInf => None,
     }
+}
+
+/// Parse a `[-]int.frac` decimal-millisecond string to `Micro` exactly.
+/// Returns `None` if `s` doesn't match that grammar — caller falls back
+/// to the f64 path for scientific notation and other non-canonical
+/// forms.
+///
+/// This is the inverse of `Display for ChannelSpec`'s
+/// `delay={ms_int}.{frac:03}` form. f64 cannot represent decimal
+/// fractions like `0.116` exactly — `0.116 × 10⁻³` round-trips
+/// through `F064FD06.ceil` to `Micro(117)`, one µs above the source
+/// value. Splitting on `.` and parsing both halves as integers
+/// sidesteps the float entirely.
+fn parse_decimal_ms(s: &str) -> Option<Micro> {
+    let (int_str, frac_str) = s.split_once('.')?;
+    if int_str.is_empty() || frac_str.is_empty() {
+        return None;
+    }
+    // Both halves must be all-digits (with the integer part optionally
+    // signed). Non-canonical forms are left to other parsing paths.
+    let signed_int = int_str.parse::<i64>().ok()?;
+    if !frac_str.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    // Convert frac_str to whole µs: `Display` always emits exactly 3
+    // digits, but accept any digit count so user input like
+    // `delay=1.5` and `delay=0.123456` parses sensibly. Right-pad to
+    // 3 digits for shorter inputs; truncate (toward zero, the
+    // user-friendly direction) for longer inputs. The empty case is
+    // unreachable — `frac_str.is_empty()` returns `None` above.
+    let frac_us: i64 = match frac_str.len() {
+        1 => frac_str.parse::<i64>().ok()? * 100,
+        2 => frac_str.parse::<i64>().ok()? * 10,
+        3 => frac_str.parse::<i64>().ok()?,
+        _ => frac_str[..3].parse::<i64>().ok()?,
+    };
+    let abs_us = signed_int
+        .checked_abs()?
+        .checked_mul(1_000)?
+        .checked_add(frac_us)?;
+    let signed_us = if int_str.starts_with('-') {
+        abs_us.checked_neg()?
+    } else {
+        abs_us
+    };
+    Some(Micro(signed_us))
 }
 
 /// Tokenise a `key=val[,key=val]*` string into key/value pairs.
@@ -707,6 +761,34 @@ mod tests {
             msg.contains("negative") && msg.contains("delay"),
             "expected negative-delay error, got: {msg}",
         );
+    }
+
+    #[test]
+    fn parse_decimal_ms_exact() {
+        // Display→parse round-trip on canonical 3-digit fractional
+        // form is bit-exact (no f64 drift).
+        assert_eq!(parse_decimal_ms("0.116"), Some(Micro(116)));
+        assert_eq!(parse_decimal_ms("51.123"), Some(Micro(51_123)));
+        assert_eq!(parse_decimal_ms("300.000"), Some(Micro(300_000)));
+        // Shorter fractional inputs right-pad to 3 digits.
+        assert_eq!(parse_decimal_ms("1.5"), Some(Micro(1_500)));
+        assert_eq!(parse_decimal_ms("1.50"), Some(Micro(1_500)));
+        // Longer inputs truncate at µs precision (toward zero).
+        assert_eq!(parse_decimal_ms("0.123456"), Some(Micro(123)));
+        // Non-canonical forms decline so the f64 fallback handles them.
+        assert_eq!(parse_decimal_ms("1e-3"), None);
+        assert_eq!(parse_decimal_ms("1."), None);
+        assert_eq!(parse_decimal_ms(".5"), None);
+        assert_eq!(parse_decimal_ms("abc"), None);
+    }
+
+    #[test]
+    fn parse_delay_decimal_no_f64_drift() {
+        // `Display for ChannelSpec` emits `delay=0.116` for
+        // `Micro(116)`. The f64 path would ceil to `Micro(117)` — the
+        // string-decimal fast path keeps it exact.
+        let spec = ChannelSpec::parse("dev=midi,delay=0.116", &[]).unwrap();
+        assert_eq!(spec.delay, Micro(116));
     }
 
     // Display + round-trip tests moved to super::super::display::tests
