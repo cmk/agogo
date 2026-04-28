@@ -27,7 +27,6 @@
 //! `f64` field (`delay_ms`) crosses via the `F064FD06` Conn per CLAUDE.md
 //! float exception 4.
 
-
 pub mod display;
 pub mod error;
 pub mod parser;
