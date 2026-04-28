@@ -43,6 +43,9 @@ use crate::time::tbase::TBase;
 use connections::extended::Extended;
 use connections::float::ExtendedFloat;
 
+pub mod error;
+pub use error::ChannelSpecError;
+
 /// Parsed `--ch` spec.
 ///
 /// Audit P4 (Plan 22): the spec carries no routing-target tag —
@@ -85,22 +88,6 @@ pub struct ChannelSpec {
     /// the most idiomatic `grid=t1` case but the mechanism applies
     /// to any grid).
     pub bars: Option<NonZeroU16>,
-}
-
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-pub enum ChannelSpecError {
-    #[error("channel spec: empty key")]
-    EmptyKey,
-    #[error("channel spec: unknown key `{0}`")]
-    UnknownKey(String),
-    #[error("channel spec: missing `{0}`")]
-    MissingKey(&'static str),
-    #[error("channel spec: bad value for `{0}`: {1}")]
-    BadValue(&'static str, String),
-    #[error("channel spec: dev=audio requires v0.4 (out/audio)")]
-    AudioDeferred,
-    #[error("channel spec: malformed (expected `key=val,...`): {0}")]
-    Malformed(String),
 }
 
 impl ChannelSpec {
