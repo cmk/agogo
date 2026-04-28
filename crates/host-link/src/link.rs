@@ -18,10 +18,11 @@
 use std::num::NonZeroU32;
 
 use agogo_core::fxp::{
-    Extended, ExtendedFloat, F064FD06, Micro, Phase, Quantum, Tempo, f64_phase_to_phase,
-    tempo_to_f64_bpm,
+    Extended, ExtendedFloat, F064FD06, Micro, Phase, Tempo, f64_phase_to_phase, tempo_to_f64_bpm,
 };
 use agogo_core::sync::PhaseSourceImpl;
+
+use crate::quantum::Quantum;
 use rusty_link::{AblLink, SessionState};
 
 /// Static mapping from stream-global sample indices to Link's

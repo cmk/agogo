@@ -16,10 +16,10 @@
 
 #![cfg(feature = "rusty-link")]
 
-use agogo_core::fxp::{Quantum, Tempo};
+use agogo_core::fxp::Tempo;
 use agogo_core::testing::fixture_or_skip;
 use agogo_host_link::{
-    HostTimeAnchor, LinkSession, LinkWriteConfig, TransportState,
+    HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum, TransportState,
 };
 use rusty_link::{AblLink, SessionState};
 use std::num::NonZeroU32;

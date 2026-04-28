@@ -15,6 +15,10 @@
 //! without `ext/rusty_link` being present — CI relies on this.
 //! `agogo-cli --features link` activates `rusty-link` transitively.
 
+pub mod quantum;
+
+pub use quantum::{Quantum, f64_beats_to_quantum, parse_quantum_from_beats};
+
 #[cfg(feature = "rusty-link")]
 pub mod link;
 

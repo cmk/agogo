@@ -443,18 +443,22 @@ impl ChannelSpec {
         })
     }
 
-    /// Parsed `snap-quantum-us=N` intent, if present. Returns
-    /// `Option<Quantum>` for the orchestrator to feed into
-    /// `LinkSession::snap_offset_for` at startup.
+    /// Parsed `snap-quantum-us=N` intent, if present. Returns the raw
+    /// microbeat count as `Option<Micro>`; the orchestrator wraps it
+    /// in `agogo_host_link::Quantum` at the host-link boundary.
+    ///
+    /// Plan 2026-04-28-03 T4 changed the return type from
+    /// `Option<Quantum>` to `Option<Micro>`: `Quantum` is a
+    /// host-link-shaped type and `core` shouldn't produce it. The
+    /// wrap happens where it's consumed (`LinkSession::snap_offset_for`).
     ///
     /// Audit P2 (Plan 20) dropped `snap_to_quantum` from the runtime
     /// `Channel` because the field was never read in production
     /// (`arm_channel` was test-only). The intent now lives only on
     /// `ChannelSpec`; orchestrator wiring that actually applies the
     /// snap to `Channel.offset` is a follow-up.
-    pub fn snap_intent(&self) -> Option<crate::fxp::Quantum> {
-        self.snap_to_quantum_micro
-            .map(|m| crate::fxp::Quantum(Micro(m)))
+    pub fn snap_intent(&self) -> Option<Micro> {
+        self.snap_to_quantum_micro.map(Micro)
     }
 }
 
@@ -1281,7 +1285,7 @@ mod tests {
 
     proptest! {
         /// `snap-quantum-us=N` parsed back through `snap_intent()`
-        /// recovers `Some(Quantum(Micro(N)))` for every signed `i64`.
+        /// recovers `Some(Micro(N))` for every signed `i64`.
         /// Generator spans the full domain — the parse path stores
         /// the raw `i64` and `snap_intent` just rewraps; bounding
         /// would hide nothing.
@@ -1290,10 +1294,7 @@ mod tests {
             let s = format!("dev=midi,grid=t4,snap-quantum-us={n}");
             let spec = ChannelSpec::parse(&s, &[])
                 .map_err(|e| TestCaseError::fail(format!("parse `{s}`: {e}")))?;
-            prop_assert_eq!(
-                spec.snap_intent(),
-                Some(crate::fxp::Quantum(Micro(n)))
-            );
+            prop_assert_eq!(spec.snap_intent(), Some(Micro(n)));
         }
     }
 }

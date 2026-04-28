@@ -207,8 +207,8 @@ enum LinkSub {
         /// snap-arming path via `ChannelSpec::snap_intent` +
         /// `LinkSession::snap_offset_for`; ignored by the bare
         /// `link transport` runner).
-        #[bpaf(long, argument::<String>("QUANTUM"), parse(parse_quantum_from_beats), fallback(agogo_core::fxp::Quantum::from_bars(4)))]
-        quantum: agogo_core::fxp::Quantum,
+        #[bpaf(long, argument::<String>("QUANTUM"), parse(parse_quantum_from_beats), fallback(agogo_host_link::Quantum::from_bars(4)))]
+        quantum: agogo_host_link::Quantum,
         /// Sample rate (bound for the anchor; transport path itself
         /// doesn't use it, but the anchor is non-optional).
         #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
@@ -371,22 +371,15 @@ pub(crate) fn parse_bpm_to_tempo(s: String) -> Result<agogo_core::fxp::Tempo, St
 
 /// bpaf parser: beats `<f64>` → `Quantum` at the argv-handler
 /// boundary. Used by both `--link-quantum` (run) and `--quantum`
-/// (link transport); errors are flag-agnostic. Only referenced
-/// under `link` / `run` features; allow dead_code so a
-/// default-feature build doesn't warn.
-#[allow(dead_code)]
-pub(crate) fn parse_quantum_from_beats(s: String) -> Result<agogo_core::fxp::Quantum, String> {
-    use agogo_core::fxp::f64_beats_to_quantum;
-    let f: f64 = s
-        .parse()
-        .map_err(|e| format!("quantum value {s}: not a number ({e})"))?;
-    if !f.is_finite() || f <= 0.0 {
-        return Err(format!(
-            "quantum value {f} invalid (must be finite and > 0)"
-        ));
-    }
-    Ok(f64_beats_to_quantum(f))
-}
+/// (link transport).
+///
+/// Plan 2026-04-28-03 T4 moved the implementation to
+/// `agogo_host_link::quantum::parse_quantum_from_beats` (the parser
+/// belongs alongside the type it produces). Re-exported here under
+/// `feature = "link"` so existing bpaf attributes
+/// (`parse(parse_quantum_from_beats)`) keep resolving.
+#[cfg(feature = "link")]
+pub(crate) use agogo_host_link::parse_quantum_from_beats;
 
 fn main() {
     let cli = cli().run();
@@ -779,8 +772,8 @@ pub mod link_commands {
     //! daemon. `transport` drives the FSM headlessly; audio-callback
     //! integration (real `agogo run --link`) lands with Plan 05.
 
-    use agogo_core::fxp::{Quantum, Tempo, tempo_to_f64_bpm};
-    use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig};
+    use agogo_core::fxp::{Tempo, tempo_to_f64_bpm};
+    use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum};
     use std::num::NonZeroU32;
     use std::thread::sleep;
     use std::time::{Duration, Instant};

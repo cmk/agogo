@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use agogo_core::channel::Channel;
 use agogo_core::fxp::{
-    Quantum, S044, S048, S088, S096, S176, S192, SampleRate, SampleTime, Tempo, tempo_to_f64_bpm,
+    S044, S048, S088, S096, S176, S192, SampleRate, SampleTime, Tempo, tempo_to_f64_bpm,
 };
 use agogo_core::host::{AudioHost, AudioIo, Config};
 use agogo_core::machine::{Machine, MachineStopHandle, TransportPolicy};
@@ -29,7 +29,7 @@ use agogo_host_cpal::CpalHost;
 use agogo_host_cpal::cpal::callback::CallbackState;
 use agogo_host_cpal::cpal::control::spsc;
 use agogo_host_link::{
-    HostTimeAnchor, LinkPhaseSource, LinkSession, LinkSessionHandle, LinkWriteConfig,
+    HostTimeAnchor, LinkPhaseSource, LinkSession, LinkSessionHandle, LinkWriteConfig, Quantum,
 };
 use agogo_host_midi::MidirSink;
 use bpaf::Bpaf;
@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn parse_quantum_from_beats_accepts_4_5() {
         let got = parse_quantum_from_beats("4.5".to_string()).unwrap();
-        assert_eq!(got, agogo_core::fxp::f64_beats_to_quantum(4.5));
+        assert_eq!(got, agogo_host_link::f64_beats_to_quantum(4.5));
     }
 
     #[test]
