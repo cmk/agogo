@@ -132,9 +132,15 @@ core = ["dep:project-core"]
   is now allowlisted in its place — vendored-from-connections, same
   justification); and Plan 2026-04-28-03 T4 moved `Quantum` +
   `f64_beats_to_quantum` to `crates/host-link/src/quantum.rs` (added
-  to the allowlist as a Link-FFI parity helper). The current
-  allowlist is the 17 entries in `scripts/check-floats.sh::ALLOWED`;
-  see that script's header for a one-line justification per file.
+  to the allowlist as a Link-FFI parity helper). Plan 2026-04-28-05
+  T1/T3/T5 added `cli/src/sync_trace.rs`, `cli/src/time_sched.rs`,
+  and `cli/src/link_probe.rs` when those inline modules were
+  extracted from `cli/src/main.rs`'s 1722-line kitchen sink; each
+  inherits its predecessor's allowlist eligibility (same exception
+  classes, same boundaries, just split into sibling modules). The
+  current allowlist is the 20 entries in
+  `scripts/check-floats.sh::ALLOWED`; see that script's header for
+  a one-line justification per file.
   The annotation comments above (`// PI-exempt`, `// PCM ABI`,
   `// argv boundary`, `// ABI-local`, `// Link FFI`) are
   reviewer-oriented markers inside allowlisted files — they're not
