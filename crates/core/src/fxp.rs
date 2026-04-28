@@ -185,7 +185,7 @@ impl Tempo {
     }
 
     /// `|self - other|` as `u32` via `u32::abs_diff` — no
-    /// sign-flipping through i64. Replaces four open-coded
+    /// sign-flipping through i64. Replaces five open-coded
     /// `(a.0 as i64 - b.0 as i64).unsigned_abs()` sites in
     /// `sync::pll`.
     pub const fn abs_diff(self, other: Tempo) -> u32 {
@@ -615,6 +615,24 @@ mod tests {
             let got = tempo_to_hz(bpm, ppq);
             let expected = (b as f64) * (ppq as f64) / 60.0;
             prop_assert!((got - expected).abs() < 1e-9);
+        }
+
+        /// `tempo_to_f64_bpm` round-trip across the full `u32` domain.
+        /// The function is the canonical Tempo→f64 helper used in 7+
+        /// sites (CLI display, host-link FFI, arb fixtures); without
+        /// this, a regression in `F064FD06.inner` or `I064U032.inner`
+        /// would only be caught indirectly via `tempo_to_hz_matches_formula`,
+        /// which exercises only integer 30..=400 BPM. Independent
+        /// reference: `raw / 1_000_000.0` — the same arithmetic the
+        /// helper composes via lawful Conns.
+        #[test]
+        fn tempo_to_f64_bpm_full_domain(raw in any::<u32>()) {
+            let got = tempo_to_f64_bpm(Tempo(raw));
+            let expected = raw as f64 / 1_000_000.0;
+            prop_assert!(
+                (got - expected).abs() < 1e-9,
+                "tempo_to_f64_bpm({raw}) = {got}, expected {expected}",
+            );
         }
 
         #[test]
