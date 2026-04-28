@@ -9,9 +9,11 @@
 # the local branch silently drops it on the floor — the merge takes
 # the remote head, and the local commit stays orphaned in the reflog.
 #
-# This script is the local-side enforcement: it refuses to invoke
-# `gh pr merge` if the current branch is ahead of its remote tracking
-# ref, regardless of why. Re-run after `git push`.
+# This script is the local-side enforcement: it resolves the PR's head
+# branch (via `gh pr view`, *not* the currently-checked-out branch —
+# safe_merge.sh 17 might be invoked from main), then refuses to invoke
+# `gh pr merge` if that PR's local branch is ahead of its remote
+# tracking ref. Re-run after `git push`.
 #
 # Usage:
 #   scripts/safe_merge.sh <gh-pr-merge-args...>
@@ -19,6 +21,7 @@
 # Examples:
 #   scripts/safe_merge.sh 17                      # interactive
 #   scripts/safe_merge.sh 17 --rebase --delete-branch
+#   scripts/safe_merge.sh --rebase                # current branch's open PR
 #
 # All arguments are forwarded verbatim to `gh pr merge` after the
 # guard passes.
@@ -28,16 +31,30 @@ if [ $# -lt 1 ]; then
   cat >&2 <<'USAGE'
 usage: safe_merge.sh <gh-pr-merge-args...>
 
-Refuses to run if the current branch is ahead of its remote tracking
-ref. All arguments are forwarded to `gh pr merge` once the guard
-passes.
+Resolves the PR's head branch via `gh pr view`, then refuses to run
+if that local branch is ahead of its remote tracking ref. All
+arguments are forwarded to `gh pr merge` once the guard passes.
 USAGE
   exit 64
 fi
 
-branch=$(git branch --show-current)
-if [ -z "$branch" ]; then
-  echo "safe_merge.sh: detached HEAD; nothing to compare against." >&2
+# Resolve the PR's head ref. `gh pr view` accepts the same first-arg
+# shapes as `gh pr merge` — number, URL, branch name, or no arg
+# (defaulting to the current branch's open PR). The first arg is a
+# selector iff it doesn't start with `-`.
+if [ $# -ge 1 ] && [ "${1#-}" = "$1" ]; then
+  pr_selector=("$1")
+else
+  pr_selector=()
+fi
+
+if ! head_ref=$(gh pr view "${pr_selector[@]}" --json headRefName --jq .headRefName 2>/dev/null); then
+  echo "safe_merge.sh: failed to resolve PR head ref via 'gh pr view ${pr_selector[*]}'." >&2
+  echo "  is the PR specifier valid, and are you authenticated to gh?" >&2
+  exit 1
+fi
+if [ -z "$head_ref" ]; then
+  echo "safe_merge.sh: 'gh pr view' returned empty headRefName." >&2
   exit 1
 fi
 
@@ -45,19 +62,26 @@ fi
 # silent failure here (offline, auth) is fine — the next check will
 # still compare against whatever's local, and the user will see if
 # something's wrong.
-git fetch --quiet origin "$branch" || true
+git fetch --quiet origin "$head_ref" || true
 
-upstream="origin/$branch"
+upstream="origin/$head_ref"
 if ! git rev-parse --verify --quiet "$upstream" >/dev/null; then
   echo "safe_merge.sh: no remote tracking ref '$upstream'." >&2
   echo "  push the branch first, then re-run." >&2
   exit 1
 fi
 
-ahead=$(git log "$upstream..HEAD" --oneline)
+# Resolve the local copy of the PR's head ref. If the branch isn't
+# checked out anywhere, there can't be unpushed local commits — the
+# guard isn't meaningful, and the merge is safe.
+if ! local_sha=$(git rev-parse --verify --quiet "refs/heads/$head_ref"); then
+  exec gh pr merge "$@"
+fi
+
+ahead=$(git log "$upstream..$local_sha" --oneline)
 if [ -n "$ahead" ]; then
   cat >&2 <<EOF
-safe_merge.sh: REFUSING TO MERGE — local branch is ahead of $upstream.
+safe_merge.sh: REFUSING TO MERGE — local branch '$head_ref' is ahead of $upstream.
 
 Unpushed commits would be silently dropped by the merge:
 
@@ -66,7 +90,7 @@ $ahead
 Per doc/workflow.md, the merge transition starts from gh_review (push
 complete), not replies_amended. Push first, then re-run:
 
-    git push
+    git push origin $head_ref
     $0 $*
 
 EOF
