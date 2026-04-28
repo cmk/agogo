@@ -350,31 +350,32 @@ item and skips any id already present, so running it repeatedly only
 appends new comments. The result is one file per PR containing the full
 local + GitHub review history in order.
 
-Once the findings are addressed in a fix commit **locally (not yet
-pushed)**, run `/reply-reviews <N>`. The command does the whole round
+Once the findings are addressed as **uncommitted edits in the working
+tree**, run `/reply-reviews <N>`. The command does the whole round
 in order: posts replies to each unresolved thread, runs
 `scripts/pull_reviews.py` to mirror the replies into `review-NNNNN.md`,
-and `git commit --amend`s the mutated doc into the same fix commit. You
-then `git push` once — code + replies + review doc land in a single
-round trip.
+then makes ONE atomic commit containing both the code edits and the
+mirrored doc. You then `git push` once — code + replies + review doc
+land in a single round trip.
 
-**Do not push before running `/reply-reviews`.** The amend-into-fix-commit
-step requires the commit to be unpushed. Pushing first strands the
-mirrored replies in the working tree and forces either a wasted `doc:`
-commit (extra CI round-trip) or a force-push that this workflow is
-designed to avoid. `/reply-reviews` enforces
-this: it refuses to run if HEAD is not ahead of `origin/<branch>` while
-unreplied threads still exist.
+**Do not commit the fix yourself before running `/reply-reviews`.**
+The command runs on the `gh_review → items_pulled → round_unpushed`
+arrow per `doc/workflow.md` — it expects to start from `gh_review`
+(local at-or-behind origin) and produce the round commit itself.
+Pre-committing a fix would put the branch at an unpushed-state that
+breaks the precondition; if you have a stranded pre-existing fix
+commit, push it first, then re-run. `/reply-reviews` refuses to run
+if the branch already has unpushed commits.
 
-**Do not merge before pushing the amended fix commit.** Per
+**Do not merge before pushing the round commit.** Per
 `doc/workflow.md`'s state machine, the merge transition is
-`gh_review → merged` — there is no edge from `replies_amended → merged`.
-Merging from `replies_amended` (the state after `/reply-reviews`
-amends but before push) silently drops the local commit because
-`gh pr merge` is GitHub-side and doesn't see local state. Use
-`scripts/safe_merge.sh <pr-args>` instead of `gh pr merge` —
+`gh_review → merged` — there is no edge from `round_unpushed → merged`.
+Merging from `round_unpushed` (the state after `/reply-reviews`
+makes its commit but before push) silently drops the local commit
+because `gh pr merge` is GitHub-side and doesn't see local state.
+Use `scripts/safe_merge.sh <pr-args>` instead of `gh pr merge` —
 the wrapper refuses to invoke the merge while the local branch
-is ahead of origin. Recovery (if a merge already dropped a fix
+is ahead of origin. Recovery (if a merge already dropped a round
 commit): cherry-pick the stranded SHA into the next plan branch's
 first commit per the bundle-into-next-plan convention; don't open
 a tiny standalone PR.
