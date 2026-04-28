@@ -124,33 +124,33 @@ core = ["dep:project-core"]
      within 1–2 lines. Mark `// Link FFI`.
 
   `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
-  lives outside the file-level allowlist (the script encodes
-  sixteen exception modules — the ten from Plan 13, plus four
-  added in Plan 14: `crates/core/src/machine.rs` (PCM ABI for
-  `AudioIo` test construction), `crates/core/src/machine/spec.rs`
-  (argv-boundary for `--ch delay`),
-  `crates/host-link/src/source.rs` (PCM ABI for
-  `PhaseSourceImpl::feed_samples`'s `&[f32]` slice param), and
-  `crates/cli/src/run.rs` (argv parsers for `--bpm` and
-  `--link-quantum`); plus two added in Plan 24:
-  `crates/core/src/time/decimal.rs` and
-  `crates/core/src/time/sample.rs` — both vendored from
-  `connections` and intrinsically f64-internal in their
-  `F064FD??` / `FD12↔Sxxx` Conn machinery (the same files were
-  upstream-allowlisted for the same reason). The
-  annotation comments above are reviewer-oriented markers inside
-  allowlisted files — they're not enforced by the grep gate itself,
-  which would need a full Rust parser to classify each use. Pattern 9
-  in `doc/reviews/review-calibration.md` is the complementary review
+  lives outside the file-level allowlist. Plan 2026-04-28-03 T5
+  reshuffled the entries when `crates/core/src/fxp.rs` was deleted:
+  its argv + PI-exempt content moved to `crates/core/src/boundary.rs`
+  (replaces the `fxp.rs` entry); `time/decimal.rs` came off the list
+  because the `float_conn!` macro split into `time/float.rs` (which
+  is now allowlisted in its place — vendored-from-connections, same
+  justification); and Plan 2026-04-28-03 T4 moved `Quantum` +
+  `f64_beats_to_quantum` to `crates/host-link/src/quantum.rs` (added
+  to the allowlist as a Link-FFI parity helper). The current
+  allowlist is the 17 entries in `scripts/check-floats.sh::ALLOWED`;
+  see that script's header for a one-line justification per file.
+  The annotation comments above (`// PI-exempt`, `// PCM ABI`,
+  `// argv boundary`, `// ABI-local`, `// Link FFI`) are
+  reviewer-oriented markers inside allowlisted files — they're not
+  enforced by the grep gate itself, which would need a full Rust
+  parser to classify each use. Pattern 9 in
+  `doc/reviews/review-calibration.md` is the complementary review
   check that catches stored-state violations the gate misses.
 
 - **Every numerical conversion comes from a named `Conn` (or a
   Conn-lookalike with proptested adjoint laws).** Bespoke `fn
-  f64_some_thing_to_other(x: f64) -> Other` helpers in `fxp.rs` are
-  only allowed for types that can't be expressed as a lawful
+  f64_some_thing_to_other(x: f64) -> Other` helpers (now living in
+  `crate::boundary` after Plan 2026-04-28-03 T5 deleted `fxp.rs`)
+  are only allowed for types that can't be expressed as a lawful
   `Conn` (e.g. `Phase` is a wrapping quotient onto a torus, not a
   monotone map — the bespoke `f64_phase_to_phase` is the one
-  legitimate exception). Naming follows the conventions in the 
+  legitimate exception). Naming follows the conventions in the
   upstream library:
   - The total identifier is **exactly 8 ASCII chars**. Names shorter
     than 8 chars (e.g. the legacy `S88S44`) are not permitted.

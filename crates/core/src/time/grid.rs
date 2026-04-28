@@ -140,17 +140,45 @@ impl Grid {
     /// within each track; binary → triplet → quintuplet → p).
     pub const ALL: [Grid; 36] = [
         // Binary (3840 → 15)
-        Grid::T1, Grid::T2, Grid::T4, Grid::T8, Grid::T16,
-        Grid::T32, Grid::T64, Grid::T128, Grid::T256,
+        Grid::T1,
+        Grid::T2,
+        Grid::T4,
+        Grid::T8,
+        Grid::T16,
+        Grid::T32,
+        Grid::T64,
+        Grid::T128,
+        Grid::T256,
         // Triplet (1280 → 5)
-        Grid::T2T, Grid::T4T, Grid::T8T, Grid::T16T, Grid::T32T,
-        Grid::T64T, Grid::T128T, Grid::T256T, Grid::T512T,
+        Grid::T2T,
+        Grid::T4T,
+        Grid::T8T,
+        Grid::T16T,
+        Grid::T32T,
+        Grid::T64T,
+        Grid::T128T,
+        Grid::T256T,
+        Grid::T512T,
         // Quintuplet (768 → 3)
-        Grid::T2Q, Grid::T4Q, Grid::T8Q, Grid::T16Q, Grid::T32Q,
-        Grid::T64Q, Grid::T128Q, Grid::T256Q, Grid::T512Q,
+        Grid::T2Q,
+        Grid::T4Q,
+        Grid::T8Q,
+        Grid::T16Q,
+        Grid::T32Q,
+        Grid::T64Q,
+        Grid::T128Q,
+        Grid::T256Q,
+        Grid::T512Q,
         // 15-tuplet (256 → 1)
-        Grid::T2P, Grid::T4P, Grid::T8P, Grid::T16P, Grid::T32P,
-        Grid::T64P, Grid::T128P, Grid::T256P, Grid::T512P,
+        Grid::T2P,
+        Grid::T4P,
+        Grid::T8P,
+        Grid::T16P,
+        Grid::T32P,
+        Grid::T64P,
+        Grid::T128P,
+        Grid::T256P,
+        Grid::T512P,
     ];
 }
 
@@ -280,15 +308,13 @@ impl std::str::FromStr for Grid {
         // non-binary → coord_n.exp() = plan_exp - 1.
         let coord_exp = if t || q {
             plan_exp.checked_sub(1).ok_or_else(|| {
-                format!(
-                    "non-binary Grid name needs plan_exp ≥ 1 (e.g. T2T, not T1T): {s}"
-                )
+                format!("non-binary Grid name needs plan_exp ≥ 1 (e.g. T2T, not T1T): {s}")
             })?
         } else {
             plan_exp
         };
-        let n = TBase::from_exp(coord_exp)
-            .ok_or_else(|| format!("Grid index out of range: {s}"))?;
+        let n =
+            TBase::from_exp(coord_exp).ok_or_else(|| format!("Grid index out of range: {s}"))?;
         Ok(Grid { n, t, q })
     }
 }
@@ -362,14 +388,8 @@ mod tests {
             let tc = g.tick_count();
             let has_3 = tc % 3 == 0;
             let has_5 = tc % 5 == 0;
-            assert_eq!(
-                has_3, !g.t,
-                "factor-3 mismatch for {g:?} (tc={tc})"
-            );
-            assert_eq!(
-                has_5, !g.q,
-                "factor-5 mismatch for {g:?} (tc={tc})"
-            );
+            assert_eq!(has_3, !g.t, "factor-3 mismatch for {g:?} (tc={tc})");
+            assert_eq!(has_5, !g.q, "factor-5 mismatch for {g:?} (tc={tc})");
         }
     }
 

@@ -23,9 +23,7 @@
 //! [`crate::boundary::f64_bpm_to_tempo`] / [`crate::boundary::f64_phase_to_phase`]
 //! at the `PllOutput` boundary.
 
-use crate::boundary::{
-    bits_q48_16_to_seconds, f64_bpm_to_tempo, f64_phase_to_phase, tempo_to_hz,
-};
+use crate::boundary::{bits_q48_16_to_seconds, f64_bpm_to_tempo, f64_phase_to_phase, tempo_to_hz};
 use crate::sync::phase::Phase;
 use crate::time::sample::SampleTime;
 use crate::time::tempo::Tempo;
@@ -169,8 +167,7 @@ impl<R: SampleTime> Pll<R> {
             self.state.integrator += self.cfg.ki * phase_error;
             let clamp_frac = self.cfg.clamp_hz / self.nominal_freq_hz;
             let min_integrator = (-clamp_frac).max(-1.0 + f64::EPSILON);
-            self.state.integrator =
-                self.state.integrator.clamp(min_integrator, clamp_frac);
+            self.state.integrator = self.state.integrator.clamp(min_integrator, clamp_frac);
 
             let correction = self.cfg.kp * phase_error + self.state.integrator;
             self.state.freq_hz = self.nominal_freq_hz * (1.0 + correction);
@@ -232,8 +229,7 @@ mod tests {
     fn default_settings_track_120_at_48k() {
         let ppq = 24u32;
         let bpm = Tempo::from_bpm_integer(120);
-        let (_, peaks): (Vec<f32>, Vec<S048>) =
-            pulse_train::<S048>(bpm, ppq, Pico(0), 48, 1);
+        let (_, peaks): (Vec<f32>, Vec<S048>) = pulse_train::<S048>(bpm, ppq, Pico(0), 48, 1);
         let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, ppq);
         let mut last = Tempo::ZERO;
         for &p in &peaks {
@@ -419,7 +415,8 @@ mod tests {
         assert!(
             n_fast < n_slow,
             "expected higher bandwidth to settle faster: ω_n=0.15→{} pulses vs ω_n=0.05→{}",
-            n_fast, n_slow
+            n_fast,
+            n_slow
         );
     }
 }

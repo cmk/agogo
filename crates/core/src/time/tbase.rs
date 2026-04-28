@@ -118,9 +118,7 @@ impl std::str::FromStr for TBase {
             .map_err(|_| format!("TBase index must be a positive integer: {s}"))?;
         // `n` must be a power of 2 in [1, 256].
         if n == 0 || !n.is_power_of_two() || n > 256 {
-            return Err(format!(
-                "TBase index must be a power of 2 in [1, 256]: {s}"
-            ));
+            return Err(format!("TBase index must be a power of 2 in [1, 256]: {s}"));
         }
         let e = n.trailing_zeros();
         TBase::from_exp(e).ok_or_else(|| format!("TBase index out of range: {s}"))

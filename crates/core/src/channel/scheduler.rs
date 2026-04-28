@@ -14,9 +14,9 @@
 use crate::channel::role::ChannelCommon;
 use crate::channel::transform::{MAX_DELAY, ScheduledEvent, micro_to_samples};
 use crate::sync::sample_tick::SampleTickConn;
+use crate::time::decimal::Micro;
 use crate::time::swing;
 use crate::time::tick::Tick;
-use crate::time::decimal::Micro;
 
 /// Conservative upper bound on the number of [`ScheduledEvent`]s
 /// that can land in one buffer of `frames` samples.
@@ -154,7 +154,11 @@ mod tests {
     use proptest::prelude::*;
 
     fn stc_120_48k() -> SampleTickConn {
-        SampleTickConn::new(48_000, crate::time::tempo::Tempo::from_bpm_integer(120), 960)
+        SampleTickConn::new(
+            48_000,
+            crate::time::tempo::Tempo::from_bpm_integer(120),
+            960,
+        )
     }
 
     /// Bare `ChannelCommon` for scheduler tests — `tick_stream`
@@ -225,11 +229,10 @@ mod tests {
             let resolution = d.n;
             (
                 Just(d),
-                (-(cap as i32)..=(cap as i32))
-                    .prop_map(move |amount| SwingConfig {
-                        resolution,
-                        amount: amount as i8,
-                    }),
+                (-(cap as i32)..=(cap as i32)).prop_map(move |amount| SwingConfig {
+                    resolution,
+                    amount: amount as i8,
+                }),
             )
         })
     }

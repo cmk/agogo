@@ -184,8 +184,8 @@ mod tests {
 
         let via_tick: u64 = stc.inner(Tick(960));
         let pico_at_one_beat = Pico(500_000_000_000);
-        let via_pico: i64 =
-            crate::boundary::pico_to_samples(pico_at_one_beat, 48_000).expect("48 kHz is supported");
+        let via_pico: i64 = crate::boundary::pico_to_samples(pico_at_one_beat, 48_000)
+            .expect("48 kHz is supported");
         assert_eq!(via_tick, 24_000);
         assert_eq!(via_pico, 24_000);
         assert_eq!(via_tick as i64, via_pico);
@@ -304,7 +304,8 @@ mod tests {
             let lhs = u128::from(sample) * u128::from(stc.bpm().0) * u128::from(stc.ppqn());
             let rhs = u128::from(tick.0) * u128::from(stc.sr()) * 60 * 1_000_000;
             assert_eq!(
-                lhs, rhs,
+                lhs,
+                rhs,
                 "tick {} not exact at sr={} bpm_µ={} ppqn={} (sample={})",
                 tick.0,
                 stc.sr(),

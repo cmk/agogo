@@ -128,8 +128,7 @@ mod tests {
 
     #[test]
     fn parens_when_imply_inside_meet() {
-        let inner =
-            Expr::Imply(Box::new(atom(Grid::T16)), Box::new(atom(Grid::T8)), s(0, 0));
+        let inner = Expr::Imply(Box::new(atom(Grid::T16)), Box::new(atom(Grid::T8)), s(0, 0));
         let e = Expr::Meet(Box::new(inner), Box::new(atom(Grid::T4)), s(0, 0));
         assert_eq!(e.to_string(), "(t16>t8)&t4");
     }

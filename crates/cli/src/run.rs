@@ -17,13 +17,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use agogo_core::channel::Channel;
 use agogo_core::boundary::tempo_to_f64_bpm;
-use agogo_core::time::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
-use agogo_core::time::tempo::Tempo;
+use agogo_core::channel::Channel;
 use agogo_core::host::{AudioHost, AudioIo, Config};
 use agogo_core::machine::{Machine, MachineStopHandle, TransportPolicy};
 use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo_core::time::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
+use agogo_core::time::tempo::Tempo;
 use agogo_core::time::tick::PPQN;
 use agogo_host_cpal::CpalHost;
 use agogo_host_cpal::cpal::callback::CallbackState;
@@ -135,10 +135,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     let channels: Vec<Channel> = named
         .into_iter()
-        .map(|(id, spec)| {
-            spec.into_channel()
-                .map_err(|e| format!("--ch {id}: {e}"))
-        })
+        .map(|(id, spec)| spec.into_channel().map_err(|e| format!("--ch {id}: {e}")))
         .collect::<Result<_, _>>()?;
 
     // Static rate dispatch.
@@ -167,7 +164,6 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     channels: Vec<Channel>,
     midi_port_request: String,
 ) -> Result<(), String> {
-
     let midi_port_name = if midi_port_request == "default" {
         MidirSink::list_output_ports()
             .map_err(|e| format!("midi enumeration: {e}"))?
@@ -182,7 +178,8 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
         midi_port_request.clone()
     };
     let sink = Arc::new(
-        MidirSink::open(&midi_port_name).map_err(|e| format!("midi open `{midi_port_name}`: {e}"))?,
+        MidirSink::open(&midi_port_name)
+            .map_err(|e| format!("midi open `{midi_port_name}`: {e}"))?,
     );
 
     // SPSC + drain thread.
@@ -210,8 +207,8 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
                 // sample 0 / current Link host clock — Plan 09's
                 // static-anchor pattern; Plan 09's deferred work
                 // upgrades to per-buffer atomic.
-                let sr_nz = NonZeroU32::new(args.sr)
-                    .ok_or_else(|| "--sr 0 is invalid".to_string())?;
+                let sr_nz =
+                    NonZeroU32::new(args.sr).ok_or_else(|| "--sr 0 is invalid".to_string())?;
                 let anchor = HostTimeAnchor {
                     host_origin_micros: 0,
                     sample_rate: sr_nz,
@@ -308,7 +305,10 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
 
     // Park the main thread until Ctrl-C or --max-duration-ms expires.
     let start = Instant::now();
-    let max = args.max_duration_ms.map(u64::from).map(Duration::from_millis);
+    let max = args
+        .max_duration_ms
+        .map(u64::from)
+        .map(Duration::from_millis);
     while !stop_flag.load(Ordering::Acquire) {
         std::thread::park_timeout(Duration::from_millis(100));
         if let Some(h) = &link_handle {
@@ -426,7 +426,7 @@ mod tests {
         fn parse_bpm_to_tempo_ok_iff_in_range(f in prop::num::f64::ANY) {
             let s = format!("{f}");
             let parsed: f64 = s.parse().unwrap_or(f64::NAN);
-            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= Tempo::MAX_BPM_F64;
+            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= agogo_core::boundary::MAX_BPM_F64;
             prop_assert_eq!(parse_bpm_to_tempo(s).is_ok(), in_range);
         }
 
@@ -588,4 +588,3 @@ mod tests {
         );
     }
 }
-

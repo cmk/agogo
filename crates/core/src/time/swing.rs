@@ -75,10 +75,7 @@ mod tests {
     use proptest::prelude::*;
 
     fn cfg(resolution: TBase, amount: i8) -> SwingConfig {
-        SwingConfig {
-            resolution,
-            amount,
-        }
+        SwingConfig { resolution, amount }
     }
 
     /// Next-coarser binary resolution. `T16 → T8`, `T8 → T4`, …,

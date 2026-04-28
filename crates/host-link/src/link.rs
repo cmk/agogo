@@ -22,8 +22,8 @@ use agogo_core::sync::PhaseSourceImpl;
 use agogo_core::sync::phase::Phase;
 use agogo_core::time::decimal::Micro;
 use agogo_core::time::float::F064FD06;
-use agogo_core::time::tempo::Tempo;
 use agogo_core::time::float::{Extended, ExtendedFloat};
+use agogo_core::time::tempo::Tempo;
 
 use crate::quantum::Quantum;
 use rusty_link::{AblLink, SessionState};
@@ -248,8 +248,7 @@ impl PhaseSourceImpl for LinkClock {
     fn phase_at_sample(&mut self, n: u64) -> Phase {
         let offset = (i128::from(n) * 1_000_000) / i128::from(self.anchor.sample_rate.get());
         let host_micros = (i128::from(self.anchor.host_origin_micros) + offset)
-            .clamp(i128::from(i64::MIN), i128::from(i64::MAX))
-            as i64;
+            .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
         self.link.capture_audio_session_state(&mut self.session);
         let p = self.session.phase_at_time(host_micros, 1.0);
         f64_phase_to_phase(p)
@@ -296,7 +295,8 @@ mod tests {
         // Link internally clamps to [20, 999] — 137 BPM passes through.
         let mut c = LinkClock::new(Tempo::from_bpm_integer(137), zero_anchor_48k());
         assert_eq!(
-            c.tempo(), Tempo::from_bpm_integer(137),
+            c.tempo(),
+            Tempo::from_bpm_integer(137),
             "tempo differs from initial 137 BPM"
         );
     }
@@ -376,7 +376,9 @@ mod tests {
         assert!(
             ulp < (1u32 << 22),
             "p0={}, p24k={}, circular ULPs = {}",
-            p0.0, p24k.0, ulp
+            p0.0,
+            p24k.0,
+            ulp
         );
     }
 
@@ -473,7 +475,8 @@ mod tests {
             assert!(
                 delta.0 >= 0,
                 "snap_offset_micro({:?}) returned negative: {:?}",
-                q, delta
+                q,
+                delta
             );
         }
     }
@@ -511,7 +514,9 @@ mod tests {
             assert!(
                 delta.0 <= bound,
                 "snap {:?} at {} beats exceeds one-quantum span bound {}",
-                delta, beats, bound
+                delta,
+                beats,
+                bound
             );
         }
     }
@@ -541,7 +546,9 @@ mod tests {
         assert!(
             ulp < (1u32 << 18),
             "expected near-equal phases at matched host times: a={}, b={}, diff_ulp={}",
-            a.0, b.0, ulp
+            a.0,
+            b.0,
+            ulp
         );
     }
 }

@@ -127,8 +127,7 @@ impl<R: SampleTime> PeakDetector<R> {
                     // range (≤ 2⁴⁷ samples ≈ 93 000 years at 48 kHz).
                     // Panic rather than wrap silently if a caller
                     // exceeds that.
-                    let centre_int: i128 =
-                        (start_index as i128) + (offset as i128) - 1;
+                    let centre_int: i128 = (start_index as i128) + (offset as i128) - 1;
                     let frac_q16 = (frac * 65_536.0).round() as i64;
                     let bits_q48_16 = i64::try_from(centre_int * 65_536)
                         .expect("stream index in Q48.16 must fit in i64")

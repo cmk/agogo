@@ -16,21 +16,6 @@ pub struct Tempo(pub u32);
 impl Tempo {
     pub const ZERO: Self = Self(0);
 
-    /// Maximum representable BPM as `f64`: `u32::MAX as f64 / 10⁶`
-    /// ≈ 4294.967295. Used as the upper bound for argv parsers
-    /// that want to reject "out of range" BPM rather than silently
-    /// saturate.
-    ///
-    /// Computed as a plain `u32 as f64 / 1.0e6` because
-    /// `tempo_to_f64_bpm(Tempo(u32::MAX))` returns a much larger
-    /// value (the `I064U032.inner` saturating-widen step lifts
-    /// `u32::MAX` to `i64::MAX` before the F-ladder inverse, so
-    /// the result is `i64::MAX / 10⁶` ≈ 9.22 × 10¹²). The `× 10⁻⁶`
-    /// here is a one-off domain-boundary constant, not a
-    /// per-input scale shift; documented inline so a future
-    /// reviewer doesn't try to "Conn-discipline" it away.
-    pub const MAX_BPM_F64: f64 = (u32::MAX as f64) / 1_000_000.0;
-
     /// Construct from an integer BPM. Panics if `n > 4294` (`n × 10⁶`
     /// overflows `u32`). `checked_mul` avoids the silent release-build
     /// wrap that plain `n * 1_000_000` would produce.

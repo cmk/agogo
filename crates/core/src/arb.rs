@@ -64,7 +64,11 @@ pub fn pulse_train<R: SampleTime>(
     let mut samples = vec![0.0_f32; total_len];
     let mut peaks = Vec::with_capacity(n_pulses as usize);
 
-    let seed = if seed == 0 { 0xdead_beef_cafe_babe } else { seed };
+    let seed = if seed == 0 {
+        0xdead_beef_cafe_babe
+    } else {
+        seed
+    };
     let mut rng = rand_pcg::Pcg64::seed_from_u64(seed);
     let normal = if sigma_samples > 0.0 {
         Some(Normal::new(0.0_f64, sigma_samples).expect("finite sigma"))
@@ -246,8 +250,7 @@ mod tests {
     #[test]
     fn pulse_train_shape_basic() {
         let bpm = Tempo::from_bpm_integer(120);
-        let (samples, peaks): (Vec<f32>, Vec<S048>) =
-            pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
+        let (samples, peaks): (Vec<f32>, Vec<S048>) = pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
         assert_eq!(peaks.len(), 4);
         // 120 BPM × 24 PPQ = 48 pps → 1000 samples between pulses at 48 kHz.
         let expected_spacing_bits = 1000i64 << 16;

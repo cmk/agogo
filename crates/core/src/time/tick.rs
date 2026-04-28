@@ -103,7 +103,10 @@ fn nicest_from_tick_count(n: u32) -> Time {
     for g in Grid::ALL {
         let tc = g.tick_count();
         if n % tc == 0 {
-            return Time { beats: n / tc, base: g };
+            return Time {
+                beats: n / tc,
+                base: g,
+            };
         }
     }
     unreachable!("Grid::T512P (tick_count = 1) divides every u32 value");
@@ -159,7 +162,10 @@ mod tests {
     #[test]
     fn time_to_tick_quarter_note() {
         assert_eq!(
-            time_to_tick(Time { beats: 1, base: Grid::T4 }),
+            time_to_tick(Time {
+                beats: 1,
+                base: Grid::T4
+            }),
             Tick(960)
         );
     }
@@ -167,7 +173,10 @@ mod tests {
     #[test]
     fn time_to_tick_two_eighths() {
         assert_eq!(
-            time_to_tick(Time { beats: 2, base: Grid::T8 }),
+            time_to_tick(Time {
+                beats: 2,
+                base: Grid::T8
+            }),
             Tick(960)
         );
     }
@@ -176,7 +185,10 @@ mod tests {
     fn from_ticks_240_is_one_sixteenth() {
         assert_eq!(
             from_ticks(Tick(240)),
-            Time { beats: 1, base: Grid::T16 }
+            Time {
+                beats: 1,
+                base: Grid::T16
+            }
         );
     }
 
@@ -185,7 +197,10 @@ mod tests {
         // T8Q = 192 ticks (5-per-quarter quintuplet).
         assert_eq!(
             from_ticks(Tick(192)),
-            Time { beats: 1, base: Grid::T8Q }
+            Time {
+                beats: 1,
+                base: Grid::T8Q
+            }
         );
     }
 
@@ -193,7 +208,10 @@ mod tests {
     fn from_ticks_160_is_one_triplet_sixteenth() {
         assert_eq!(
             from_ticks(Tick(160)),
-            Time { beats: 1, base: Grid::T16T }
+            Time {
+                beats: 1,
+                base: Grid::T16T
+            }
         );
     }
 
@@ -201,7 +219,10 @@ mod tests {
     fn from_ticks_960_is_one_quarter() {
         assert_eq!(
             from_ticks(Tick(960)),
-            Time { beats: 1, base: Grid::T4 }
+            Time {
+                beats: 1,
+                base: Grid::T4
+            }
         );
     }
 
@@ -210,7 +231,10 @@ mod tests {
         // 1 tick = T512P. Coarsest divisor is T512P itself.
         assert_eq!(
             from_ticks(Tick(1)),
-            Time { beats: 1, base: Grid::T512P }
+            Time {
+                beats: 1,
+                base: Grid::T512P
+            }
         );
     }
 
@@ -229,7 +253,10 @@ mod tests {
         // 0 % 3840 == 0, so the coarsest grid wins.
         assert_eq!(
             from_ticks(Tick(0)),
-            Time { beats: 0, base: Grid::T1 }
+            Time {
+                beats: 0,
+                base: Grid::T1
+            }
         );
     }
 
@@ -238,20 +265,38 @@ mod tests {
         // Different (beats, base) pairs but same duration.
         // At 960 PPQN: T64 = 60, T32 = 120. 2 × 60 = 1 × 120.
         assert_eq!(
-            Time { beats: 2, base: Grid::T64 },
-            Time { beats: 1, base: Grid::T32 }
+            Time {
+                beats: 2,
+                base: Grid::T64
+            },
+            Time {
+                beats: 1,
+                base: Grid::T32
+            }
         );
         assert_eq!(
-            Time { beats: 2, base: Grid::T8 },
-            Time { beats: 1, base: Grid::T4 }
+            Time {
+                beats: 2,
+                base: Grid::T8
+            },
+            Time {
+                beats: 1,
+                base: Grid::T4
+            }
         );
     }
 
     #[test]
     fn time_ne_when_different_durations() {
         assert_ne!(
-            Time { beats: 1, base: Grid::T4 },
-            Time { beats: 1, base: Grid::T8 }
+            Time {
+                beats: 1,
+                base: Grid::T4
+            },
+            Time {
+                beats: 1,
+                base: Grid::T8
+            }
         );
     }
 

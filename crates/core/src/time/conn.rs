@@ -29,8 +29,8 @@ use connections::conn::Conn;
 use num_rational::Rational64;
 
 use crate::time::grid::Grid;
+use crate::time::tick::{PPQN, Tick, Time, from_ticks, from_ticks_floor, time_to_tick};
 use connections::lattice::{Join, Meet};
-use crate::time::tick::{Tick, Time, from_ticks, from_ticks_floor, time_to_tick, PPQN};
 
 /// A rational whole-note duration. `Whole::new(1, 4)` = quarter note.
 pub type Whole = Rational64;

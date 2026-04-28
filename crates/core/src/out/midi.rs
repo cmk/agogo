@@ -176,10 +176,7 @@ pub fn render_midi_click_block(
             &[MIDI_NOTE_ON | ch_byte, n.into(), v.into()],
             ev.sample_index,
         );
-        sink.send_at(
-            &[MIDI_NOTE_OFF | ch_byte, n.into(), 0],
-            ev.sample_index,
-        );
+        sink.send_at(&[MIDI_NOTE_OFF | ch_byte, n.into(), 0], ev.sample_index);
         *counter = counter.wrapping_add(1);
     }
 }
@@ -216,8 +213,8 @@ pub fn render_midi_channel(
             render_buffer(events, transport, buffer_start_sample, sink);
         }
         MidiRole::Click(cfg) => {
-            let counter = click_counter
-                .expect("MidiRole::Click(_) requires a counter slot from Machine");
+            let counter =
+                click_counter.expect("MidiRole::Click(_) requires a counter slot from Machine");
             render_midi_click_block(events, cfg, counter, sink);
         }
         // Spec-surface stub; rendering lands in v0.2+.
@@ -429,12 +426,12 @@ mod tests {
     // ── render_midi_channel ───────────────────────────────────────
 
     use crate::channel::{Channel, scheduler::tick_stream};
-    use crate::time::decimal::Micro;
-    use crate::time::tempo::Tempo;
     use crate::sync::sample_tick::SampleTickConn;
+    use crate::time::decimal::Micro;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
+    use crate::time::tempo::Tempo;
 
     fn stc_120_48k() -> SampleTickConn {
         SampleTickConn::new(48_000, Tempo::from_bpm_integer(120), 960)
@@ -459,7 +456,15 @@ mod tests {
         let role = MidiRole::Clock;
         let evs = [ev(0), ev(24_000)];
         let sink = TestSink::new();
-        render_midi_channel(&common, &role, &evs, Some(MidiRtByte::Start), 0, None, &sink);
+        render_midi_channel(
+            &common,
+            &role,
+            &evs,
+            Some(MidiRtByte::Start),
+            0,
+            None,
+            &sink,
+        );
         let recs = sink.records();
         assert_eq!(recs.len(), 3);
         assert_eq!(recs[0].bytes, vec![MIDI_START]);
@@ -484,7 +489,15 @@ mod tests {
         });
         let evs = [ev(0), ev(24_000)];
         let sink = TestSink::new();
-        render_midi_channel(&common, &role, &evs, Some(MidiRtByte::Start), 0, None, &sink);
+        render_midi_channel(
+            &common,
+            &role,
+            &evs,
+            Some(MidiRtByte::Start),
+            0,
+            None,
+            &sink,
+        );
         assert!(sink.is_empty());
     }
 

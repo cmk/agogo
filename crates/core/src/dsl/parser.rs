@@ -158,9 +158,9 @@ impl<'a> Parser<'a> {
     /// An ident is tried as a `Grid` name first (via `Grid::from_str`);
     /// if that fails, it's treated as a variable reference.
     fn parse_primary(&mut self) -> Result<Expr, DslError> {
-        let tok = self.peek().ok_or_else(|| {
-            self.err(DslErrorKind::UnexpectedEof, self.eof_span())
-        })?;
+        let tok = self
+            .peek()
+            .ok_or_else(|| self.err(DslErrorKind::UnexpectedEof, self.eof_span()))?;
 
         match &tok.kind {
             TokenKind::Ident(text) => {
