@@ -41,9 +41,9 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
         .parse()
         .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
     // Channel pipeline requires one of the six audio sample rates
-    // supported by `fxp::pico_to_samples` (the downstream Pico →
-    // Sample dispatch). Validate here rather than letting
-    // `micro_to_samples` panic deep inside the transform.
+    // supported by `agogo_core::boundary::pico_to_samples` (the
+    // downstream Pico → Sample dispatch). Validate here rather than
+    // letting `micro_to_samples` panic deep inside the transform.
     match args.sr {
         44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => {}
         _ => {

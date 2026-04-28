@@ -11,8 +11,10 @@ After this PR:
 - **`main.rs` shrinks to 675 lines** (down from 1722, target was ~650).
   The remaining content is the CLI enum hierarchy + parser fns +
   dispatch match + `main()`.
-- Each handler module lives in its own sibling file with file-level
-  `#[cfg(feature = "...")]`.
+- Each handler module lives in its own sibling file. Feature
+  gating stays on the `mod foo;` declaration in `main.rs` —
+  `#[cfg(feature = "link")] pub mod link_probe;` etc. — matching
+  how the inline `pub mod` blocks were gated before.
 - The EOF `mod tests` block is gone — its three test cohorts
   (sync_trace, time_sched, channel_trace) now live in the respective
   sibling modules' own `#[cfg(test)] mod tests`.
@@ -156,3 +158,108 @@ reach these modules. No API break.
 **Must fix before push:** None.
 
 **Follow-up:** None.
+
+<!-- gh-id: 3157301263 -->
+### Copilot on [`doc/reviews/review-00037.md:15`](https://github.com/cmk/agogo/pull/37#discussion_r3157301263) (2026-04-28 21:22 UTC)
+
+The Summary says the extracted handler modules use file-level `#[cfg(feature = "...")]`, but this PR actually applies feature gating on the `mod ...;` declarations in `crates/cli/src/main.rs` (and this same file later notes that approach as correct). Please update the Summary bullet to match the implementation to avoid misleading readers.
+```suggestion
+- Each handler module lives in its own sibling file, with
+  `#[cfg(feature = "...")]` applied to the corresponding `mod ...;`
+  declarations in `crates/cli/src/main.rs`.
+```
+
+<!-- gh-id: 3157301308 -->
+### Copilot on [`doc/plans/plan-2026-04-28-05.md:17`](https://github.com/cmk/agogo/pull/37#discussion_r3157301308) (2026-04-28 21:22 UTC)
+
+The Goal section says each extracted handler file has a file-level `#[cfg(feature = "...")]`, but the implementation in this PR uses `#[cfg(feature = "...")] mod foo;` in `crates/cli/src/main.rs`. Since this plan is being added alongside the implementation, updating this bullet to match what shipped will prevent readers from being misled about where feature gating lives.
+```suggestion
+- Each handler module lives in its own sibling file and remains
+  independently feature-gated via `#[cfg(feature = "...")] mod
+  foo;` declarations in `main.rs`.
+```
+
+<!-- gh-id: 3157301332 -->
+### Copilot on [`crates/cli/src/link_probe.rs:115`](https://github.com/cmk/agogo/pull/37#discussion_r3157301332) (2026-04-28 21:22 UTC)
+
+This assertion makes the test environment-dependent: it will fail on any machine/CI runner that can see a real Link peer on the LAN (since `probe()` enables Link networking). To keep the test deterministic, consider gating it behind an env var / `#[ignore]`, and/or removing the `peers == 0` requirement so the test only checks stable properties (e.g., non-empty rows and initial tempo).
+
+<!-- gh-id: 3157301355 -->
+### Copilot on [`crates/cli/src/main.rs:671`](https://github.com/cmk/agogo/pull/37#discussion_r3157301355) (2026-04-28 21:22 UTC)
+
+`midi_trace` and `time_sched` are declared without `#[cfg(feature = "core")]`, but both modules depend on `agogo_core` (which is an optional dep behind the `core` feature). As written, `cargo build -p agogo-cli --no-default-features` (or `--features link` without `core`) will fail at compile time even though the command dispatcher has `#[cfg(not(feature = "core"))]` branches suggesting this build is supported. Gate these modules the same way as `sync_trace`/`channel_trace` (and consider applying `all(feature = "link", feature = "core")` to the Link modules too, since they also use `agogo_core`).
+
+<!-- gh-id: 4192530411 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-28 21:22 UTC](https://github.com/cmk/agogo/pull/37#pullrequestreview-4192530411))
+
+## Pull request overview
+
+Refactors the `agogo-cli` binary by extracting seven previously-inline handler modules (and their tests) out of `crates/cli/src/main.rs` into dedicated sibling source files, plus updates the float-usage allowlist/docs to match the new file layout.
+
+**Changes:**
+- Split handler modules (`sync_trace`, `channel_trace`, `time_sched`, `midi_trace`, `link_commands`, `link_probe`, `demo`) into separate `crates/cli/src/*.rs` files and removed the EOF test block from `main.rs`.
+- Moved the relevant test cohorts into the corresponding extracted modules.
+- Updated the float gate allowlist (`scripts/check-floats.sh`) and repository convention docs (`CLAUDE.md`), and added plan/review docs for the change.
+
+### Reviewed changes
+
+Copilot reviewed 12 out of 12 changed files in this pull request and generated 5 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| scripts/check-floats.sh | Adds new CLI module files to the f32/f64 allowlist after extraction. |
+| CLAUDE.md | Updates documented allowlist count/entries to match the script. |
+| doc/reviews/review-00037.md | Adds a review record describing the extraction work and verification. |
+| doc/plans/plan-2026-04-28-05.md | Adds the plan document for the extraction series. |
+| crates/cli/src/main.rs | Replaces inline module bodies with `mod foo;` declarations and removes EOF tests. |
+| crates/cli/src/sync_trace.rs | New extracted `agogo sync trace` handler + moved convergence test. |
+| crates/cli/src/channel_trace.rs | New extracted `agogo channel trace` handler + moved tests. |
+| crates/cli/src/time_sched.rs | New extracted `agogo time sched` handler + moved tests. |
+| crates/cli/src/midi_trace.rs | New extracted `agogo midi trace` handler + existing tests. |
+| crates/cli/src/link_commands.rs | New extracted Link subcommands implementation. |
+| crates/cli/src/link_probe.rs | New extracted Link probe loop + existing network-touching test. |
+| crates/cli/src/demo.rs | New extracted end-to-end demo pipeline implementation. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3157301370 -->
+### Copilot on [`crates/cli/src/channel_trace.rs:46`](https://github.com/cmk/agogo/pull/37#discussion_r3157301370) (2026-04-28 21:22 UTC)
+
+The comment references `fxp::pico_to_samples`, but the float↔fixed boundary helpers (including `pico_to_samples`) live in `agogo_core::boundary` now (and `fxp.rs` has been deleted). Update this comment to point at the current function/module so readers can find the invariant being enforced here.
+```suggestion
+    // supported by `agogo_core::boundary::pico_to_samples` (the
+    // downstream Pico → Sample dispatch). Validate here rather than
+    // letting `micro_to_samples` panic deep inside the transform.
+```
+
+<!-- gh-id: 3157330931 -->
+#### ↳ cmk ([2026-04-28 21:28 UTC](https://github.com/cmk/agogo/pull/37#discussion_r3157330931))
+
+Done — corrected the Summary to describe gating-on-the-mod-decl, matching what shipped (and what the Code Quality section already says correctly).
+
+<!-- gh-id: 3157331074 -->
+#### ↳ cmk ([2026-04-28 21:28 UTC](https://github.com/cmk/agogo/pull/37#discussion_r3157331074))
+
+Done — same correction in the plan's Goal section. Thanks for catching the doc/impl drift across both files.
+
+<!-- gh-id: 3157331223 -->
+#### ↳ cmk ([2026-04-28 21:28 UTC](https://github.com/cmk/agogo/pull/37#discussion_r3157331223))
+
+Deferring this one. The `peers == 0` assertion + the Link-network-dependent test predate this PR — they were inside main.rs's inline `mod link_probe { #[cfg(test)] mod tests { ... } }` block before extraction and rode along verbatim per the no-logic-changes-during-reorg discipline. Worth fixing properly with a `fixture_or_skip!("link_multicast")` gate (host-link/tests/bidirectional.rs already uses that pattern) — tracking as a follow-up alongside the host-link 4-layer wrapping cleanup.
+
+<!-- gh-id: 3157331456 -->
+#### ↳ cmk ([2026-04-28 21:28 UTC](https://github.com/cmk/agogo/pull/37#discussion_r3157331456))
+
+Deferring — verified pre-existing: `cargo build -p agogo-cli --no-default-features` fails with the same 33 errors against origin/main (before this PR). The inline `pub mod midi_trace { use agogo_core::... }` and `pub mod time_sched { use agogo_core::... }` were also un-gated; this PR moved them verbatim. Real bug, but a behaviour change beyond the structural-only scope. Tracking as a follow-up — likely also needs gating on `MidiSub::Trace` / `TimeOp::Sched` enum variants in the CLI shape, since those are what reach into the modules.
+
+<!-- gh-id: 3157331660 -->
+#### ↳ cmk ([2026-04-28 21:28 UTC](https://github.com/cmk/agogo/pull/37#discussion_r3157331660))
+
+Done — updated the comment to point at `agogo_core::boundary::pico_to_samples` (the post-fxp.rs-deletion home from PR #35 T5). Thanks.
