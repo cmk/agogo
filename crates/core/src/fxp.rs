@@ -33,14 +33,14 @@
 // Float-boundary types (`ExtendedFloat<f64>`, `Extended<T>`) still
 // come from the connections crate — they're the algebra primitives
 // the time tier is built on.
-pub use connections::conn::float::ExtendedFloat;
+pub use connections::float::ExtendedFloat;
 pub use connections::extended::Extended;
 
 // Saturating i64 → u32 narrowing Conn used inside `f64_bpm_to_tempo`
 // and `tempo_to_f64_bpm` to lawfully cross the `Tempo`'s u32 backing.
 // `I064U032.ceil(-1) = 0`, `I064U032.ceil(i64::MAX) = u32::MAX`,
 // `I064U032.inner: u32 → i64` is lossless.
-use connections::conn::std::u32::I064U032;
+use connections::int::u32::I064U032;
 
 // Time tier (decimal SI ladder + sample-indexed Q48.16) is now
 // vendored under `crate::time::{decimal, sample}`. Re-export the

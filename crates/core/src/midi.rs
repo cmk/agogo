@@ -8,7 +8,7 @@
 //! These types are MIDI-specific by design — they live in
 //! `agogo-core` rather than the general-purpose `connections` crate.
 //!
-//! The `U7U8` / `U4U8` connections adapt the Haskell `Cast 'L`
+//! The `U007U008` / `U004U008` connections adapt the Haskell `Cast 'L`
 //! saturating pattern from `Data.Connection.Word` (`conn = CastL f g`
 //! where `f = fromIntegral . max 0` and `g = fromIntegral . min (f
 //! maxBound)`). Since `U7` / `U4` are unsigned, `max 0` is a no-op:
@@ -96,7 +96,7 @@ impl core::fmt::Display for U4 {
 // - `Conn::new_left` sets `floor = ceil`, matching the Haskell
 //   one-sided `'L` shape.
 
-pub const U7U8: Conn<U7, u8> = {
+pub const U007U008: Conn<U7, u8> = {
     fn ceil(x: U7) -> u8 {
         x.0
     }
@@ -106,7 +106,7 @@ pub const U7U8: Conn<U7, u8> = {
     Conn::new_left(ceil, inner)
 };
 
-pub const U4U8: Conn<U4, u8> = {
+pub const U004U008: Conn<U4, u8> = {
     fn ceil(x: U4) -> u8 {
         x.0
     }
@@ -141,18 +141,18 @@ mod tests {
 
     #[test]
     fn u7u8_inner_at_127() {
-        assert_eq!(U7U8.inner(127), U7(127));
+        assert_eq!(U007U008.inner(127), U7(127));
     }
 
     #[test]
     fn u7u8_inner_at_max_u8_saturates() {
-        assert_eq!(U7U8.inner(255), U7(127));
-        assert_eq!(U7U8.inner(128), U7(127));
+        assert_eq!(U007U008.inner(255), U7(127));
+        assert_eq!(U007U008.inner(128), U7(127));
     }
 
     #[test]
     fn u7u8_ceil_zero() {
-        assert_eq!(U7U8.ceil(U7(0)), 0);
+        assert_eq!(U007U008.ceil(U7(0)), 0);
     }
 
     #[test]
@@ -160,16 +160,16 @@ mod tests {
         // Conn::new_left sets floor = ceil; verify the contract.
         for x in 0..=U7::MAX {
             let u = U7(x);
-            assert_eq!(U7U8.floor(u), U7U8.ceil(u));
+            assert_eq!(U007U008.floor(u), U007U008.ceil(u));
         }
     }
 
     #[test]
     fn u4u8_inner_at_max_u8_saturates() {
-        assert_eq!(U4U8.inner(255), U4(15));
-        assert_eq!(U4U8.inner(16), U4(15));
-        assert_eq!(U4U8.inner(15), U4(15));
-        assert_eq!(U4U8.inner(0), U4(0));
+        assert_eq!(U004U008.inner(255), U4(15));
+        assert_eq!(U004U008.inner(16), U4(15));
+        assert_eq!(U004U008.inner(15), U4(15));
+        assert_eq!(U004U008.inner(0), U4(0));
     }
 
     #[test]
@@ -218,7 +218,7 @@ mod tests {
         #[test]
         fn u7u8_inner_round_trip_on_u7(x in 0u8..=U7::MAX) {
             let u = U7(x);
-            prop_assert_eq!(U7U8.inner(U7U8.ceil(u)), u);
+            prop_assert_eq!(U007U008.inner(U007U008.ceil(u)), u);
         }
 
         /// Saturation property on the u8 side: `ceil ∘ inner` clamps
@@ -227,7 +227,7 @@ mod tests {
         /// boundary, the point of the test.
         #[test]
         fn u7u8_ceil_inner_saturates(b in any::<u8>()) {
-            prop_assert_eq!(U7U8.ceil(U7U8.inner(b)), b.min(U7::MAX));
+            prop_assert_eq!(U007U008.ceil(U007U008.inner(b)), b.min(U7::MAX));
         }
 
         /// Galois adjoint law: `ceil(a) ≤ b ⟺ a ≤ inner(b)`. Pairs
@@ -239,8 +239,8 @@ mod tests {
             b in any::<u8>(),
         ) {
             let a = U7(a);
-            let lhs = U7U8.ceil(a) <= b;
-            let rhs = a.0 <= U7U8.inner(b).0;
+            let lhs = U007U008.ceil(a) <= b;
+            let rhs = a.0 <= U007U008.inner(b).0;
             prop_assert_eq!(lhs, rhs);
         }
 
@@ -249,13 +249,13 @@ mod tests {
         #[test]
         fn u4u8_inner_round_trip_on_u4(x in 0u8..=U4::MAX) {
             let u = U4(x);
-            prop_assert_eq!(U4U8.inner(U4U8.ceil(u)), u);
+            prop_assert_eq!(U004U008.inner(U004U008.ceil(u)), u);
         }
 
         /// Saturation for U4 spans the full u8 domain.
         #[test]
         fn u4u8_ceil_inner_saturates(b in any::<u8>()) {
-            prop_assert_eq!(U4U8.ceil(U4U8.inner(b)), b.min(U4::MAX));
+            prop_assert_eq!(U004U008.ceil(U004U008.inner(b)), b.min(U4::MAX));
         }
 
         /// Galois adjoint law for U4.
@@ -265,8 +265,8 @@ mod tests {
             b in any::<u8>(),
         ) {
             let a = U4(a);
-            let lhs = U4U8.ceil(a) <= b;
-            let rhs = a.0 <= U4U8.inner(b).0;
+            let lhs = U004U008.ceil(a) <= b;
+            let rhs = a.0 <= U004U008.inner(b).0;
             prop_assert_eq!(lhs, rhs);
         }
     }
