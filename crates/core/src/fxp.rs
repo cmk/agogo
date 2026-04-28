@@ -33,8 +33,8 @@
 // Float-boundary types (`ExtendedFloat<f64>`, `Extended<T>`) still
 // come from the connections crate — they're the algebra primitives
 // the time tier is built on.
-pub use connections::float::ExtendedFloat;
 pub use connections::extended::Extended;
+pub use connections::float::ExtendedFloat;
 
 // Saturating i64 → u32 narrowing Conn used inside `f64_bpm_to_tempo`
 // and `tempo_to_f64_bpm` to lawfully cross the `Tempo`'s u32 backing.
@@ -47,8 +47,10 @@ use connections::int::u32::I064U032;
 // agogo-local types under the same names every workspace caller
 // already uses.
 pub use crate::time::decimal::{
-    F064FD00, F064FD01, F064FD02, F064FD03, F064FD06, F064FD09, F064FD12, FD00, FD01, FD02, FD03,
-    FD06, FD09, FD12, FD12FD00, FD12FD03, FD12FD06, FD12FD09, HasResolution,
+    FD00, FD01, FD02, FD03, FD06, FD09, FD12, FD12FD00, FD12FD03, FD12FD06, FD12FD09, HasResolution,
+};
+pub use crate::time::float::{
+    F064FD00, F064FD01, F064FD02, F064FD03, F064FD06, F064FD09, F064FD12,
 };
 pub use crate::time::sample::{
     FD12S044, FD12S048, FD12S088, FD12S096, FD12S176, FD12S192, Q48_16, S044, S048, S088, S096,
@@ -476,15 +478,15 @@ pub fn smoothstep_u8(t: u32, n: u32) -> u8 {
     // y = 3x² − 2x³, with x in Q0.24:
     //   x² in Q0.48, x³ in Q0.72. Work in u128.
     let x: u128 = (u128::from(t) << 24) / u128::from(n);
-    let x2: u128 = x * x;                 // Q0.48
-    let x3: u128 = x2 * x;                // Q0.72
+    let x2: u128 = x * x; // Q0.48
+    let x3: u128 = x2 * x; // Q0.72
     // y = 3·x² − 2·x³, both terms scaled to Q0.48 then combined.
     //   3·x² is already Q0.48.
     //   2·x³ in Q0.72 becomes (2·x³) >> 24 in Q0.48 (with rounding).
     let term_a = 3u128 * x2;
     let rounding = 1u128 << 23;
     let term_b = (2u128 * x3 + rounding) >> 24;
-    let y: u128 = term_a - term_b;        // Q0.48, always ≤ 2^48
+    let y: u128 = term_a - term_b; // Q0.48, always ≤ 2^48
     // scale to u8: (y * 255 + 2^47) >> 48
     let scaled = (y * 255u128 + (1u128 << 47)) >> 48;
     scaled.min(255) as u8
