@@ -502,11 +502,19 @@ fn parse_swing(v: &str) -> Result<SwingConfig, ChannelSpecError> {
     }
 }
 
-/// Convert a finite millisecond `f64` value to `Micro` via the
-/// `F064FD06` Conn.
+/// Convert a finite millisecond `f64` value to `Micro`.
+///
+/// **User-unit shift, not Conn-composable.** `F064FD06` interprets
+/// its f64 argument as **canonical seconds** (per the `time::decimal`
+/// module's float-conn convention). The `× 10⁻³` here converts
+/// user-input milliseconds to canonical seconds for the F-ladder
+/// boundary; this shift has no Conn equivalent because the F-ladder
+/// is rooted in seconds, not in arbitrary user-input units.
+/// Documented argv-boundary per CLAUDE.md exception 4 — the `f64`
+/// dies on the same line via `F064FD06.ceil`.
 fn micro_from_ms(ms: f64) -> Option<Micro> {
-    // argv boundary
-    let seconds = ms * 1.0e-3; // argv boundary
+    // argv boundary: ms → canonical seconds for F064FD06's input.
+    let seconds = ms * 1.0e-3;
     match F064FD06.ceil(ExtendedFloat::Extend(seconds)) {
         Extended::Finite(m) => Some(m),
         Extended::PosInf | Extended::NegInf => None,

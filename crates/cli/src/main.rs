@@ -324,7 +324,29 @@ fn parse_non_negative_f64(v: f64) -> Result<f64, String> {
     }
 }
 
-
+/// Parse a BPM `f64` argv value into `Tempo`, returning an explicit
+/// error for out-of-range / non-finite inputs.
+///
+/// Wraps `f64_bpm_to_tempo` (which silently saturates) for CLI use,
+/// where the user wants a hard error message rather than silent
+/// fallback behavior. Used by three argv-handler sites
+/// (channel_trace, midi_trace, demo) — each previously open-coded a
+/// nearly-identical 10-line `(args.bpm * 1.0e6).round()` body
+/// (audit M4 + N5).
+///
+/// Q3 (the float surface-area sweep) will obsolete this helper by
+/// moving the validation into the bpaf parser, so `RunArgs.bpm`
+/// becomes `Tempo` directly.
+fn parse_cli_bpm(arg: f64, flag: &str) -> Result<agogo_core::fxp::Tempo, String> {
+    use agogo_core::fxp::{Tempo, f64_bpm_to_tempo, tempo_to_f64_bpm};
+    let max_bpm = tempo_to_f64_bpm(Tempo(u32::MAX));
+    if !arg.is_finite() || arg <= 0.0 || arg > max_bpm {
+        return Err(format!(
+            "{flag} {arg} out of range (expected (0, {max_bpm}] BPM)"
+        ));
+    }
+    Ok(f64_bpm_to_tempo(arg))
+}
 
 fn main() {
     let cli = cli().run();
@@ -485,7 +507,7 @@ fn main() {
                 // Display-only conversion: fxp → f64 at println! time,
                 // never stored in `ProbeRow`. f64 dies inside this
                 // format string.
-                let tempo_bpm = f64::from(row.tempo.0) / 1.0e6;
+                let tempo_bpm = agogo_core::fxp::tempo_to_f64_bpm(row.tempo);
                 let phase = f64::from(row.phase.0) / (1u64 << 32) as f64;
                 println!(
                     "{},{},{:.4},{:.6}",
@@ -718,7 +740,7 @@ pub mod link_commands {
     //! daemon. `transport` drives the FSM headlessly; audio-callback
     //! integration (real `agogo run --link`) lands with Plan 05.
 
-    use agogo_core::fxp::{Tempo, f64_beats_to_quantum, f64_bpm_to_tempo};
+    use agogo_core::fxp::{Tempo, f64_beats_to_quantum, f64_bpm_to_tempo, tempo_to_f64_bpm};
     use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig};
     use std::num::NonZeroU32;
     use std::thread::sleep;
@@ -784,7 +806,7 @@ pub mod link_commands {
         println!(
             "{},{},{:.4},{}",
             0, last_peers,
-            f64::from(last_tempo.0) / 1_000_000.0,
+            tempo_to_f64_bpm(last_tempo),
             last_playing as u8,
         );
         while Instant::now() < deadline {
@@ -798,7 +820,7 @@ pub mod link_commands {
                 println!(
                     "{},{},{:.4},{}",
                     t_ms, peers,
-                    f64::from(tempo.0) / 1_000_000.0,
+                    tempo_to_f64_bpm(tempo),
                     playing as u8,
                 );
                 last_playing = playing;
@@ -829,7 +851,7 @@ pub mod link_commands {
         session.enable(false);
         println!(
             "peers={peers} tempo_bpm={:.4} is_playing={}",
-            f64::from(tempo.0) / 1_000_000.0,
+            tempo_to_f64_bpm(tempo),
             playing as u8,
         );
     }
@@ -839,7 +861,7 @@ pub mod link_commands {
 mod sync_trace {
     use agogo_core::arb::pulse_train;
     use agogo_core::fxp::{
-        Extended, F064FD12, ExtendedFloat, Pico, S048, SampleRate, SampleTime, Tempo,
+        Extended, ExtendedFloat, F064FD12, Pico, S048, SampleRate, SampleTime, Tempo,
         f64_bpm_to_tempo,
     };
     use agogo_core::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
@@ -872,11 +894,12 @@ mod sync_trace {
     ) -> Vec<TraceRow> {
         // argv-boundary conversions. f64 dies on these two lines.
         let bpm: Tempo = f64_bpm_to_tempo(bpm_f64);
-        // µs → seconds → Pico via the lawful `F064FD12` conn from
-        // `agogo_core::time::decimal` (re-exported via
-        // `agogo_core::fxp`). `parse_non_negative_f64` at the bpaf
-        // layer already rejected NaN / ±∞, so a finite-wrap here is
-        // safe; the `PosInf` match arm catches out-of-range values.
+        // µs (f64) → seconds → Pico via `F064FD12`. The `× 10⁻⁶`
+        // is a user-unit-to-canonical-seconds shift, not a ladder
+        // rung — `F064FD12` interprets its f64 input as canonical
+        // seconds, so the µs-input has to land on the seconds basis
+        // first. `parse_non_negative_f64` at the bpaf layer already
+        // rejected NaN / ±∞.
         let jitter_s = jitter_us * 1.0e-6;
         let jitter: Pico = match F064FD12.ceil(ExtendedFloat::Extend(jitter_s)) {
             Extended::Finite(p) => p,
@@ -910,7 +933,7 @@ mod sync_trace {
 #[cfg(feature = "core")]
 pub mod channel_trace {
     use agogo_core::channel::{ChannelCommon, tick_stream};
-    use agogo_core::fxp::{Extended, ExtendedFloat, F064FD06, Micro, Tempo};
+    use agogo_core::fxp::{Extended, ExtendedFloat, F064FD06, Micro};
     use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
@@ -942,18 +965,8 @@ pub mod channel_trace {
             .grid
             .parse()
             .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
-        // argv-boundary: f64 BPM → µBPM. f64 dies right here.
-        let bpm = {
-            let scaled = (args.bpm * 1.0e6).round();
-            if !(0.0..u32::MAX as f64).contains(&scaled) {
-                return Err(format!(
-                    "--bpm {} out of range (expected (0, {}] BPM)",
-                    args.bpm,
-                    u32::MAX as f64 / 1.0e6
-                ));
-            }
-            Tempo(scaled as u32)
-        };
+        // argv-boundary: f64 BPM → Tempo. f64 dies in parse_cli_bpm.
+        let bpm = super::parse_cli_bpm(args.bpm, "--bpm")?;
         // Channel pipeline requires one of the six audio sample rates
         // supported by `fxp::pico_to_samples` (the downstream Pico →
         // Sample dispatch). Validate here rather than letting
@@ -968,15 +981,15 @@ pub mod channel_trace {
             }
         }
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
-        // argv-boundary: ms (f64) → Micro via the lawful `F064FD06`
-        // conn from `agogo_core::time::decimal` (re-exported via
-        // `agogo_core::fxp`). Out-of-range saturations are user
-        // errors, not silent defaults — `parse_non_negative_f64`
-        // already validated finiteness, so an `Extended::PosInf` /
-        // `Extended::NegInf` result means the user asked for a
-        // value outside `Micro`'s ±i64 range (billions of years).
-        // Surface that as an error rather than silently mapping to
-        // zero.
+        // argv-boundary: ms (f64) → seconds → Micro via `F064FD06`.
+        // The `× 10⁻³` is the user-unit-to-canonical-seconds shift
+        // (F064FD06 interprets f64 as seconds). Out-of-range
+        // saturations are user errors, not silent defaults —
+        // `parse_non_negative_f64` already validated finiteness, so
+        // an `Extended::PosInf` / `Extended::NegInf` result means
+        // the user asked for a value outside `Micro`'s ±i64 range
+        // (billions of years). Surface that as an error rather than
+        // silently mapping to zero.
         let ms_to_micro = |flag: &str, ms: f64| -> Result<Micro, String> {
             match F064FD06.ceil(ExtendedFloat::Extend(ms * 1.0e-3)) {
                 Extended::Finite(m) => Ok(m),
@@ -1031,7 +1044,7 @@ pub mod channel_trace {
 
 pub mod midi_trace {
     use agogo_core::channel::{ChannelCommon, MidiRole, scheduler::tick_stream};
-    use agogo_core::fxp::{Micro, Tempo};
+    use agogo_core::fxp::Micro;
     use agogo_core::out::midi::{MidiRtByte, TestSink, render_midi_channel};
     use agogo_core::time::conn::SampleTickConn;
     use agogo_core::time::grid::Grid;
@@ -1064,18 +1077,8 @@ pub mod midi_trace {
             .grid
             .parse()
             .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
-        // argv-boundary: f64 BPM → µBPM. f64 dies right here.
-        let bpm = {
-            let scaled = (args.bpm * 1.0e6).round();
-            if !(0.0..u32::MAX as f64).contains(&scaled) {
-                return Err(format!(
-                    "--bpm {} out of range (expected (0, {}) BPM)",
-                    args.bpm,
-                    u32::MAX as f64 / 1.0e6
-                ));
-            }
-            Tempo(scaled as u32)
-        };
+        // argv-boundary: f64 BPM → Tempo. f64 dies in parse_cli_bpm.
+        let bpm = super::parse_cli_bpm(args.bpm, "--bpm")?;
         // Match `channel_trace`'s sr gate: the transform pipeline's
         // `pico_to_samples` dispatch supports only these six rates and
         // panics deep inside otherwise. Plan 12 never hits that path
@@ -1390,17 +1393,7 @@ pub mod demo {
             .parse()
             .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
         // argv-boundary BPM (matches channel_trace + midi_trace).
-        let bpm = {
-            let scaled = (args.bpm * 1.0e6).round();
-            if !(0.0..u32::MAX as f64).contains(&scaled) {
-                return Err(format!(
-                    "--bpm {} out of range (expected (0, {}) BPM)",
-                    args.bpm,
-                    u32::MAX as f64 / 1.0e6
-                ));
-            }
-            Tempo(scaled as u32)
-        };
+        let bpm = super::parse_cli_bpm(args.bpm, "--bpm")?;
         // SR validation matches the channel pipeline's allowlist.
         match args.sr {
             44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => {}

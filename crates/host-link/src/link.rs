@@ -19,6 +19,7 @@ use std::num::NonZeroU32;
 
 use agogo_core::fxp::{
     Extended, ExtendedFloat, F064FD06, Micro, Phase, Quantum, Tempo, f64_phase_to_phase,
+    tempo_to_f64_bpm,
 };
 use agogo_core::sync::PhaseSourceImpl;
 use rusty_link::{AblLink, SessionState};
@@ -65,9 +66,10 @@ impl LinkClock {
     /// thread only.
     pub fn new(initial_bpm: Tempo, anchor: HostTimeAnchor) -> Self {
         // Link FFI: AblLink's C++ constructor takes f64 BPM. Contain
-        // the one-shot `Tempo → f64` cast to this line; downstream
-        // agogo never sees the f64.
-        let initial_bpm_f64 = f64::from(initial_bpm.0) / 1.0e6;
+        // the one-shot `Tempo → f64` cast to this line via the
+        // lawful `tempo_to_f64_bpm` (F064FD06.inner under the hood);
+        // downstream agogo never sees the f64.
+        let initial_bpm_f64 = tempo_to_f64_bpm(initial_bpm);
         Self {
             link: AblLink::new(initial_bpm_f64),
             session: SessionState::new(),
@@ -158,8 +160,9 @@ impl LinkClock {
     /// thread.
     pub fn push_tempo(&mut self, bpm: Tempo) {
         self.link.capture_audio_session_state(&mut self.session);
-        // Link FFI — Tempo (µBPM) → f64 BPM at the set_tempo boundary.
-        let bpm_f64 = f64::from(bpm.0) / 1_000_000.0;
+        // Link FFI — Tempo (µBPM) → f64 BPM at the set_tempo
+        // boundary via the lawful `tempo_to_f64_bpm` (F064FD06.inner).
+        let bpm_f64 = tempo_to_f64_bpm(bpm);
         self.session.set_tempo(bpm_f64, self.link.clock_micros());
         self.link.commit_audio_session_state(&self.session);
     }
