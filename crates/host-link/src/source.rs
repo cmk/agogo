@@ -198,9 +198,7 @@ mod tests {
         let writer = std::thread::spawn(move || {
             let start = Instant::now();
             let mut bpm = 120u32;
-            while start.elapsed() < Duration::from_millis(100)
-                && !h_stop.load(Ordering::Acquire)
-            {
+            while start.elapsed() < Duration::from_millis(100) && !h_stop.load(Ordering::Acquire) {
                 handle.set_tempo(Tempo::from_bpm_integer(bpm));
                 let _ = handle.is_playing();
                 bpm = if bpm >= 200 { 60 } else { bpm + 1 };

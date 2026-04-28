@@ -6,16 +6,25 @@
 # fall into one of the five enumerated exception categories
 # (CLAUDE.md §Repository conventions):
 #
-#   crates/core/src/sync/pll.rs        PI controller state + control law
-#   crates/core/src/sync/detect.rs     parabolic-fit ABI-local locals
-#   crates/core/src/sync/source.rs     PCM audio intake (`&[f32]`) + tests
-#   crates/core/src/fxp.rs             argv-boundary + PI-exempt helpers
-#   crates/core/src/arb.rs             test-fixture PCM generators
+#   crates/core/src/sync/pll.rs                   PI controller state + control law
+#   crates/core/src/sync/detect.rs                parabolic-fit ABI-local locals
+#   crates/core/src/sync/source.rs                PCM audio intake (`&[f32]`) + tests
+#   crates/core/src/boundary.rs                   argv-boundary + PI-exempt helpers (split from
+#                                                 the deleted fxp.rs in Plan 2026-04-28-03 T5)
+#   crates/core/src/arb.rs                        test-fixture PCM generators
 #   crates/core/src/host.rs                       PCM ABI shape (AudioIo `&[f32]` slices)
 #   crates/core/src/machine.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction in tests)
 #   crates/core/src/machine/spec.rs               argv-boundary (--ch shift-ms / offset-ms via F64F06)
+#   crates/core/src/time/float.rs                 vendored from connections — F064FDxx Conns
+#                                                 with f64-correction loops are intrinsic
+#                                                 (split from time/decimal.rs in Plan 2026-04-28-03 T1)
+#   crates/core/src/time/sample.rs                vendored from connections — FD12↔Sxxx Conn
+#                                                 walk needs f64 internally
 #   crates/host-link/src/link.rs                  Link FFI (AblLink C++ ABI)
 #   crates/host-link/src/source.rs                PCM ABI (PhaseSourceImpl::feed_samples slice param)
+#   crates/host-link/src/quantum.rs               Link FFI parity helper (f64_beats_to_quantum
+#                                                 round-half-away-from-zero matches std::llround;
+#                                                 moved from fxp.rs in Plan 2026-04-28-03 T4)
 #   crates/host-cpal/src/cpal.rs                  PCM ABI (cpal stream callback)
 #   crates/host-cpal/src/cpal/callback.rs         PCM ABI (AudioIo input/output slices)
 #   crates/cli/src/main.rs                        argv parsers (`parse_bpm_to_tempo` / `parse_quantum_from_beats` / `parse_jitter_us_to_pico` / `parse_ms_to_micro`)
@@ -40,21 +49,34 @@ ALLOWED=(
   "crates/core/src/sync/pll.rs"
   "crates/core/src/sync/detect.rs"
   "crates/core/src/sync/source.rs"
-  "crates/core/src/fxp.rs"
+  # Replaces the deleted `crates/core/src/fxp.rs` entry from before
+  # Plan 2026-04-28-03 T5: argv-boundary helpers (`f64_bpm_to_tempo`,
+  # `f64_phase_to_phase`) and PI-exempt control-law helpers
+  # (`tempo_to_hz`, `bits_q48_16_to_seconds`, `tempo_to_f64_bpm`,
+  # `pico_to_f64_seconds`) plus the `MAX_BPM_F64` argv-bound constant.
+  "crates/core/src/boundary.rs"
   "crates/core/src/arb.rs"
   "crates/core/src/host.rs"
   "crates/core/src/machine.rs"
   "crates/core/src/machine/spec.rs"
   # Vendored from connections — both modules ship with f64 inside
-  # their float→fixed Conn machinery (the F064FD?? family for
-  # decimal.rs; a similar pattern for sample.rs's FD12↔Sxxx
-  # adjoint walk). The f64 surface is intrinsic to the abstraction
-  # and was upstream-allowlisted for the same reason; the file move
-  # downstream brings the allowlist entry with it.
-  "crates/core/src/time/decimal.rs"
+  # their float→fixed Conn machinery (`F064FDxx` correction loops
+  # for time/float.rs; the FD12↔Sxxx adjoint walk for time/sample.rs).
+  # The f64 surface is intrinsic to the abstraction and was upstream-
+  # allowlisted for the same reason; the file move downstream brings
+  # the allowlist entry with it. (Plan 2026-04-28-03 T1 split float
+  # out of decimal — decimal.rs is no longer allowlisted because it
+  # contains no live f64 after the split.)
+  "crates/core/src/time/float.rs"
   "crates/core/src/time/sample.rs"
   "crates/host-link/src/link.rs"
   "crates/host-link/src/source.rs"
+  # Plan 2026-04-28-03 T4: `Quantum` + `f64_beats_to_quantum` +
+  # `parse_quantum_from_beats` moved here from `agogo_core::fxp`.
+  # The f64 surface is the FFI-parity exception — Link's C++ side
+  # does `std::llround(q × 1e6)`; agogo's `Quantum` round-trip must
+  # agree bit-for-bit at the seam.
+  "crates/host-link/src/quantum.rs"
   "crates/host-cpal/src/cpal.rs"
   "crates/host-cpal/src/cpal/callback.rs"
   "crates/cli/src/main.rs"

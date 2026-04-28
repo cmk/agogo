@@ -69,11 +69,7 @@ pub struct LinkSession {
 impl LinkSession {
     /// Construct a session. The underlying `LinkClock` is constructed
     /// but not enabled — call `enable` explicitly.
-    pub fn new(
-        initial_bpm: Tempo,
-        anchor: HostTimeAnchor,
-        config: LinkWriteConfig,
-    ) -> Self {
+    pub fn new(initial_bpm: Tempo, anchor: HostTimeAnchor, config: LinkWriteConfig) -> Self {
         Self {
             clock: LinkClock::new(initial_bpm, anchor),
             transport: rust_fsm::StateMachine::new(),
@@ -242,10 +238,7 @@ mod tests {
             LinkWriteConfig::default(),
         );
         let delta = s.snap_offset_for(Some(Quantum::from_bars(4)));
-        assert!(
-            delta.0 >= 0,
-            "snap delta is negative: {delta:?}",
-        );
+        assert!(delta.0 >= 0, "snap delta is negative: {delta:?}",);
     }
 
     /// `quantum_snap_idempotent` — two consecutive calls with the

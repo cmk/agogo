@@ -16,11 +16,9 @@
 
 #![cfg(feature = "rusty-link")]
 
-use agogo_core::time::tempo::Tempo;
 use agogo_core::testing::fixture_or_skip;
-use agogo_host_link::{
-    HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum, TransportState,
-};
+use agogo_core::time::tempo::Tempo;
+use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum, TransportState};
 use rusty_link::{AblLink, SessionState};
 use std::num::NonZeroU32;
 use std::thread::sleep;
@@ -46,11 +44,7 @@ fn anchor_48k() -> HostTimeAnchor {
 /// to discover each other via multicast loopback. Returns `true` if
 /// both sides report `num_peers() >= 1` within the budget; `false`
 /// otherwise (signals multicast loopback disabled).
-fn wait_for_pair(
-    session: &LinkSession,
-    peer: &AblLink,
-    budget: Duration,
-) -> bool {
+fn wait_for_pair(session: &LinkSession, peer: &AblLink, budget: Duration) -> bool {
     let deadline = Instant::now() + budget;
     while Instant::now() < deadline {
         if session.num_peers() >= 1 && peer.num_peers() >= 1 {
@@ -71,8 +65,11 @@ const PROPAGATION_MS: u64 = 1_000;
 #[test]
 fn tempo_push_round_trip() {
     link_multicast_or_skip!();
-    let mut agogo_session =
-        LinkSession::new(Tempo::from_bpm_integer(120), anchor_48k(), LinkWriteConfig::default());
+    let mut agogo_session = LinkSession::new(
+        Tempo::from_bpm_integer(120),
+        anchor_48k(),
+        LinkWriteConfig::default(),
+    );
     let peer_link = AblLink::new(120.0);
     agogo_session.enable(true);
     peer_link.enable(true);
@@ -102,8 +99,11 @@ fn tempo_push_round_trip() {
 #[test]
 fn transport_link_to_agogo() {
     link_multicast_or_skip!();
-    let mut agogo_session =
-        LinkSession::new(Tempo::from_bpm_integer(120), anchor_48k(), LinkWriteConfig::default());
+    let mut agogo_session = LinkSession::new(
+        Tempo::from_bpm_integer(120),
+        anchor_48k(),
+        LinkWriteConfig::default(),
+    );
     let peer_link = AblLink::new(120.0);
     agogo_session.enable(true);
     peer_link.enable(true);
@@ -146,8 +146,11 @@ fn transport_link_to_agogo() {
 #[test]
 fn transport_agogo_to_link_one_shot() {
     link_multicast_or_skip!();
-    let mut agogo_session =
-        LinkSession::new(Tempo::from_bpm_integer(120), anchor_48k(), LinkWriteConfig::default());
+    let mut agogo_session = LinkSession::new(
+        Tempo::from_bpm_integer(120),
+        anchor_48k(),
+        LinkWriteConfig::default(),
+    );
     let peer_link = AblLink::new(120.0);
     agogo_session.enable(true);
     peer_link.enable(true);
@@ -173,7 +176,10 @@ fn transport_agogo_to_link_one_shot() {
     sleep(Duration::from_millis(300));
     agogo_session.enable(false);
     peer_link.enable(false);
-    assert!(playing, "peer never observed is_playing = true after UserStart");
+    assert!(
+        playing,
+        "peer never observed is_playing = true after UserStart"
+    );
 }
 
 #[test]
@@ -186,14 +192,17 @@ fn quantum_snap_produces_positive_offset() {
     // transform pipeline wired through the real audio callback,
     // which lands with Plan 05.
     link_multicast_or_skip!();
-    use agogo_core::channel::{Channel, ChannelCommon, MidiRole, MAX_DELAY};
+    use agogo_core::channel::{Channel, ChannelCommon, MAX_DELAY, MidiRole};
     use agogo_core::time::decimal::Micro;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
 
-    let mut agogo_session =
-        LinkSession::new(Tempo::from_bpm_integer(120), anchor_48k(), LinkWriteConfig::default());
+    let mut agogo_session = LinkSession::new(
+        Tempo::from_bpm_integer(120),
+        anchor_48k(),
+        LinkWriteConfig::default(),
+    );
     agogo_session.enable(true);
     // Let Link's internal state stabilise.
     sleep(Duration::from_millis(100));
@@ -230,11 +239,13 @@ fn quantum_snap_produces_positive_offset() {
     let final_offset = ch.common().offset;
     assert!(
         final_offset.0 >= 0,
-        "snap produced negative offset: {:?}", final_offset
+        "snap produced negative offset: {:?}",
+        final_offset
     );
     assert!(
         final_offset.0 < 2_000_001,
-        "snap offset {:?} exceeds one-quantum span at 120 BPM", final_offset
+        "snap offset {:?} exceeds one-quantum span at 120 BPM",
+        final_offset
     );
     // Also: the offset shouldn't accidentally saturate MAX_DELAY
     // (which would indicate unit confusion — MAX_DELAY is 300 ms).

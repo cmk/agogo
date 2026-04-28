@@ -26,12 +26,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::channel::scheduler::tick_stream_into;
 use crate::channel::{Channel, ScheduledEvent};
-use crate::time::sample::SampleTime;
-use crate::time::tempo::Tempo;
 use crate::host::AudioIo;
 use crate::out::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::sync::PhaseSource;
 use crate::sync::sample_tick::SampleTickConn;
+use crate::time::sample::SampleTime;
+use crate::time::tempo::Tempo;
 
 pub use spec::{ChannelSpec, ChannelSpecError, parse_channels};
 
@@ -357,7 +357,10 @@ impl<R: SampleTime> Machine<R> {
             // visible at the dispatch site rather than buried in a
             // catch-all match arm inside the renderer.
             match ch {
-                Channel::Midi { common: midi_common, role } => {
+                Channel::Midi {
+                    common: midi_common,
+                    role,
+                } => {
                     render_midi_channel(
                         midi_common,
                         role,
@@ -381,10 +384,10 @@ impl<R: SampleTime> Machine<R> {
 mod tests {
     use super::*;
     use crate::channel::{ChannelCommon, MidiRole};
-    use crate::time::decimal::Micro;
-    use crate::time::sample::S048;
     use crate::out::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
+    use crate::time::decimal::Micro;
     use crate::time::grid::Grid;
+    use crate::time::sample::S048;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
     use crate::time::tick::PPQN;
@@ -416,13 +419,7 @@ mod tests {
         let input = vec![0.0_f32; frames];
         let mut output: [f32; 0] = []; // PCM ABI
         for b in 0..n_buffers {
-            let mut io = AudioIo::new(
-                &input,
-                &mut output,
-                b * frames as u64,
-                sr,
-                frames,
-            );
+            let mut io = AudioIo::new(&input, &mut output, b * frames as u64, sr, frames);
             machine.on_buffer(&mut io, sink);
         }
     }
@@ -500,24 +497,14 @@ mod tests {
             if b == 5 {
                 stop.request_stop();
             }
-            let mut io = AudioIo::new(
-                &input,
-                &mut output,
-                b * frames as u64,
-                48_000,
-                frames,
-            );
+            let mut io = AudioIo::new(&input, &mut output, b * frames as u64, 48_000, frames);
             machine.on_buffer(&mut io, &sink);
         }
 
         let transport_records: Vec<(u64, u8)> = sink
             .records()
             .into_iter()
-            .filter(|r| {
-                r.bytes
-                    .iter()
-                    .any(|&b| b == MIDI_START || b == MIDI_STOP)
-            })
+            .filter(|r| r.bytes.iter().any(|&b| b == MIDI_START || b == MIDI_STOP))
             .map(|r| (r.at_sample, r.bytes[0]))
             .collect();
 
@@ -628,11 +615,7 @@ mod tests {
         let transport: Vec<(u64, u8)> = sink
             .records()
             .into_iter()
-            .filter(|r| {
-                r.bytes
-                    .iter()
-                    .any(|&b| b == MIDI_START || b == MIDI_STOP)
-            })
+            .filter(|r| r.bytes.iter().any(|&b| b == MIDI_START || b == MIDI_STOP))
             .map(|r| (r.at_sample, r.bytes[0]))
             .collect();
 
@@ -642,11 +625,11 @@ mod tests {
         // `running` to false — it's a fixture byte, not a stop-and-
         // silence command. Subsequent buffers would keep draining
         // the (now-empty) schedule with `next_byte` returning None.
-        assert_eq!(
-            transport,
-            vec![(4_096, MIDI_START), (3 * 4_096, MIDI_STOP)],
+        assert_eq!(transport, vec![(4_096, MIDI_START), (3 * 4_096, MIDI_STOP)],);
+        assert!(
+            machine.is_running(),
+            "Scripted Stop should not flip running"
         );
-        assert!(machine.is_running(), "Scripted Stop should not flip running");
     }
 
     proptest! {
@@ -905,19 +888,29 @@ mod tests {
     #[test]
     fn bars_filter_huge_n_keeps_only_first_event() {
         let bpm = Tempo::from_bpm_integer(120);
-        let cfg = MidiClickConfig { note: U7(76), vel: U7(100), ch: U4(9), accent: None };
+        let cfg = MidiClickConfig {
+            note: U7(76),
+            vel: U7(100),
+            ch: U4(9),
+            accent: None,
+        };
         let mut machine = Machine::<S048>::new(
             vec![click_channel(Grid::T16, cfg, NonZeroU16::new(u16::MAX))],
             PhaseSource::Internal { bpm },
-            48_000, bpm, PPQN,
-            TransportPolicy::Scripted { schedule: VecDeque::new() },
+            48_000,
+            bpm,
+            PPQN,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
             48_000, // 1 sec at 48k = ~16 sixteenth-note events
         );
         let sink = TestSink::new();
         drive_buffers(&mut machine, &sink, 4, 48_000, 48_000);
         let on_samples = collect_tick_samples(&sink, true, U4(9));
         assert_eq!(
-            on_samples.len(), 1,
+            on_samples.len(),
+            1,
             "bars=u16::MAX must filter all but the first event, got {} clicks",
             on_samples.len(),
         );

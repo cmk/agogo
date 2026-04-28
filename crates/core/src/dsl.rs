@@ -94,18 +94,12 @@ mod tests {
 
     #[test]
     fn imply() {
-        assert_eq!(
-            parse("T16>T8", &[]).unwrap(),
-            Grid::T16.imp(&Grid::T8)
-        );
+        assert_eq!(parse("T16>T8", &[]).unwrap(), Grid::T16.imp(&Grid::T8));
     }
 
     #[test]
     fn coimply() {
-        assert_eq!(
-            parse("T16<T8", &[]).unwrap(),
-            Grid::T16.coimp(&Grid::T8)
-        );
+        assert_eq!(parse("T16<T8", &[]).unwrap(), Grid::T16.coimp(&Grid::T8));
     }
 
     #[test]
@@ -125,10 +119,7 @@ mod tests {
     #[test]
     fn var_in_meet() {
         let env = vec![("kick".to_string(), Grid::T4)];
-        assert_eq!(
-            parse("kick&T16", &env).unwrap(),
-            Grid::T4.meet(&Grid::T16)
-        );
+        assert_eq!(parse("kick&T16", &env).unwrap(), Grid::T4.meet(&Grid::T16));
     }
 
     #[test]

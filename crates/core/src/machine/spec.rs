@@ -30,18 +30,18 @@
 use core::num::{NonZeroU16, NonZeroU32};
 use std::fmt::{self, Display};
 
+use crate::channel::Channel;
 use crate::channel::role::{ChannelCommon, MidiClickAccent, MidiClickConfig, MidiRole};
 use crate::channel::transform::MAX_DELAY;
-use crate::channel::Channel;
 use crate::dsl;
+use crate::midi::{U4, U7};
 use crate::time::decimal::Micro;
 use crate::time::float::F064FD06;
-use connections::extended::Extended;
-use connections::float::ExtendedFloat;
-use crate::midi::{U4, U7};
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
 use crate::time::tbase::TBase;
+use connections::extended::Extended;
+use connections::float::ExtendedFloat;
 
 /// Parsed `--ch` spec.
 ///
@@ -253,9 +253,10 @@ impl ChannelSpec {
                     let n = v
                         .parse::<u16>()
                         .map_err(|e| ChannelSpecError::BadValue("bars", e.to_string()))?;
-                    bars = Some(NonZeroU16::new(n).ok_or_else(|| {
-                        ChannelSpecError::BadValue("bars", "must be > 0".into())
-                    })?);
+                    bars =
+                        Some(NonZeroU16::new(n).ok_or_else(|| {
+                            ChannelSpecError::BadValue("bars", "must be > 0".into())
+                        })?);
                 }
                 "swing" => {
                     swing = parse_swing(&v)?;
@@ -303,11 +304,9 @@ impl ChannelSpec {
                     delay = candidate;
                 }
                 "snap-quantum-us" => {
-                    snap_to_quantum_micro = Some(
-                        v.parse::<i64>().map_err(|e| {
-                            ChannelSpecError::BadValue("snap-quantum-us", e.to_string())
-                        })?,
-                    );
+                    snap_to_quantum_micro = Some(v.parse::<i64>().map_err(|e| {
+                        ChannelSpecError::BadValue("snap-quantum-us", e.to_string())
+                    })?);
                 }
                 other => return Err(ChannelSpecError::UnknownKey(other.to_string())),
             }
@@ -360,8 +359,7 @@ impl ChannelSpec {
                 let ch = mch_zero_based.unwrap_or(U4(9));
                 let accent = match accent_every {
                     Some(e) => {
-                        let av =
-                            accent_vel.ok_or(ChannelSpecError::MissingKey("accent-vel"))?;
+                        let av = accent_vel.ok_or(ChannelSpecError::MissingKey("accent-vel"))?;
                         let an = accent_note.unwrap_or(note);
                         Some(MidiClickAccent {
                             // SAFETY: e > 0 enforced at parse time.
@@ -470,17 +468,12 @@ impl ChannelSpec {
 /// are auto-assigned IDs (`C1`, `C2`, ...).
 ///
 /// Returns `(id, ChannelSpec)` pairs in definition order.
-pub fn parse_channels(
-    specs: &[String],
-) -> Result<Vec<(String, ChannelSpec)>, ChannelSpecError> {
+pub fn parse_channels(specs: &[String]) -> Result<Vec<(String, ChannelSpec)>, ChannelSpecError> {
     let mut env: Vec<(String, Grid)> = Vec::new();
     let mut result = Vec::new();
     for (i, s) in specs.iter().enumerate() {
         let spec = ChannelSpec::parse(s, &env)?;
-        let id = spec
-            .id
-            .clone()
-            .unwrap_or_else(|| format!("C{}", i + 1));
+        let id = spec.id.clone().unwrap_or_else(|| format!("C{}", i + 1));
         // Reject IDs that are valid grid names — they can never be
         // referenced as variables since the parser always tries
         // Grid::from_str first.
@@ -516,10 +509,7 @@ fn parse_swing(v: &str) -> Result<SwingConfig, ChannelSpecError> {
         let amount = amt_str
             .parse::<i8>()
             .map_err(|e| ChannelSpecError::BadValue("swing", e.to_string()))?;
-        Ok(SwingConfig {
-            resolution,
-            amount,
-        })
+        Ok(SwingConfig { resolution, amount })
     } else {
         let amount = v
             .parse::<i8>()
@@ -634,9 +624,7 @@ impl Display for ChannelSpec {
 }
 
 fn quote_if_needed(v: &str) -> String {
-    if v.chars()
-        .any(|c| c == ',' || c == '=' || c.is_whitespace())
-    {
+    if v.chars().any(|c| c == ',' || c == '=' || c.is_whitespace()) {
         format!("\"{}\"", v)
     } else {
         v.to_string()
@@ -727,7 +715,13 @@ mod tests {
         assert_eq!(spec.grid, Grid::T4); // default
         // dev field is gone (audit P4); the parser still requires
         // the `dev=` key but stores nothing.
-        assert_eq!(spec.swing, SwingConfig { resolution: TBase::T8, amount: 0 });
+        assert_eq!(
+            spec.swing,
+            SwingConfig {
+                resolution: TBase::T8,
+                amount: 0
+            }
+        );
         assert_eq!(spec.offset_ticks, 0);
     }
 
@@ -767,25 +761,49 @@ mod tests {
     #[test]
     fn parse_swing_bare_amount() {
         let spec = ChannelSpec::parse("dev=midi,swing=80", &[]).unwrap();
-        assert_eq!(spec.swing, SwingConfig { resolution: TBase::T8, amount: 80 });
+        assert_eq!(
+            spec.swing,
+            SwingConfig {
+                resolution: TBase::T8,
+                amount: 80
+            }
+        );
     }
 
     #[test]
     fn parse_swing_with_resolution() {
         let spec = ChannelSpec::parse("dev=midi,swing=T16:80", &[]).unwrap();
-        assert_eq!(spec.swing, SwingConfig { resolution: TBase::T16, amount: 80 });
+        assert_eq!(
+            spec.swing,
+            SwingConfig {
+                resolution: TBase::T16,
+                amount: 80
+            }
+        );
     }
 
     #[test]
     fn parse_swing_negative() {
         let spec = ChannelSpec::parse("dev=midi,swing=-40", &[]).unwrap();
-        assert_eq!(spec.swing, SwingConfig { resolution: TBase::T8, amount: -40 });
+        assert_eq!(
+            spec.swing,
+            SwingConfig {
+                resolution: TBase::T8,
+                amount: -40
+            }
+        );
     }
 
     #[test]
     fn parse_swing_explicit_negative() {
         let spec = ChannelSpec::parse("dev=midi,swing=T16:-40", &[]).unwrap();
-        assert_eq!(spec.swing, SwingConfig { resolution: TBase::T16, amount: -40 });
+        assert_eq!(
+            spec.swing,
+            SwingConfig {
+                resolution: TBase::T16,
+                amount: -40
+            }
+        );
     }
 
     // ── Offset ───────────────────────────────────────────────────
@@ -936,7 +954,8 @@ mod tests {
 
     #[test]
     fn display_round_trip_full() {
-        let spec = ChannelSpec::parse("dev=midi,grid=T16,swing=T16:80,offset=20,delay=5", &[]).unwrap();
+        let spec =
+            ChannelSpec::parse("dev=midi,grid=T16,swing=T16:80,offset=20,delay=5", &[]).unwrap();
         let s = spec.to_string();
         let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
         assert_eq!(spec, reparsed);
@@ -947,7 +966,10 @@ mod tests {
         let spec = ChannelSpec::parse("dev=midi,swing=80", &[]).unwrap();
         let s = spec.to_string();
         assert!(s.contains("swing=80"), "got: {s}");
-        assert!(!s.contains("swing=t8:"), "should omit default resolution, got: {s}");
+        assert!(
+            !s.contains("swing=t8:"),
+            "should omit default resolution, got: {s}"
+        );
     }
 
     #[test]
@@ -968,8 +990,7 @@ mod tests {
 
     #[test]
     fn display_quotes_values_with_commas() {
-        let spec =
-            ChannelSpec::parse(r#"dev=midi,out="port,with,commas""#, &[]).unwrap();
+        let spec = ChannelSpec::parse(r#"dev=midi,out="port,with,commas""#, &[]).unwrap();
         let s = spec.to_string();
         assert!(s.contains(r#"out="port,with,commas""#), "got: {s}");
         let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
@@ -1027,7 +1048,8 @@ mod tests {
     /// arithmetic hazards in the round-trip path.
     fn arb_bars() -> impl Strategy<Value = Option<NonZeroU16>> {
         prop::option::of(
-            any::<u16>().prop_filter("bars > 0", |&n| n > 0)
+            any::<u16>()
+                .prop_filter("bars > 0", |&n| n > 0)
                 .prop_map(|n| NonZeroU16::new(n).unwrap()),
         )
     }
@@ -1123,8 +1145,7 @@ mod tests {
 
     #[test]
     fn parse_click_defaults_mch_to_10() {
-        let spec = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=76,vel=100", &[])
-            .unwrap();
+        let spec = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=76,vel=100", &[]).unwrap();
         let cfg = match spec.mode {
             MidiRole::Click(c) => c,
             _ => panic!(),
@@ -1170,8 +1191,7 @@ mod tests {
 
     #[test]
     fn parse_rejects_vel_zero() {
-        let err =
-            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=0", &[]).unwrap_err();
+        let err = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=0", &[]).unwrap_err();
         match err {
             ChannelSpecError::BadValue(key, _) => assert_eq!(key, "vel"),
             other => panic!("unexpected: {:?}", other),
@@ -1190,16 +1210,14 @@ mod tests {
 
     #[test]
     fn parse_rejects_mch_zero_or_above_16() {
-        let err =
-            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=0", &[])
-                .unwrap_err();
+        let err = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=0", &[])
+            .unwrap_err();
         match err {
             ChannelSpecError::BadValue(key, _) => assert_eq!(key, "mch"),
             _ => panic!("expected BadValue"),
         }
-        let err =
-            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=17", &[])
-                .unwrap_err();
+        let err = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=17", &[])
+            .unwrap_err();
         match err {
             ChannelSpecError::BadValue(key, _) => assert_eq!(key, "mch"),
             _ => panic!("expected BadValue"),
@@ -1258,22 +1276,26 @@ mod tests {
     #[test]
     fn into_channel_click_maps_mch_to_zero_based() {
         let spec =
-            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=10", &[])
-                .unwrap();
+            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80,mch=10", &[]).unwrap();
         let ch = spec.into_channel().unwrap();
         match ch {
-            Channel::Midi { role: MidiRole::Click(cfg), .. } => assert_eq!(cfg.ch, U4(9)),
+            Channel::Midi {
+                role: MidiRole::Click(cfg),
+                ..
+            } => assert_eq!(cfg.ch, U4(9)),
             _ => panic!("expected Channel::Midi {{ role: Click(_) }}"),
         }
     }
 
     #[test]
     fn into_channel_click_no_accent_when_accent_every_absent() {
-        let spec =
-            ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80", &[]).unwrap();
+        let spec = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=37,vel=80", &[]).unwrap();
         let ch = spec.into_channel().unwrap();
         match ch {
-            Channel::Midi { role: MidiRole::Click(cfg), .. } => assert!(cfg.accent.is_none()),
+            Channel::Midi {
+                role: MidiRole::Click(cfg),
+                ..
+            } => assert!(cfg.accent.is_none()),
             _ => panic!(),
         }
     }

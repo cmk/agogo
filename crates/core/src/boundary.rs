@@ -30,6 +30,25 @@ use crate::time::float::{F064FD06, F064FD12};
 use crate::time::sample::{FD12S044, FD12S048, FD12S088, FD12S096, FD12S176, FD12S192};
 use crate::time::tempo::Tempo;
 
+/// Maximum representable BPM as `f64`: `u32::MAX as f64 / 10⁶`
+/// ≈ 4294.967295. Used as the upper bound for argv parsers
+/// that want to reject "out of range" BPM rather than silently
+/// saturate.
+///
+/// Computed as a plain `u32 as f64 / 1.0e6` because
+/// `tempo_to_f64_bpm(Tempo(u32::MAX))` returns a much larger
+/// value (the `I064U032.inner` saturating-widen step lifts
+/// `u32::MAX` to `i64::MAX` before the F-ladder inverse, so
+/// the result is `i64::MAX / 10⁶` ≈ 9.22 × 10¹²). The `× 10⁻⁶`
+/// here is a one-off domain-boundary constant, not a per-input
+/// scale shift.
+///
+/// Lives here in `boundary` (rather than as `Tempo::MAX_BPM_F64`)
+/// so `crate::time::tempo` stays f64-free per the workspace's
+/// `scripts/check-floats.sh` allowlist (Plan 2026-04-28-03 review
+/// round 1).
+pub const MAX_BPM_F64: f64 = (u32::MAX as f64) / 1_000_000.0;
+
 /// Extract the finite f64 from an `ExtendedFloat` produced by a
 /// finite-domain Conn::inner call. Documents the finite-input
 /// invariant once, so the unreachable! arms in `tempo_to_f64_bpm`

@@ -71,3 +71,117 @@ references after the rewrite (only doc-comment historical citations).
 
 These ride along in follow-up plans; the deferred section of
 plan-2026-04-28-03.md tracks them.
+
+## Local review (2026-04-29)
+
+**Branch:** plan/2026-04-28-03
+**Commits:** 8 (origin/main..plan/2026-04-28-03)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+
+All eight commits use valid prefixes (`plan:`, `debt:`, `fix:`,
+`doc:`); messages are conventional and accurate. The `debt:` commits
+are pure structural reorgs with no logic changes — `cargo test
+--workspace` passes at each commit boundary as a credible
+consequence. No merge commits; history is linear.
+
+### Code Quality
+
+**Must-fix (round 1, addressed below): `scripts/check-floats.sh`
+allowlist was stale.** Four new files (`crates/core/src/boundary.rs`,
+`crates/core/src/time/float.rs`, `crates/core/src/time/tempo.rs`,
+`crates/host-link/src/quantum.rs`) contained legitimate `f64` uses
+(PI-exempt, vendored-Conn-machinery, FFI-parity) but weren't on the
+allowlist; the deleted `crates/core/src/fxp.rs` was still listed.
+The CI gate would have failed on push.
+
+**Must-fix (round 1, addressed): `time/decimal.rs` allowlist entry
+was now a false-positive stub.** After T1 split `float_conn!` out,
+`decimal.rs` contains no live `f64` — only a doc-comment reference
+to `ExtendedFloat<f64>` (line 146), which the gate's `//`-prefix
+skip already handles. Removed from the allowlist.
+
+**Other quality findings (all clean):**
+- `finite_or_unreachable` helper in `boundary.rs` is called at
+  exactly two sites (`tempo_to_f64_bpm`, `pico_to_f64_seconds`) —
+  intent-preserving dedupe, not a smell.
+- `time::float` re-exports `Extended` / `ExtendedFloat` so cli /
+  host-link reach them via `agogo_core::time::float::*` without a
+  direct `connections` dep. Plan's Review section explicitly
+  documents this deviation.
+- No bespoke `f64_*_to_*` helpers where a `Conn` would do —
+  `f64_beats_to_quantum` and `f64_bpm_to_tempo` document why
+  round-half-away-from-zero (matching Link's C++ `std::llround`)
+  isn't a Galois adjoint.
+- No open-coded unit arithmetic inside Conn-wrapper bodies.
+- `grep -rn "agogo_core::fxp\|crate::fxp" crates/` returns 0 live
+  references.
+
+### Test Coverage
+
+All moved tests confirmed present and gated correctly:
+- T1 (float_conn): full proptest battery moved to `time/float.rs::tests`.
+- T3 (SampleTickConn): 16 tests in `sync/sample_tick.rs::tests`,
+  including the 8-test `mod exactness` absorbed from
+  `time/exact_rates.rs`.
+- T4 (Phase): 4 proptests in `sync/phase.rs::tests`. Tempo has no
+  type-local tests (boundary tests live alongside the f64 helpers).
+  Quantum: 4 tests in `host-link/quantum.rs::tests`.
+- T5 (boundary): 8 proptests + spot checks in `boundary.rs::tests`.
+- T10 (snap_offset): pre-existing proptests + spot checks survive
+  the inline reshape unchanged.
+
+Workspace test counts: 939 (core lib) + 39+39 (cli, two binaries) +
+1 (doc) + 31+4 (host-link) + 10 (host-cpal) + 2 (host-midi) = 1065
+tests, 0 failed.
+
+### Plan Conformance
+
+T1, T2, T3, T4, T5, T10 all implemented as written. The plan's
+explicit deferrals (T6 `LpfPid`, T7 `TransportState`, T8
+`RelativeClock`, T9 `machine/spec`, T11 CLI `main`, T12 stragglers)
+are correctly out of scope for this PR. The plan's Review section
+documents two design deviations (no `compose!`/`ceiling1` body
+cleanups in T5; `Extended`/`ExtendedFloat` re-exported from
+`time::float`) — both visible in the diff.
+
+### Risks
+
+**Resolved (round 1):** `Tempo::MAX_BPM_F64` was a `pub const f64`
+on a non-allowlisted file. Moved to `crate::boundary::MAX_BPM_F64`
+(callers updated in `cli/main.rs` and `cli/run.rs`). Keeps
+`time/tempo.rs` f64-free.
+
+**Acceptable risks:**
+- `snap_intent()` signature change `Option<Quantum>` →
+  `Option<Micro>` only affects test code (no production callers
+  per plan and grep). Tests updated.
+- The `Quantum` cross-crate move from `core` → `host-link` is the
+  largest API-surface change but every caller is feature-gated on
+  `link` and updates land in this commit.
+
+No new dependencies added. No security concerns (the diff is
+structural Rust moves).
+
+### Recommendations
+
+**Must fix before push (round 1, addressed):**
+
+1. ✅ Update `scripts/check-floats.sh` allowlist (add
+   `boundary.rs`, `time/float.rs`, `host-link/quantum.rs`; remove
+   `fxp.rs`, `time/decimal.rs`). Update CLAUDE.md to match.
+2. ✅ Move `Tempo::MAX_BPM_F64` to `boundary::MAX_BPM_F64` so
+   `time/tempo.rs` stays f64-free and doesn't need an allowlist
+   entry.
+
+**Follow-up (future work):**
+
+3. The `finite_or_unreachable` helper is a candidate for the
+   compose!-cleanup follow-up plan once `LinkClock::snap_offset_micro`
+   needs a similar one (currently inlines its own match). Potential
+   single helper across `boundary.rs` and `host-link::link.rs`.
+4. The plan's deferred items (T6–T8 borrow tasks; T9/T11/T12
+   kitchen-sink splits) all remain reasonable post-merge follow-ups.

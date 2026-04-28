@@ -27,18 +27,10 @@ pub fn eval_expr(expr: &Expr, env: &[(String, Grid)], source: &str) -> Result<Gr
                 source: source.to_string(),
             }),
         Expr::Neg(inner, _) => Ok(eval_expr(inner, env, source)?.neg()),
-        Expr::Meet(a, b, _) => {
-            Ok(eval_expr(a, env, source)?.meet(&eval_expr(b, env, source)?))
-        }
-        Expr::Join(a, b, _) => {
-            Ok(eval_expr(a, env, source)?.join(&eval_expr(b, env, source)?))
-        }
-        Expr::Imply(a, b, _) => {
-            Ok(eval_expr(a, env, source)?.imp(&eval_expr(b, env, source)?))
-        }
-        Expr::Coimply(a, b, _) => {
-            Ok(eval_expr(a, env, source)?.coimp(&eval_expr(b, env, source)?))
-        }
+        Expr::Meet(a, b, _) => Ok(eval_expr(a, env, source)?.meet(&eval_expr(b, env, source)?)),
+        Expr::Join(a, b, _) => Ok(eval_expr(a, env, source)?.join(&eval_expr(b, env, source)?)),
+        Expr::Imply(a, b, _) => Ok(eval_expr(a, env, source)?.imp(&eval_expr(b, env, source)?)),
+        Expr::Coimply(a, b, _) => Ok(eval_expr(a, env, source)?.coimp(&eval_expr(b, env, source)?)),
     }
 }
 
@@ -62,34 +54,22 @@ mod tests {
 
     #[test]
     fn meet() {
-        assert_eq!(
-            eval("T16&T8", &[]).unwrap(),
-            Grid::T16.meet(&Grid::T8)
-        );
+        assert_eq!(eval("T16&T8", &[]).unwrap(), Grid::T16.meet(&Grid::T8));
     }
 
     #[test]
     fn join() {
-        assert_eq!(
-            eval("T16|T8", &[]).unwrap(),
-            Grid::T16.join(&Grid::T8)
-        );
+        assert_eq!(eval("T16|T8", &[]).unwrap(), Grid::T16.join(&Grid::T8));
     }
 
     #[test]
     fn imply() {
-        assert_eq!(
-            eval("T16>T8", &[]).unwrap(),
-            Grid::T16.imp(&Grid::T8)
-        );
+        assert_eq!(eval("T16>T8", &[]).unwrap(), Grid::T16.imp(&Grid::T8));
     }
 
     #[test]
     fn coimply() {
-        assert_eq!(
-            eval("T16<T8", &[]).unwrap(),
-            Grid::T16.coimp(&Grid::T8)
-        );
+        assert_eq!(eval("T16<T8", &[]).unwrap(), Grid::T16.coimp(&Grid::T8));
     }
 
     #[test]
@@ -106,10 +86,7 @@ mod tests {
     #[test]
     fn var_in_expr() {
         let env = vec![("kick".to_string(), Grid::T4)];
-        assert_eq!(
-            eval("kick&T16", &env).unwrap(),
-            Grid::T4.meet(&Grid::T16)
-        );
+        assert_eq!(eval("kick&T16", &env).unwrap(), Grid::T4.meet(&Grid::T16));
     }
 
     #[test]
@@ -133,10 +110,7 @@ mod tests {
         // channel N can only reference channels 1..N-1.
         let env = vec![("C1".to_string(), Grid::T4)];
         let err = eval("C2&C1", &env).unwrap_err();
-        assert_eq!(
-            err.kind,
-            DslErrorKind::UnknownVariable("C2".to_string())
-        );
+        assert_eq!(err.kind, DslErrorKind::UnknownVariable("C2".to_string()));
     }
 
     #[test]

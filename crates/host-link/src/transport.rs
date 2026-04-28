@@ -104,10 +104,7 @@ mod tests {
 
     #[test]
     fn user_stop_from_playing_publishes_stopped() {
-        let (state, outs) = run(&[
-            TransportEvent::UserStart,
-            TransportEvent::UserStop,
-        ]);
+        let (state, outs) = run(&[TransportEvent::UserStart, TransportEvent::UserStop]);
         assert!(matches!(state, TransportState::Stopped));
         assert!(matches!(outs[1], Some(TransportOutput::PublishStopped)));
     }
@@ -152,7 +149,10 @@ mod tests {
         // Stopped + UserStop → Stopped (no output).
         // Playing + UserStart → Playing (no output).
         let cases: &[(&[TransportEvent], TransportState)] = &[
-            (&[TransportEvent::LinkReportsStopped], TransportState::Stopped),
+            (
+                &[TransportEvent::LinkReportsStopped],
+                TransportState::Stopped,
+            ),
             (&[TransportEvent::UserStop], TransportState::Stopped),
             (
                 &[
