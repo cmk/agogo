@@ -28,7 +28,6 @@
 //! float exception 4.
 
 use core::num::{NonZeroU16, NonZeroU32};
-use std::fmt::{self, Display};
 
 use crate::channel::role::{MidiClickAccent, MidiClickConfig, MidiRole};
 use crate::dsl;
@@ -41,6 +40,7 @@ use crate::time::tbase::TBase;
 use connections::extended::Extended;
 use connections::float::ExtendedFloat;
 
+pub mod display;
 pub mod error;
 pub mod types;
 pub mod validate;
@@ -430,97 +430,6 @@ fn micro_from_user_ms(ms: f64) -> Option<Micro> {
     }
 }
 
-impl Display for ChannelSpec {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // `dev=midi` is the only supported value (audit P4); emitted
-        // as a literal so the round-trip parser still sees the
-        // required key.
-        write!(f, "dev=midi,grid={}", self.grid)?;
-        if let Some(id) = &self.id {
-            write!(f, ",id={}", quote_if_needed(id))?;
-        }
-        if let Some(out) = &self.out {
-            write!(f, ",out={}", quote_if_needed(out))?;
-        }
-        // mode + click keys: emit only when non-default
-        // (MidiRole::Clock is the implicit default, so it's omitted).
-        match &self.mode {
-            MidiRole::Clock => {}
-            MidiRole::Click(cfg) => {
-                write!(
-                    f,
-                    ",mode=click,note={},vel={},mch={}",
-                    cfg.note,
-                    cfg.vel,
-                    cfg.ch.0 + 1, // user-facing 1-based
-                )?;
-                if let Some(a) = &cfg.accent {
-                    write!(f, ",accent-every={},accent-vel={}", a.every, a.vel)?;
-                    // `accent-note` defaults to `note` at parse;
-                    // emit it only when it differs so the round-trip
-                    // doesn't introduce a redundant key.
-                    if a.note != cfg.note {
-                        write!(f, ",accent-note={}", a.note)?;
-                    }
-                }
-            }
-            // MidiRole::Cc is a spec-surface stub; the parser doesn't
-            // produce it today, so the Display side stays silent.
-            MidiRole::Cc(_) => {}
-        }
-        if self.swing.amount != 0 || self.swing.resolution != TBase::T8 {
-            if self.swing.resolution == TBase::T8 {
-                write!(f, ",swing={}", self.swing.amount)?;
-            } else {
-                write!(f, ",swing={}:{}", self.swing.resolution, self.swing.amount)?;
-            }
-        }
-        if self.offset_ticks != 0 {
-            write!(f, ",offset={}", self.offset_ticks)?;
-        }
-        if self.delay != Micro::ZERO {
-            // Parser rejects negative delay (audit Q3 round-1 fix);
-            // the spec layer guarantees `self.delay.0 >= 0`. Assert
-            // here so a future path that constructs ChannelSpec
-            // directly (test code, arb extension) surfaces the
-            // invariant violation rather than silently corrupting
-            // the Display output.
-            debug_assert!(
-                self.delay.0 >= 0,
-                "ChannelSpec.delay invariant violated: {:?} < 0",
-                self.delay
-            );
-            // Print as decimal milliseconds (parser-stable).
-            // Sub-µs precision was already lost through F064FD06.ceil
-            // at parse time; the integer-ms parse path round-trips
-            // bit-exactly.
-            let us = self.delay.0;
-            let ms_int = us / 1_000;
-            let frac = (us % 1_000) as u64;
-            if frac == 0 {
-                write!(f, ",delay={ms_int}")?;
-            } else {
-                write!(f, ",delay={ms_int}.{frac:03}")?;
-            }
-        }
-        if let Some(q) = self.snap_to_quantum_micro {
-            write!(f, ",snap-quantum-us={}", q)?;
-        }
-        if let Some(b) = self.bars {
-            write!(f, ",bars={}", b)?;
-        }
-        Ok(())
-    }
-}
-
-fn quote_if_needed(v: &str) -> String {
-    if v.chars().any(|c| c == ',' || c == '=' || c.is_whitespace()) {
-        format!("\"{}\"", v)
-    } else {
-        v.to_string()
-    }
-}
-
 /// Tokenise a `key=val[,key=val]*` string into key/value pairs.
 fn tokenize(s: &str) -> Result<Vec<(String, String)>, ChannelSpecError> {
     let s = s.trim();
@@ -595,7 +504,6 @@ fn tokenize(s: &str) -> Result<Vec<(String, String)>, ChannelSpecError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::prelude::*;
 
     // ── Basic parsing ────────────────────────────────────────────
 
@@ -825,180 +733,9 @@ mod tests {
         );
     }
 
-    // ── Display round-trip ───────────────────────────────────────
+    // Display + round-trip tests moved to 
+    // (Plan 2026-04-28-06 T4).
 
-    #[test]
-    fn display_round_trip_minimal() {
-        let spec = ChannelSpec::parse("dev=midi", &[]).unwrap();
-        let s = spec.to_string();
-        let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
-        assert_eq!(spec, reparsed);
-    }
-
-    #[test]
-    fn display_round_trip_full() {
-        let spec =
-            ChannelSpec::parse("dev=midi,grid=T16,swing=T16:80,offset=20,delay=5", &[]).unwrap();
-        let s = spec.to_string();
-        let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
-        assert_eq!(spec, reparsed);
-    }
-
-    #[test]
-    fn display_swing_default_res_omits_resolution() {
-        let spec = ChannelSpec::parse("dev=midi,swing=80", &[]).unwrap();
-        let s = spec.to_string();
-        assert!(s.contains("swing=80"), "got: {s}");
-        assert!(
-            !s.contains("swing=t8:"),
-            "should omit default resolution, got: {s}"
-        );
-    }
-
-    #[test]
-    fn display_swing_explicit_res_includes_resolution() {
-        let spec = ChannelSpec::parse("dev=midi,swing=T16:80", &[]).unwrap();
-        let s = spec.to_string();
-        assert!(s.contains("swing=t16:80"), "got: {s}");
-    }
-
-    #[test]
-    fn display_quotes_values_with_spaces() {
-        let spec = ChannelSpec::parse(r#"dev=midi,out="IAC Bus 1""#, &[]).unwrap();
-        let s = spec.to_string();
-        assert!(s.contains(r#"out="IAC Bus 1""#), "got: {s}");
-        let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
-        assert_eq!(spec, reparsed);
-    }
-
-    #[test]
-    fn display_quotes_values_with_commas() {
-        let spec = ChannelSpec::parse(r#"dev=midi,out="port,with,commas""#, &[]).unwrap();
-        let s = spec.to_string();
-        assert!(s.contains(r#"out="port,with,commas""#), "got: {s}");
-        let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
-        assert_eq!(spec, reparsed);
-    }
-
-    // ── Proptest ─────────────────────────────────────────────────
-
-    fn arb_grid() -> impl Strategy<Value = Grid> {
-        prop::sample::select(Grid::ALL.as_slice())
-    }
-
-    fn arb_tbase() -> impl Strategy<Value = TBase> {
-        prop::sample::select(TBase::ALL.as_slice())
-    }
-
-    /// Generate a `MidiRole` reachable from the spec parser:
-    /// `Clock` or `Click(MidiClickConfig)` with arbitrary
-    /// note/vel/ch and an optional accent.
-    ///
-    /// `accent.every` spans the full `NonZeroU32` domain — the
-    /// round-trip property is u32-shape-preserving (parse-as-u32,
-    /// Display via `Display for NonZeroU32`), so the entire domain
-    /// is safe to sample. Per CLAUDE.md: don't bound to "keep
-    /// things small," only to avoid documented hazards.
-    fn arb_mode() -> impl Strategy<Value = MidiRole> {
-        let click = (
-            0u8..=127,
-            1u8..=127,
-            0u8..=15,
-            prop::option::of((
-                any::<u32>().prop_filter("every > 0", |&n| n > 0),
-                0u8..=127,
-                1u8..=127,
-            )),
-        )
-            .prop_map(|(note, vel, ch, accent_triple)| {
-                let accent = accent_triple.map(|(every, an, av)| MidiClickAccent {
-                    every: NonZeroU32::new(every).unwrap(),
-                    note: U7(an),
-                    vel: U7(av),
-                });
-                MidiRole::Click(MidiClickConfig {
-                    note: U7(note),
-                    vel: U7(vel),
-                    ch: U4(ch),
-                    accent,
-                })
-            });
-        prop_oneof![Just(MidiRole::Clock), click]
-    }
-
-    /// Full `NonZeroU16` domain for `bars` — same justification as
-    /// `arb_mode`'s `every`: parser is u16-shape-preserving, no
-    /// arithmetic hazards in the round-trip path.
-    fn arb_bars() -> impl Strategy<Value = Option<NonZeroU16>> {
-        prop::option::of(
-            any::<u16>()
-                .prop_filter("bars > 0", |&n| n > 0)
-                .prop_map(|n| NonZeroU16::new(n).unwrap()),
-        )
-    }
-
-    fn arb_spec() -> impl Strategy<Value = ChannelSpec> {
-        (
-            arb_grid(),
-            prop::option::of("[a-zA-Z][a-zA-Z0-9]{0,8}"),
-            prop::option::of("[a-zA-Z0-9]{1,10}"),
-            arb_tbase(),
-            any::<i8>(),
-            any::<i32>(),
-            0u32..=300,
-            prop::option::of(any::<i32>().prop_map(|n| n as i64)),
-            arb_mode(),
-            arb_bars(),
-        )
-            .prop_map(
-                |(
-                    grid,
-                    id,
-                    out,
-                    swing_res,
-                    swing_amt,
-                    offset_ticks,
-                    delay_ms_int,
-                    snap,
-                    mode,
-                    bars,
-                )| {
-                    ChannelSpec {
-                        id,
-                        out,
-                        grid,
-                        mode,
-                        swing: SwingConfig {
-                            resolution: swing_res,
-                            amount: swing_amt,
-                        },
-                        offset_ticks,
-                        // Generator yields integer milliseconds in
-                        // [0, 300]; convert to Micro at the strategy
-                        // boundary so the spec stays typed.
-                        delay: Micro(i64::from(delay_ms_int) * 1_000),
-                        snap_to_quantum_micro: snap,
-                        bars,
-                    }
-                },
-            )
-    }
-
-    proptest! {
-        /// Plan 14 property `spec_round_trip`: the `Display` impl
-        /// emits parser-stable output, so `parse(spec.to_string())`
-        /// recovers the same spec for every value the strategy
-        /// generates. Plan 2026-04-25-03 extends the strategy with
-        /// `mode=click` (note/vel/mch/accent-*) and `bars` so
-        /// round-trip pins both the existing and new keys.
-        #[test]
-        fn spec_round_trip(spec in arb_spec()) {
-            let s = spec.to_string();
-            let parsed = ChannelSpec::parse(&s, &[])
-                .map_err(|e| TestCaseError::fail(format!("parse `{}`: {}", s, e)))?;
-            prop_assert_eq!(parsed, spec);
-        }
-    }
 
     // ── Plan 2026-04-25-03: mode=click + bars spot checks ──────
 
