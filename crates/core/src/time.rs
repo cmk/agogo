@@ -30,6 +30,7 @@ pub mod grid;
 pub mod sample;
 pub mod swing;
 pub mod tbase;
+pub mod tempo;
 pub mod tick;
 
 #[cfg(test)]

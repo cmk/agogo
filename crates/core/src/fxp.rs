@@ -79,143 +79,17 @@ pub use crate::time::decimal::FD12 as Pico;
 // `SampleTime` trait moved to `crate::time::sample` (Plan 2026-04-28-03 T2);
 // re-exported above alongside the `Sxxx` rate types it lives over.
 
-// ────────────────────────────────────────────────────────────────────
-// Phase — Q0.32 cycles.
-//
-// The whole u32 range maps to [0, 1) cycles; wrapping_add IS modular
-// reduction, which is the load-bearing property of the NCO hot path.
-// ────────────────────────────────────────────────────────────────────
-
-/// A phase in `[0, 1)` cycles as unsigned Q0.32.
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
-pub struct Phase(pub u32);
-
-impl Phase {
-    pub const ZERO: Self = Self(0);
-
-    pub const fn wrapping_add(self, rhs: Self) -> Self {
-        Self(self.0.wrapping_add(rhs.0))
-    }
-
-    pub const fn wrapping_sub(self, rhs: Self) -> Self {
-        Self(self.0.wrapping_sub(rhs.0))
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Tempo — BPM × 10⁶ stored as u32.
-//
-// Range 0..≈4295 BPM (plenty for music). Resolution 10⁻⁶ BPM, well
-// below any human perceptual threshold.
-// ────────────────────────────────────────────────────────────────────
-
-/// Beats per minute × 10⁶.
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Tempo(pub u32);
-
-impl Tempo {
-    pub const ZERO: Self = Self(0);
-
-    /// Maximum representable BPM as `f64`: `u32::MAX as f64 / 10⁶`
-    /// ≈ 4294.967295. Used as the upper bound for argv parsers
-    /// that want to reject "out of range" BPM rather than silently
-    /// saturate.
-    ///
-    /// Computed as a plain `u32 as f64 / 1.0e6` because
-    /// `tempo_to_f64_bpm(Tempo(u32::MAX))` returns a much larger
-    /// value (the `I064U032.inner` saturating-widen step lifts
-    /// `u32::MAX` to `i64::MAX` before the F-ladder inverse, so
-    /// the result is `i64::MAX / 10⁶` ≈ 9.22 × 10¹²). The `× 10⁻⁶`
-    /// here is a one-off domain-boundary constant, not a
-    /// per-input scale shift; documented inline so a future
-    /// reviewer doesn't try to "Conn-discipline" it away.
-    pub const MAX_BPM_F64: f64 = (u32::MAX as f64) / 1_000_000.0;
-
-    /// Construct from an integer BPM. Panics if `n > 4294` (`n × 10⁶`
-    /// overflows `u32`). `checked_mul` avoids the silent release-build
-    /// wrap that plain `n * 1_000_000` would produce.
-    pub const fn from_bpm_integer(n: u32) -> Self {
-        match n.checked_mul(1_000_000) {
-            Some(v) => Self(v),
-            None => panic!("Tempo::from_bpm_integer: n must be ≤ 4294"),
-        }
-    }
-
-    /// `|self - other|` as `u32` via `u32::abs_diff` — no
-    /// sign-flipping through i64. Replaces five open-coded
-    /// `(a.0 as i64 - b.0 as i64).unsigned_abs()` sites in
-    /// `sync::pll`.
-    pub const fn abs_diff(self, other: Tempo) -> u32 {
-        self.0.abs_diff(other.0)
-    }
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Quantum — Link's quantum as microbeats.
-//
-// Ableton Link represents quantum internally as `std::int64_t`
-// microbeats (see ext/rusty_link/link/include/ableton/link/Beats.hpp).
-// Its public `double quantum` ABI converts via `std::llround(q * 1e6)`
-// on the first line of every API body. Wrapping a `Micro` (10⁻⁶ rung
-// of the decimal ladder, `i64` backing) gives agogo's `Quantum` the
-// same integer representation Link's C++ side stores — zero
-// disagreement at the FFI boundary.
-// ────────────────────────────────────────────────────────────────────
-
-/// Link quantum in microbeats. `Quantum::from_bars(4)` = one bar in
-/// 4/4 = 4 000 000 microbeats.
-#[repr(transparent)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash, Default)]
-pub struct Quantum(pub Micro);
-
-impl Quantum {
-    pub const ZERO: Self = Self(Micro::ZERO);
-
-    /// Exact integer-bar constructor. Panics if `n × 10⁶` overflows
-    /// `i64` (`n > 9.2 × 10¹²`); realistic callers use `n` ≤ 64 or so.
-    pub const fn from_bars(n: u32) -> Self {
-        match (n as i64).checked_mul(1_000_000) {
-            Some(v) => Self(Micro(v)),
-            None => panic!("Quantum::from_bars: n × 10⁶ overflows i64"),
-        }
-    }
-}
-
-/// f64 beats → `Quantum`. Rounds identically to Link's own
-/// `Beats(double)` constructor (`std::llround(q * 1e6)`) so the two
-/// sides agree bit-for-bit at the Link FFI boundary. Non-finite
-/// input saturates to `Quantum::ZERO`; finite values preserve their
-/// sign and saturate on overflow to `i64::MAX` / `i64::MIN`. A noisy
-/// return would force the caller to handle an error at every argv
-/// boundary without gain, since non-finite quantum is already a user
-/// mistake.
-pub fn f64_beats_to_quantum(q: f64) -> Quantum {
-    // argv boundary — called from the CLI handler's first lines.
-    //
-    // **Round-to-nearest, not Conn-composed.** Link's C++ side does
-    // `std::llround(q × 1e6)` (round-half-away-from-zero) on every
-    // microbeat construction; agogo's `Quantum` must agree
-    // bit-for-bit at the FFI seam. `F064FD06.ceil` and `.floor` are
-    // Galois adjoints (round up / round down), but
-    // round-half-away-from-zero is **not** a Galois adjoint and has
-    // no `Conn` equivalent. The `* 1_000_000.0` unit shift is
-    // documented here as an **FFI-parity exception** to the
-    // Conn-discipline rule. The `f64qnt_matches_link_beats`
-    // proptest pins the bit-exact agreement.
-    if !q.is_finite() {
-        return Quantum::ZERO;
-    }
-    let scaled = (q * 1_000_000.0).round();
-    if scaled > i64::MAX as f64 {
-        return Quantum(Micro(i64::MAX));
-    }
-    if scaled < i64::MIN as f64 {
-        return Quantum(Micro(i64::MIN));
-    }
-    Quantum(Micro(scaled as i64))
-}
+// `Phase` / `Tempo` / `Quantum` moved to their proper homes
+// (Plan 2026-04-28-03 T4):
+// - `Phase`   → `crate::sync::phase` (NCO controller state)
+// - `Tempo`   → `crate::time::tempo` (musical-time noun: BPM)
+// - `Quantum` → `agogo_host_link::quantum` (Link-FFI only — out of
+//   `core` entirely; CLI imports `agogo_host_link::Quantum` under
+//   `feature = "link"`)
+// Re-exports below (Phase, Tempo) keep the transitional fxp.rs path
+// working until T5 deletes the file outright.
+pub use crate::sync::phase::Phase;
+pub use crate::time::tempo::Tempo;
 
 // ────────────────────────────────────────────────────────────────────
 // Boundary conversions.
@@ -439,36 +313,8 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    // ────────────────────────────────────────
-    // Phase
-    // ────────────────────────────────────────
-
-    proptest! {
-        #[test]
-        fn phase_wraps_modulo_2_32(x in any::<u32>(), y in any::<u32>()) {
-            let sum = Phase(x).wrapping_add(Phase(y));
-            prop_assert_eq!(sum.0, x.wrapping_add(y));
-        }
-
-        #[test]
-        fn phase_add_zero_identity(x in any::<u32>()) {
-            prop_assert_eq!(Phase(x).wrapping_add(Phase::ZERO), Phase(x));
-        }
-
-        #[test]
-        fn phase_add_commutes(x in any::<u32>(), y in any::<u32>()) {
-            prop_assert_eq!(
-                Phase(x).wrapping_add(Phase(y)),
-                Phase(y).wrapping_add(Phase(x))
-            );
-        }
-
-        #[test]
-        fn phase_sub_inverts_add(a in any::<u32>(), b in any::<u32>()) {
-            let s = Phase(a).wrapping_add(Phase(b));
-            prop_assert_eq!(s.wrapping_sub(Phase(b)), Phase(a));
-        }
-    }
+    // Phase tests moved to `crate::sync::phase::tests`
+    // (Plan 2026-04-28-03 T4).
 
     // ────────────────────────────────────────
     // smoothstep_u8 / linear_u8
@@ -711,71 +557,6 @@ mod tests {
         assert_eq!(pico_to_samples(Pico(0), 0), None);
     }
 
-    // ────────────────────────────────────────
-    // Quantum
-    // ────────────────────────────────────────
-
-    #[test]
-    fn quantum_from_bars_integer_hand_computed() {
-        assert_eq!(Quantum::from_bars(4).0.0, 4_000_000);
-        assert_eq!(Quantum::from_bars(1).0.0, 1_000_000);
-        assert_eq!(Quantum::from_bars(0), Quantum::ZERO);
-    }
-
-    #[test]
-    fn f64_beats_edge_cases() {
-        assert_eq!(f64_beats_to_quantum(4.0), Quantum::from_bars(4));
-        assert_eq!(f64_beats_to_quantum(3.5), Quantum(Micro(3_500_000)));
-        assert_eq!(f64_beats_to_quantum(0.0), Quantum::ZERO);
-        assert_eq!(f64_beats_to_quantum(f64::NAN), Quantum::ZERO);
-        assert_eq!(
-            f64_beats_to_quantum(f64::INFINITY),
-            Quantum::ZERO,
-            "infinity treated as non-finite"
-        );
-    }
-
-    // `f64_beats_to_quantum` must produce the same microbeats integer
-    // as Link's own `Beats(double)` constructor — `std::llround(q × 1e6)`.
-    // Rust's `f64::round` is round-half-away-from-zero, matching C++'s
-    // `std::llround`. This property pins that agreement across the
-    // realistic ABI range.
-    proptest! {
-        #[test]
-        fn f64qnt_matches_link_beats(q in -1_000_000.0_f64..=1_000_000.0) {
-            let got = f64_beats_to_quantum(q).0.0;
-            // Independent reference: round-half-away-from-zero,
-            // saturating cast — exactly what Link's C++ side does
-            // via `std::llround(q * 1e6)`. Hand-coded here (not via
-            // F064FD06) so the proptest is a true regression gate
-            // for `f64_beats_to_quantum`'s composition body, not a
-            // tautology comparing the function to itself.
-            let scaled = (q * 1_000_000.0).round();
-            let expected = if scaled > i64::MAX as f64 {
-                i64::MAX
-            } else if scaled < i64::MIN as f64 {
-                i64::MIN
-            } else {
-                scaled as i64
-            };
-            prop_assert_eq!(got, expected, "disagreement at q={}", q);
-        }
-
-        /// Monotonicity: `q1 <= q2 ⟹ f64_beats_to_quantum(q1).0 <=
-        /// f64_beats_to_quantum(q2).0` across finite inputs. This is
-        /// the Conn monotone-map surrogate — the full adjoint law
-        /// becomes expressible when `F64QNT: Conn<f64, Quantum>`
-        /// proper lands (upstream needs a `float_conn!` variant for
-        /// i64-backed newtypes; tracked in enforcement's §Deferred).
-        #[test]
-        fn f64qnt_monotone(
-            a in -1_000_000.0_f64..=1_000_000.0,
-            b in -1_000_000.0_f64..=1_000_000.0,
-        ) {
-            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-            let qlo = f64_beats_to_quantum(lo).0.0;
-            let qhi = f64_beats_to_quantum(hi).0.0;
-            prop_assert!(qlo <= qhi, "qlo={} > qhi={} for lo={} hi={}", qlo, qhi, lo, hi);
-        }
-    }
+    // Quantum tests moved to `agogo_host_link::quantum::tests`
+    // (Plan 2026-04-28-03 T4).
 }
