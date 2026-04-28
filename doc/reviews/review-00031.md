@@ -107,3 +107,43 @@ Three findings turned out to be **not Conn-composable**:
   `× 10⁶ / Hz`. Different shape than M1-M7 (rate-aware, not a
   ladder rung). Surfaced by the Q2 grep but not in original
   audit. Defer.
+
+## Local review (2026-04-27)
+
+**Branch:** plan/2026-04-27-03
+**Commits:** 3 (origin/main..plan/2026-04-27-03)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+Three commits (plan/refactor/doc), conventional, atomic, each green.
+
+### Code Quality
+- All four new helpers correctly named, well-documented, and at the right level of abstraction.
+- `Tempo::abs_diff`, `tempo_to_f64_bpm`, `pico_to_f64_seconds`, `SampleTime::samples_f64`: composition correct, `Bot/Top` arms documented as unreachable.
+- `parse_cli_bpm` boundary message uses `tempo_to_f64_bpm(Tempo(u32::MAX)) ≈ 4294.967295` correctly; unifies the inconsistent `(0, X]` vs `(0, X)` brackets into one consistent `(0, max_bpm]`.
+- FFI-parity exception comments (`f64_beats_to_quantum`, `f64_bpm_to_tempo`) are detailed and explicit; the committed proptest seed for `q = 944307.2541834672` is the right mechanism per CLAUDE.md.
+- User-unit-shift exception comments (`micro_from_ms`, `ms_to_micro`, µs jitter) clearly explain the F-ladder-is-rooted-in-seconds constraint.
+- Three plan deviations all hold up: (1) `F064FDxx` interprets f64 as seconds, not the rung's unit; (2) round-half-away-from-zero is not a Galois adjoint; (3) N2 misdiagnosis — `Tick.0 as i64` is a benign u32 widening.
+
+### Test Coverage
+- Existing 941 tests still pass.
+- Auto-saved `f64qnt_matches_link_beats` regression seed correctly committed.
+- **One coverage gap flagged:** `tempo_to_f64_bpm` has no direct proptest over `any::<u32>()`. CLAUDE.md mandates property tests for transformers; this helper is now the canonical Tempo→f64 with 7+ call sites.
+
+### Plan Conformance
+T1-T5 all completed (with three documented deviations). Plan's Review section accurately captures all deviations.
+
+### Risks
+- `Bot/Top` arms in `tempo_to_f64_bpm` and `pico_to_f64_seconds` return silent `f64::INFINITY` on (genuinely unreachable) lift failures. Latent silent-corruption risk if upstream Conn contracts change. Tracked for Q3 ("revisit and tighten" per plan's Review).
+
+### Must fix before push
+
+None.
+
+### Follow-up (future work)
+
+1. ~~Add a `tempo_to_f64_bpm` proptest over `any::<u32>()`.~~ **Addressed in this round** (`tempo_to_f64_bpm_full_domain` proptest, 5-line addition; CLAUDE.md mandates it for transformers).
+2. Consider `unreachable!()` for the `Bot/Top` arms in `tempo_to_f64_bpm` / `pico_to_f64_seconds` — defer to Q3 per plan's own Review.
+3. ~~`Tempo::abs_diff` doc count "four" → "five" sites.~~ **Addressed in this round** (1-word doc fix).
