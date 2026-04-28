@@ -91,7 +91,7 @@ enum DemoSub {
         source: String,
         /// Tempo in BPM.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo_core::fxp::Tempo,
+        bpm: agogo_core::time::tempo::Tempo,
         /// Sample rate in Hz. Plan 13 T5 supports 48000 only;
         /// other rates from the channel pipeline's allowlist
         /// arrive when `agogo run` lands in Plan 14.
@@ -133,7 +133,7 @@ enum MidiSub {
     Trace {
         /// Tempo in beats per minute.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo_core::fxp::Tempo,
+        bpm: agogo_core::time::tempo::Tempo,
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
@@ -167,8 +167,8 @@ enum LinkSub {
     #[bpaf(command("probe"))]
     Probe {
         /// Tempo to initialise Link with (BPM).
-        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo_core::fxp::Tempo::from_bpm_integer(120)))]
-        initial_bpm: agogo_core::fxp::Tempo,
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo_core::time::tempo::Tempo::from_bpm_integer(120)))]
+        initial_bpm: agogo_core::time::tempo::Tempo,
         /// Sample rate for the sample-index ↔ host-time mapping.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
         sr: u32,
@@ -187,7 +187,7 @@ enum LinkSub {
     PushTempo {
         /// New tempo in BPM.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo_core::fxp::Tempo,
+        bpm: agogo_core::time::tempo::Tempo,
         /// How long to keep the network session alive after
         /// committing, so peers see the change. Typical = 200 ms.
         #[bpaf(long, argument("SETTLE_MS"), parse(parse_positive_u32), fallback(200))]
@@ -201,8 +201,8 @@ enum LinkSub {
     #[bpaf(command("transport"))]
     Transport {
         /// Initial BPM.
-        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo_core::fxp::Tempo::from_bpm_integer(120)))]
-        bpm: agogo_core::fxp::Tempo,
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo_core::time::tempo::Tempo::from_bpm_integer(120)))]
+        bpm: agogo_core::time::tempo::Tempo,
         /// Quantum in bars (consumed by the future orchestrator
         /// snap-arming path via `ChannelSpec::snap_intent` +
         /// `LinkSession::snap_offset_for`; ignored by the bare
@@ -227,8 +227,8 @@ enum LinkSub {
     /// state: `peers,tempo_bpm,is_playing`. Useful from scripts.
     #[bpaf(command("diag"))]
     Diag {
-        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo_core::fxp::Tempo::from_bpm_integer(120)))]
-        bpm: agogo_core::fxp::Tempo,
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo_core::time::tempo::Tempo::from_bpm_integer(120)))]
+        bpm: agogo_core::time::tempo::Tempo,
         #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
         sr: u32,
         /// How long to join the network before reading state. Too
@@ -246,13 +246,13 @@ enum SyncSub {
     #[bpaf(command("trace"))]
     Trace {
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo_core::fxp::Tempo,
+        bpm: agogo_core::time::tempo::Tempo,
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
         #[bpaf(long, argument("PPQ"), parse(parse_positive_u32))]
         ppq: u32,
-        #[bpaf(long, argument::<String>("JITTER_US"), parse(parse_jitter_us_to_pico), fallback(agogo_core::fxp::Pico::ZERO))]
-        jitter_us: agogo_core::fxp::Pico,
+        #[bpaf(long, argument::<String>("JITTER_US"), parse(parse_jitter_us_to_pico), fallback(agogo_core::time::decimal::Pico::ZERO))]
+        jitter_us: agogo_core::time::decimal::Pico,
         #[bpaf(long, argument("PULSES"), parse(parse_positive_u32))]
         pulses: u32,
         #[bpaf(long, argument("SEED"), fallback(1))]
@@ -279,7 +279,7 @@ enum ChannelSub {
     Trace {
         /// Tempo in beats per minute.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo_core::fxp::Tempo,
+        bpm: agogo_core::time::tempo::Tempo,
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
@@ -289,8 +289,8 @@ enum ChannelSub {
         /// Positive delay compensation in ms; clamped to `[0, 300]`
         /// inside the transform. Non-finite or negative values
         /// rejected at the CLI boundary.
-        #[bpaf(long, argument::<String>("MS"), parse(parse_ms_to_micro), fallback(agogo_core::fxp::Micro::ZERO))]
-        delay: agogo_core::fxp::Micro,
+        #[bpaf(long, argument::<String>("MS"), parse(parse_ms_to_micro), fallback(agogo_core::time::decimal::Micro::ZERO))]
+        delay: agogo_core::time::decimal::Micro,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
         frames: usize,
@@ -314,8 +314,10 @@ fn parse_positive_u32(v: u32) -> Result<u32, String> {
 /// `Conn<f64-as-ms, FD06>` rung. This is the documented
 /// argv-boundary unit-shift exception (CLAUDE.md exception 4: f64
 /// dies inside the handler body).
-pub(crate) fn parse_ms_to_micro(s: String) -> Result<agogo_core::fxp::Micro, String> {
-    use agogo_core::fxp::{Extended, ExtendedFloat, F064FD06};
+pub(crate) fn parse_ms_to_micro(s: String) -> Result<agogo_core::time::decimal::Micro, String> {
+    use agogo_core::time::float::F064FD06;
+    use agogo_core::time::float::Extended;
+    use agogo_core::time::float::ExtendedFloat;
     let ms: f64 = s
         .parse()
         .map_err(|e| format!("--delay {s}: not a number ({e})"))?;
@@ -334,8 +336,10 @@ pub(crate) fn parse_ms_to_micro(s: String) -> Result<agogo_core::fxp::Micro, Str
 /// boundary. Same argv-boundary rationale as `parse_ms_to_micro`:
 /// `F064FD12` interprets f64 as seconds, so the µs→s shift is
 /// open-coded inside the parser body.
-pub(crate) fn parse_jitter_us_to_pico(s: String) -> Result<agogo_core::fxp::Pico, String> {
-    use agogo_core::fxp::{Extended, ExtendedFloat, F064FD12};
+pub(crate) fn parse_jitter_us_to_pico(s: String) -> Result<agogo_core::time::decimal::Pico, String> {
+    use agogo_core::time::float::F064FD12;
+    use agogo_core::time::float::Extended;
+    use agogo_core::time::float::ExtendedFloat;
     let us: f64 = s
         .parse()
         .map_err(|e| format!("--jitter-us {s}: not a number ({e})"))?;
@@ -355,8 +359,8 @@ pub(crate) fn parse_jitter_us_to_pico(s: String) -> Result<agogo_core::fxp::Pico
 /// errors avoid hardcoding a flag name so the message reads
 /// correctly regardless of which option triggered the parse.
 /// String dies inside the FromStr call; f64 dies on the last line.
-pub(crate) fn parse_bpm_to_tempo(s: String) -> Result<agogo_core::fxp::Tempo, String> {
-    use agogo_core::fxp::{Tempo, f64_bpm_to_tempo};
+pub(crate) fn parse_bpm_to_tempo(s: String) -> Result<agogo_core::time::tempo::Tempo, String> {
+    use agogo_core::boundary::f64_bpm_to_tempo; use agogo_core::time::tempo::Tempo;
     let f: f64 = s
         .parse()
         .map_err(|e| format!("BPM value {s}: not a number ({e})"))?;
@@ -397,7 +401,7 @@ fn main() {
         }) => {
             #[cfg(feature = "core")]
             {
-                if sr != <agogo_core::fxp::S048 as agogo_core::fxp::SampleRate>::HZ {
+                if sr != <agogo_core::time::sample::S048 as agogo_core::time::sample::SampleRate>::HZ {
                     eprintln!(
                         "error: sync trace is pinned to 48 kHz this sprint (got --sr {sr}); \
                          multi-rate support deferred"
@@ -540,7 +544,7 @@ fn main() {
                 // Display-only conversion: fxp → f64 at println! time,
                 // never stored in `ProbeRow`. f64 dies inside this
                 // format string.
-                let tempo_bpm = agogo_core::fxp::tempo_to_f64_bpm(row.tempo);
+                let tempo_bpm = agogo_core::boundary::tempo_to_f64_bpm(row.tempo);
                 let phase = f64::from(row.phase.0) / (1u64 << 32) as f64;
                 println!(
                     "{},{},{:.4},{:.6}",
@@ -657,10 +661,10 @@ pub mod link_probe {
         /// monotonically-increasing timestamps end-to-end.
         pub t_ms: u64,
         pub peers: u64,
-        pub tempo: agogo_core::fxp::Tempo,
+        pub tempo: agogo_core::time::tempo::Tempo,
         /// Beat-phase in `[0, 1)` at sample `t_ms × sr / 1000`,
         /// mapped through the anchor captured at probe start.
-        pub phase: agogo_core::fxp::Phase,
+        pub phase: agogo_core::sync::phase::Phase,
     }
 
     /// Run a probe loop for `duration_ms`, sampling every `period_ms`.
@@ -674,7 +678,7 @@ pub mod link_probe {
     /// turn the `sleep(Duration::ZERO)` inside the loop into a no-op
     /// and starve the row consumer if it can't keep up.
     pub fn probe<F: FnMut(ProbeRow)>(
-        initial_tempo: agogo_core::fxp::Tempo,
+        initial_tempo: agogo_core::time::tempo::Tempo,
         sr: u32,
         duration_ms: u32,
         period_ms: u32,
@@ -721,7 +725,7 @@ pub mod link_probe {
                 t_ms,
                 peers: clock.num_peers(),
                 tempo: clock.tempo(),
-                phase: agogo_core::fxp::Phase(phase_u32),
+                phase: agogo_core::sync::phase::Phase(phase_u32),
             });
             sleep(period);
         }
@@ -744,13 +748,13 @@ pub mod link_probe {
         #[test]
         fn probe_emits_rows_and_keeps_initial_tempo() {
             let mut rows = Vec::new();
-            probe(agogo_core::fxp::Tempo::from_bpm_integer(125), 48_000, 100, 50, |row| rows.push(row));
+            probe(agogo_core::time::tempo::Tempo::from_bpm_integer(125), 48_000, 100, 50, |row| rows.push(row));
             assert!(!rows.is_empty(), "probe returned no rows");
             let first = rows[0];
             assert_eq!(first.peers, 0);
             // Tempo is integer µBPM: 125 BPM → 125_000_000.
             assert_eq!(
-                first.tempo, agogo_core::fxp::Tempo(125_000_000),
+                first.tempo, agogo_core::time::tempo::Tempo(125_000_000),
                 "tempo {:?} differs from initial Tempo(125_000_000)",
                 first.tempo
             );
@@ -772,7 +776,7 @@ pub mod link_commands {
     //! daemon. `transport` drives the FSM headlessly; audio-callback
     //! integration (real `agogo run --link`) lands with Plan 05.
 
-    use agogo_core::fxp::{Tempo, tempo_to_f64_bpm};
+    use agogo_core::boundary::tempo_to_f64_bpm; use agogo_core::time::tempo::Tempo;
     use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum};
     use std::num::NonZeroU32;
     use std::thread::sleep;
@@ -889,7 +893,7 @@ pub mod link_commands {
 #[cfg(feature = "core")]
 mod sync_trace {
     use agogo_core::arb::pulse_train;
-    use agogo_core::fxp::{Pico, S048, SampleRate, SampleTime, Tempo};
+    use agogo_core::time::decimal::Pico; use agogo_core::time::sample::{S048, SampleRate, SampleTime}; use agogo_core::time::tempo::Tempo;
     use agogo_core::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
 
     /// CSV row — integer fields throughout. Peak position is emitted
@@ -920,7 +924,7 @@ mod sync_trace {
     ) -> Vec<TraceRow> {
         let (samples, _truth): (Vec<f32>, Vec<S048>) =
             pulse_train::<S048>(bpm, ppq, jitter, pulses, seed);
-        let pulse_rate_hz = agogo_core::fxp::tempo_to_hz(bpm, ppq);
+        let pulse_rate_hz = agogo_core::boundary::tempo_to_hz(bpm, ppq);
         let spacing_samples = (S048::HZ as f64 / pulse_rate_hz) as u32;
         let mut detector = PeakDetector::<S048>::new(DetectorConfig {
             threshold_q15: 16_384, // 0.5 Q0.15
@@ -945,7 +949,7 @@ mod sync_trace {
 #[cfg(feature = "core")]
 pub mod channel_trace {
     use agogo_core::channel::{ChannelCommon, tick_stream};
-    use agogo_core::fxp::{Micro, Tempo};
+    use agogo_core::time::decimal::Micro; use agogo_core::time::tempo::Tempo;
     use agogo_core::sync::sample_tick::SampleTickConn;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
@@ -1036,7 +1040,7 @@ pub mod channel_trace {
 
 pub mod midi_trace {
     use agogo_core::channel::{ChannelCommon, MidiRole, scheduler::tick_stream};
-    use agogo_core::fxp::{Micro, Tempo};
+    use agogo_core::time::decimal::Micro; use agogo_core::time::tempo::Tempo;
     use agogo_core::out::midi::{MidiRtByte, TestSink, render_midi_channel};
     use agogo_core::sync::sample_tick::SampleTickConn;
     use agogo_core::time::grid::Grid;
@@ -1159,7 +1163,7 @@ pub mod midi_trace {
 
         fn base_args() -> TraceArgs {
             TraceArgs {
-                bpm: agogo_core::fxp::Tempo::from_bpm_integer(120),
+                bpm: agogo_core::time::tempo::Tempo::from_bpm_integer(120),
                 sr: 48_000,
                 grid: "t4".to_string(),
                 frames: 24_000,
@@ -1332,7 +1336,7 @@ pub mod demo {
     //! `Machine`.
 
     use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
-    use agogo_core::fxp::{Micro, S048, SampleRate, Tempo};
+    use agogo_core::time::decimal::Micro; use agogo_core::time::sample::{S048, SampleRate}; use agogo_core::time::tempo::Tempo;
     use agogo_core::host::{AudioHost, Config};
     use agogo_core::machine::{Machine, TransportPolicy};
     use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
@@ -1505,7 +1509,7 @@ pub mod demo {
             "agogo demo: running for {} ms, --bpm {:.2} --sr {} --grid {} \
              --source {} --audio-in {} --midi-out {}",
             args.duration_ms,
-            agogo_core::fxp::tempo_to_f64_bpm(args.bpm),
+            agogo_core::boundary::tempo_to_f64_bpm(args.bpm),
             args.sr,
             args.grid,
             args.source,
@@ -1551,7 +1555,7 @@ mod tests {
     use super::channel_trace::{self, TraceArgs};
     use super::sync_trace::trace;
     use super::time_sched::{ScheduleArgs, schedule_ticks, swing_to_config};
-    use agogo_core::fxp::{Micro, Pico, Tempo};
+    use agogo_core::time::decimal::{Micro, Pico}; use agogo_core::time::tempo::Tempo;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;

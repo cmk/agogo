@@ -11,7 +11,7 @@
 //! `crate::time`), and `SampleTickConn` reads `Tempo`. It belongs in
 //! `sync` alongside the other tempo-coupled state.
 
-use crate::fxp::Tempo;
+use crate::time::tempo::Tempo;
 use crate::time::tick::Tick;
 
 /// Sample ↔ Tick bridge parameterised by sample rate, tempo, and PPQN.
@@ -90,7 +90,7 @@ impl SampleTickConn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fxp::Pico;
+    use crate::time::decimal::Pico;
     use proptest::prelude::*;
 
     fn mbpm(b: u32) -> Tempo {
@@ -185,7 +185,7 @@ mod tests {
         let via_tick: u64 = stc.inner(Tick(960));
         let pico_at_one_beat = Pico(500_000_000_000);
         let via_pico: i64 =
-            crate::fxp::pico_to_samples(pico_at_one_beat, 48_000).expect("48 kHz is supported");
+            crate::boundary::pico_to_samples(pico_at_one_beat, 48_000).expect("48 kHz is supported");
         assert_eq!(via_tick, 24_000);
         assert_eq!(via_pico, 24_000);
         assert_eq!(via_tick as i64, via_pico);
@@ -193,17 +193,17 @@ mod tests {
         // And at tick 1920 (two beats = 1 s = 48 000 samples = 10¹² pico):
         assert_eq!(stc.inner(Tick(1920)), 48_000);
         assert_eq!(
-            crate::fxp::pico_to_samples(Pico(1_000_000_000_000), 48_000),
+            crate::boundary::pico_to_samples(Pico(1_000_000_000_000), 48_000),
             Some(48_000)
         );
     }
 
     #[test]
     fn pico_to_samples_rejects_unsupported_rate() {
-        assert_eq!(crate::fxp::pico_to_samples(Pico(0), 22_050), None);
-        assert_eq!(crate::fxp::pico_to_samples(Pico(0), 0), None);
+        assert_eq!(crate::boundary::pico_to_samples(Pico(0), 22_050), None);
+        assert_eq!(crate::boundary::pico_to_samples(Pico(0), 0), None);
         assert_eq!(
-            crate::fxp::pico_to_samples(Pico(1_000_000_000_000), 48_000),
+            crate::boundary::pico_to_samples(Pico(1_000_000_000_000), 48_000),
             Some(48_000)
         );
     }

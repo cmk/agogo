@@ -10,8 +10,12 @@
 //! float-domain proof obligations), so they live in separate files.
 
 use connections::conn::Conn;
-use connections::extended::Extended;
-use connections::float::ExtendedFloat;
+
+// Re-export the float-boundary primitive types so downstream crates
+// that don't depend on `connections` directly (cli, host-link) can
+// reach them through `agogo_core::time::float::{Extended, ExtendedFloat}`.
+pub use connections::extended::Extended;
+pub use connections::float::ExtendedFloat;
 
 use super::decimal::{FD00, FD01, FD02, FD03, FD06, FD09, FD12};
 

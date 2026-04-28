@@ -17,10 +17,13 @@
 
 use std::num::NonZeroU32;
 
-use agogo_core::fxp::{
-    Extended, ExtendedFloat, F064FD06, Micro, Phase, Tempo, f64_phase_to_phase, tempo_to_f64_bpm,
-};
+use agogo_core::boundary::{f64_phase_to_phase, tempo_to_f64_bpm};
 use agogo_core::sync::PhaseSourceImpl;
+use agogo_core::sync::phase::Phase;
+use agogo_core::time::decimal::Micro;
+use agogo_core::time::float::F064FD06;
+use agogo_core::time::tempo::Tempo;
+use agogo_core::time::float::{Extended, ExtendedFloat};
 
 use crate::quantum::Quantum;
 use rusty_link::{AblLink, SessionState};
@@ -141,7 +144,7 @@ impl LinkClock {
         // Link FFI: AblLink returns BPM as f64. `f64_bpm_to_tempo`
         // handles the one-shot conversion to the `Tempo` newtype
         // (µBPM u32, saturating on out-of-range).
-        agogo_core::fxp::f64_bpm_to_tempo(self.session.tempo())
+        agogo_core::boundary::f64_bpm_to_tempo(self.session.tempo())
     }
 
     /// Number of peers currently joined to the session.
@@ -206,13 +209,12 @@ impl LinkClock {
     pub fn snap_offset_micro(&mut self, quantum: Quantum) -> Micro {
         // Quantum (Micro / microbeats) → f64 beats via the lawful
         // F064FD06 Conn inverse. The `10⁶` unit shift lives inside
-        // `F064FD06`'s definition (`agogo_core::time::decimal`,
-        // re-exported via `crate::fxp`), not open-coded here
-        // (audit findings M5/N6 closed for this call site by
-        // Plan 23 / audit P5). `Extended::Finite` lifts the
-        // `Micro` into the saturation lattice F064FD06 operates
-        // on; `Bot`/`Top` are unreachable for a finite `Quantum`
-        // but the match keeps the result total.
+        // `F064FD06`'s definition (`agogo_core::time::float`), not
+        // open-coded here (audit findings M5/N6 closed for this call
+        // site by Plan 23 / audit P5). `Extended::Finite` lifts the
+        // `Micro` into the saturation lattice F064FD06 operates on;
+        // `Bot`/`Top` are unreachable for a finite `Quantum` but the
+        // match keeps the result total.
         let q_f64 = match F064FD06.inner(Extended::Finite(quantum.0)) {
             ExtendedFloat::Extend(b) => b,
             ExtendedFloat::Bot | ExtendedFloat::Top => return Micro::ZERO,

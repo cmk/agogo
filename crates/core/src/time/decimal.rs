@@ -64,6 +64,26 @@ def_fixed!(FD09, 1_000_000_000);
 def_fixed!(FD12, 1_000_000_000_000);
 
 // ────────────────────────────────────────────────────────────────────
+// Domain aliases.
+//
+// Two time-unit words kept alongside the canonical FD06 / FD12
+// names because they read more naturally at FFI seams (host-link
+// session arming, channel::scheduler delay/offset arithmetic, the
+// cpal seam, jitter math). Every other workspace site uses the
+// canonical FDxx names directly. Moved here from fxp.rs (Plan
+// 2026-04-28-03 T5) — the aliases live with the types they alias.
+// ────────────────────────────────────────────────────────────────────
+
+/// Domain alias for µs. Used at FFI seams: `Quantum(Micro)`,
+/// `host-link::session`, `ChannelCommon::{delay, offset}`,
+/// `channel::scheduler` arithmetic.
+pub use FD06 as Micro;
+
+/// Domain alias for ps. Used in `pico_to_samples`, the cpal seam,
+/// `arb::pulse_train`, `sync::pll` jitter math.
+pub use FD12 as Pico;
+
+// ────────────────────────────────────────────────────────────────────
 // Fine → Coarse connection constructors.
 //
 // For each pair, the ratio `prec = Fine::PREC / Coarse::PREC` is the

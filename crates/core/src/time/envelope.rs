@@ -9,19 +9,78 @@
 //! `opening n t`. We follow the plan (Rust convention: position-then-
 //! length reads naturally as `opening(at: t, over: n)`).
 //!
-//! **Rounding.** All arithmetic is integer: delegation to
-//! `fxp::linear_u8` and `fxp::smoothstep_u8` keeps the old bit-exact
-//! rounding semantics (ties round half-away-from-zero via the shared
-//! Q0.24 / u128 path) without any floating-point. Edge cases match
-//! the Haskell: `n == 0` collapses to the envelope's fully-open value
-//! (255 for `opening` / `s_curve`, 0 for `closing`).
+//! **Rounding.** All arithmetic is integer: the `linear_u8` and
+//! `smoothstep_u8` primitives below carry bit-exact rounding semantics
+//! (ties round half-away-from-zero via the shared Q0.24 / u128 path)
+//! without any floating-point. Edge cases match the Haskell: `n == 0`
+//! collapses to the envelope's fully-open value (255 for `opening` /
+//! `s_curve`, 0 for `closing`).
 
-use crate::fxp;
 use crate::time::tick::Tick;
+
+// ────────────────────────────────────────────────────────────────────
+// Integer ramp + smoothstep primitives.
+//
+// Both take integer inputs `t <= n` (with `n > 0`) and return u8.
+// Bit-exact, no float. Moved here from `crate::fxp` (Plan
+// 2026-04-28-03 T5): these are envelope curves, not arithmetic
+// primitives — they belong with the envelope module.
+// ────────────────────────────────────────────────────────────────────
+
+/// Linear ramp `t/n` rendered as `u8`. Endpoints: `linear_u8(0, n) = 0`,
+/// `linear_u8(n, n) = 255`. Degenerate `n = 0` returns 255 (treat
+/// "no span" as fully open — matches `opening(0, 0) = 255`).
+pub fn linear_u8(t: u32, n: u32) -> u8 {
+    if n == 0 {
+        return 255;
+    }
+    if t >= n {
+        return 255;
+    }
+    // round-nearest: (t * 255 + n/2) / n
+    let num = u64::from(t) * 255 + u64::from(n) / 2;
+    (num / u64::from(n)) as u8
+}
+
+/// Hermite smoothstep `3x² − 2x³` rendered as `u8` with
+/// `x = t/n ∈ [0, 1]`. Endpoints: `smoothstep_u8(0, n) = 0`,
+/// `smoothstep_u8(n, n) = 255`. Degenerate `n = 0` returns 255.
+pub fn smoothstep_u8(t: u32, n: u32) -> u8 {
+    if n == 0 {
+        return 255;
+    }
+    if t >= n {
+        return 255;
+    }
+    if t == 0 {
+        return 0;
+    }
+    // x as Q0.24 (guaranteed < 1 here because t < n).
+    //   x = t · 2^24 / n
+    // y = 3x² − 2x³, with x in Q0.24:
+    //   x² in Q0.48, x³ in Q0.72. Work in u128.
+    let x: u128 = (u128::from(t) << 24) / u128::from(n);
+    let x2: u128 = x * x; // Q0.48
+    let x3: u128 = x2 * x; // Q0.72
+    // y = 3·x² − 2·x³, both terms scaled to Q0.48 then combined.
+    //   3·x² is already Q0.48.
+    //   2·x³ in Q0.72 becomes (2·x³) >> 24 in Q0.48 (with rounding).
+    let term_a = 3u128 * x2;
+    let rounding = 1u128 << 23;
+    let term_b = (2u128 * x3 + rounding) >> 24;
+    let y: u128 = term_a - term_b; // Q0.48, always ≤ 2^48
+    // scale to u8: (y * 255 + 2^47) >> 48
+    let scaled = (y * 255u128 + (1u128 << 47)) >> 48;
+    scaled.min(255) as u8
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Envelopes proper.
+// ────────────────────────────────────────────────────────────────────
 
 /// Linear opening envelope: 0 at `t = 0`, 255 at `t = n`.
 pub fn opening(t: Tick, n: Tick) -> u8 {
-    fxp::linear_u8(t.0, n.0)
+    linear_u8(t.0, n.0)
 }
 
 /// Linear closing envelope: 255 at `t = 0`, 0 at `t = n`.
@@ -29,13 +88,13 @@ pub fn closing(t: Tick, n: Tick) -> u8 {
     if n.0 == 0 {
         return 0;
     }
-    255 - fxp::linear_u8(t.0.min(n.0), n.0)
+    255 - linear_u8(t.0.min(n.0), n.0)
 }
 
 /// Hermite smoothstep envelope: `3x² - 2x³` scaled to `0..=255`.
 /// Monotonically non-decreasing on `[0, n]`.
 pub fn s_curve(t: Tick, n: Tick) -> u8 {
-    fxp::smoothstep_u8(t.0, n.0)
+    smoothstep_u8(t.0, n.0)
 }
 
 #[cfg(test)]
@@ -170,6 +229,74 @@ mod tests {
             let v = s_curve(t, n);
             if t.0 == 0 { prop_assert_eq!(v, 0); }
             if t.0 >= n.0 { prop_assert_eq!(v, 255); }
+        }
+    }
+
+    // ── linear_u8 / smoothstep_u8 primitives (moved from fxp T5) ─────
+
+    #[test]
+    fn smoothstep_endpoints_explicit() {
+        assert_eq!(smoothstep_u8(0, 10), 0);
+        assert_eq!(smoothstep_u8(10, 10), 255);
+        assert_eq!(smoothstep_u8(5, 10), 128); // Hermite midpoint
+    }
+
+    #[test]
+    fn linear_endpoints_explicit() {
+        assert_eq!(linear_u8(0, 10), 0);
+        assert_eq!(linear_u8(10, 10), 255);
+        assert_eq!(linear_u8(5, 10), 128);
+    }
+
+    #[test]
+    fn degenerate_n_zero() {
+        assert_eq!(smoothstep_u8(0, 0), 255);
+        assert_eq!(linear_u8(0, 0), 255);
+    }
+
+    proptest! {
+        #[test]
+        fn smoothstep_u8_endpoints(n in 1u32..u32::MAX) {
+            prop_assert_eq!(smoothstep_u8(0, n), 0);
+            prop_assert_eq!(smoothstep_u8(n, n), 255);
+        }
+
+        #[test]
+        fn smoothstep_u8_monotone(t1 in 0u32..=1_000_000, n in 1u32..=1_000_000) {
+            let t2 = t1.saturating_add(1);
+            let (t1, t2) = if t1 <= n && t2 <= n { (t1, t2) } else { (0, 1.min(n)) };
+            prop_assert!(smoothstep_u8(t1, n) <= smoothstep_u8(t2, n));
+        }
+
+        #[test]
+        fn smoothstep_u8_symmetric(t in 0u32..=10_000, n_extra in 0u32..=10_000) {
+            let n = t + n_extra;
+            if n == 0 { return Ok(()); }
+            let a = smoothstep_u8(t, n) as u32;
+            let b = smoothstep_u8(n - t, n) as u32;
+            // Hermite is symmetric around x=0.5, so s(t) + s(n-t) = 255,
+            // modulo ±1 ULP rounding.
+            let sum = a + b;
+            prop_assert!(
+                (254..=256).contains(&sum),
+                "sum={} for t={} n={}",
+                sum,
+                t,
+                n
+            );
+        }
+
+        #[test]
+        fn linear_u8_endpoints(n in 1u32..u32::MAX) {
+            prop_assert_eq!(linear_u8(0, n), 0);
+            prop_assert_eq!(linear_u8(n, n), 255);
+        }
+
+        #[test]
+        fn linear_u8_monotone(t1 in 0u32..=1_000_000, n in 1u32..=1_000_000) {
+            let t2 = t1.saturating_add(1);
+            let (t1, t2) = if t1 <= n && t2 <= n { (t1, t2) } else { (0, 1.min(n)) };
+            prop_assert!(linear_u8(t1, n) <= linear_u8(t2, n));
         }
     }
 }

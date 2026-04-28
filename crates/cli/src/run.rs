@@ -18,9 +18,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use agogo_core::channel::Channel;
-use agogo_core::fxp::{
-    S044, S048, S088, S096, S176, S192, SampleRate, SampleTime, Tempo, tempo_to_f64_bpm,
-};
+use agogo_core::boundary::tempo_to_f64_bpm;
+use agogo_core::time::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
+use agogo_core::time::tempo::Tempo;
 use agogo_core::host::{AudioHost, AudioIo, Config};
 use agogo_core::machine::{Machine, MachineStopHandle, TransportPolicy};
 use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
