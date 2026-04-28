@@ -872,8 +872,9 @@ mod sync_trace {
     ) -> Vec<TraceRow> {
         // argv-boundary conversions. f64 dies on these two lines.
         let bpm: Tempo = f64_bpm_to_tempo(bpm_f64);
-        // µs → seconds → Pico via upstream `F064FD12` (lawful conn over
-        // `ExtendedFloat<f64>`). `parse_non_negative_f64` at the bpaf
+        // µs → seconds → Pico via the lawful `F064FD12` conn from
+        // `agogo_core::time::decimal` (re-exported via
+        // `agogo_core::fxp`). `parse_non_negative_f64` at the bpaf
         // layer already rejected NaN / ±∞, so a finite-wrap here is
         // safe; the `PosInf` match arm catches out-of-range values.
         let jitter_s = jitter_us * 1.0e-6;
@@ -967,13 +968,15 @@ pub mod channel_trace {
             }
         }
         let stc = SampleTickConn::new(args.sr, bpm, PPQN);
-        // argv-boundary: ms (f64) → Micro via the upstream `F064FD06`
-        // lawful conn. Out-of-range saturations are user errors, not
-        // silent defaults — `parse_non_negative_f64` already validated
-        // finiteness, so an `Extended::PosInf` /
-        // `Extended::NegInf` result means the user asked for a value
-        // outside `Micro`'s ±i64 range (billions of years). Surface
-        // that as an error rather than silently mapping to zero.
+        // argv-boundary: ms (f64) → Micro via the lawful `F064FD06`
+        // conn from `agogo_core::time::decimal` (re-exported via
+        // `agogo_core::fxp`). Out-of-range saturations are user
+        // errors, not silent defaults — `parse_non_negative_f64`
+        // already validated finiteness, so an `Extended::PosInf` /
+        // `Extended::NegInf` result means the user asked for a
+        // value outside `Micro`'s ±i64 range (billions of years).
+        // Surface that as an error rather than silently mapping to
+        // zero.
         let ms_to_micro = |flag: &str, ms: f64| -> Result<Micro, String> {
             match F064FD06.ceil(ExtendedFloat::Extend(ms * 1.0e-3)) {
                 Extended::Finite(m) => Ok(m),

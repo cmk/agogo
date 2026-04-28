@@ -226,9 +226,9 @@ pub use strategies::{
 // Fallback to satisfy the unused-trait import on non-testkit builds.
 #[allow(dead_code)]
 fn _sample_rate_sealed() -> u32 {
-    S48_HZ
+    S048_HZ
 }
-const S48_HZ: u32 = <crate::fxp::S048 as SampleRate>::HZ;
+const S048_HZ: u32 = <crate::fxp::S048 as SampleRate>::HZ;
 
 #[cfg(test)]
 mod tests {

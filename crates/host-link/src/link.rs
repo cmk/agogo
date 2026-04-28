@@ -202,12 +202,13 @@ impl LinkClock {
     pub fn snap_offset_micro(&mut self, quantum: Quantum) -> Micro {
         // Quantum (Micro / microbeats) → f64 beats via the lawful
         // F064FD06 Conn inverse. The `10⁶` unit shift lives inside
-        // `F064FD06`'s definition in the `connections` crate, not
-        // open-coded here (audit findings M5/N6 closed for this
-        // call site by Plan 23 / audit P5). `Extended::Finite`
-        // lifts the `Micro` into the saturation lattice F064FD06
-        // operates on; `Bot`/`Top` are unreachable for a finite
-        // `Quantum` but the match keeps the result total.
+        // `F064FD06`'s definition (`agogo_core::time::decimal`,
+        // re-exported via `crate::fxp`), not open-coded here
+        // (audit findings M5/N6 closed for this call site by
+        // Plan 23 / audit P5). `Extended::Finite` lifts the
+        // `Micro` into the saturation lattice F064FD06 operates
+        // on; `Bot`/`Top` are unreachable for a finite `Quantum`
+        // but the match keeps the result total.
         let q_f64 = match F064FD06.inner(Extended::Finite(quantum.0)) {
             ExtendedFloat::Extend(b) => b,
             ExtendedFloat::Bot | ExtendedFloat::Top => return Micro::ZERO,
