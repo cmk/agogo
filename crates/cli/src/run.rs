@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use agogo_core::channel::Channel;
 use agogo_core::fxp::{
-    S044, S048, S088, S096, S176, S192, SampleRate, SampleTime, Tempo, f64_bpm_to_tempo,
+    Quantum, S044, S048, S088, S096, S176, S192, SampleRate, SampleTime, Tempo, tempo_to_f64_bpm,
 };
 use agogo_core::host::{AudioHost, AudioIo, Config};
 use agogo_core::machine::{Machine, MachineStopHandle, TransportPolicy};
@@ -40,18 +40,49 @@ use std::num::NonZeroU32;
 /// scheduler uses [`PPQN`] (960).
 const PULSE_PPQ: u32 = 24;
 
-use crate::{parse_positive_f64, parse_positive_u32};
+use crate::parse_positive_u32;
+
+/// bpaf parser: --bpm <f64> → Tempo at the argv-handler boundary.
+/// f64 dies inside this function; downstream sees only Tempo.
+fn parse_bpm_to_tempo(s: String) -> Result<Tempo, String> {
+    use agogo_core::fxp::f64_bpm_to_tempo;
+    let f: f64 = s
+        .parse()
+        .map_err(|e| format!("--bpm {s}: not a number ({e})"))?;
+    let max_bpm = tempo_to_f64_bpm(Tempo(u32::MAX));
+    if !f.is_finite() || f <= 0.0 || f > max_bpm {
+        return Err(format!(
+            "--bpm {f} out of range (expected (0, {max_bpm}] BPM)"
+        ));
+    }
+    Ok(f64_bpm_to_tempo(f))
+}
+
+/// bpaf parser: --link-quantum <BEATS> → Quantum at the argv-handler
+/// boundary. f64 dies inside this function.
+fn parse_quantum_from_beats(s: String) -> Result<Quantum, String> {
+    use agogo_core::fxp::f64_beats_to_quantum;
+    let f: f64 = s
+        .parse()
+        .map_err(|e| format!("--link-quantum {s}: not a number ({e})"))?;
+    if !f.is_finite() || f <= 0.0 {
+        return Err(format!(
+            "--link-quantum {f} invalid (must be finite and > 0)"
+        ));
+    }
+    Ok(f64_beats_to_quantum(f))
+}
 
 /// Argv container for `agogo run`. Used by both the bpaf derive and
-/// the dispatcher in `main.rs`. Fields cross the argv boundary at
-/// the handler's first lines: `--bpm` via `f64_bpm_to_tempo`,
-/// `--link-quantum` through the `from_beats` helper exposed in
-/// `agogo_core::fxp`.
+/// the dispatcher in `main.rs`. The two formerly-`f64` fields
+/// (`bpm`, `link_quantum`) now land as typed `Tempo` / `Quantum`
+/// directly — the f64 surface area collapses to the bodies of
+/// `parse_bpm_to_tempo` and `parse_quantum_from_beats` above.
 #[derive(Debug, Clone, Bpaf)]
 pub struct RunArgs {
     /// Tempo in beats per minute. Applies to all channels.
-    #[bpaf(long, argument("BPM"), parse(parse_positive_f64))]
-    pub bpm: f64, // argv boundary
+    #[bpaf(long, argument("BPM"), parse(parse_bpm_to_tempo))]
+    pub bpm: Tempo,
     /// Sample rate in Hz. Six rates supported: 44100 / 48000 /
     /// 88200 / 96000 / 176400 / 192000.
     #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
@@ -76,8 +107,8 @@ pub struct RunArgs {
     pub ch: Vec<String>,
     /// Link quantum in beats. Required when `--source link`;
     /// ignored otherwise. Default 4 (one bar of 4/4).
-    #[bpaf(long, argument("BEATS"), parse(parse_positive_f64), optional)]
-    pub link_quantum: Option<f64>, // argv boundary
+    #[bpaf(long, argument("BEATS"), parse(parse_quantum_from_beats), optional)]
+    pub link_quantum: Option<Quantum>,
     /// Mirror Link's `start_stop_sync` flag (publishes is_playing
     /// transitions to the Link network).
     #[bpaf(long)]
@@ -98,8 +129,9 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             .to_string());
     }
 
-    // argv boundary: --bpm dies here; downstream sees only Tempo.
-    let bpm: Tempo = f64_bpm_to_tempo(args.bpm);
+    // `args.bpm` is already `Tempo` — bpaf's `parse_bpm_to_tempo`
+    // consumed the f64 at parse time.
+    let bpm: Tempo = args.bpm;
 
     // Parse all --ch specs eagerly (in order, so variable refs
     // resolve) before any device opens.
@@ -215,17 +247,14 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
                     host_origin_micros: 0,
                     sample_rate: sr_nz,
                 };
-                let quantum_beats = args.link_quantum.unwrap_or(4.0); // argv boundary
-                if !quantum_beats.is_finite() || quantum_beats <= 0.0 {
-                    return Err(format!(
-                        "--link-quantum {} invalid (must be finite, > 0)",
-                        quantum_beats
-                    ));
-                }
+                // `args.link_quantum` is already `Option<Quantum>` —
+                // bpaf's `parse_quantum_from_beats` consumed the f64
+                // at parse time. Default 4 bars of 4/4 = 4 microbeats.
+                let default_quantum = args.link_quantum.unwrap_or(Quantum::from_bars(4));
                 let config = LinkWriteConfig {
                     enable_start_stop_sync: args.link_enable_start_stop,
                     enable_start_stop: args.link_enable_start_stop,
-                    default_quantum: agogo_core::fxp::f64_beats_to_quantum(quantum_beats),
+                    default_quantum,
                     push_tempo_on_change: true,
                 };
                 let session = LinkSession::new(bpm, anchor, config);
@@ -288,7 +317,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
 
     eprintln!(
         "agogo run: --bpm {} --sr {} --source {} --audio-in {} (midi port: {}) ({} channel{}{})",
-        args.bpm,
+        tempo_to_f64_bpm(args.bpm),
         args.sr,
         args.source,
         args.audio_in,
@@ -368,7 +397,7 @@ mod tests {
 
     fn args_with(ch: Vec<&str>, sr: u32) -> RunArgs {
         RunArgs {
-            bpm: 120.0,
+            bpm: Tempo::from_bpm_integer(120),
             sr,
             buffer_frames: 1024,
             source: "internal".into(),

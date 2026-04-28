@@ -69,9 +69,11 @@ pub struct ChannelSpec {
     pub swing: SwingConfig,
     /// Musical offset in ticks (signed). Default: 0.
     pub offset_ticks: i32,
-    /// Positive delay compensation in milliseconds. Clamped to
-    /// MAX_DELAY (300 ms) in `into_channel`.
-    pub delay_ms: f64, // argv boundary
+    /// Positive delay compensation. Clamped to MAX_DELAY (300 ms)
+    /// in `into_channel`. Stored as `Micro` (i64 µs) so the f64
+    /// surface area is contained to the parser's first line —
+    /// audit P0b / Q3 closure for finding K.
+    pub delay: Micro,
     /// Optional quantum snap, in microseconds (Link-aware channels).
     pub snap_to_quantum_micro: Option<i64>,
     /// Per-channel `bar_multiplier`. Plan 2026-04-25-03: emit every
@@ -118,7 +120,7 @@ impl ChannelSpec {
             amount: 0,
         };
         let mut offset_ticks: i32 = 0;
-        let mut delay_ms: f64 = 0.0; // argv boundary
+        let mut delay: Micro = Micro::ZERO;
         let mut snap_to_quantum_micro: Option<i64> = None;
 
         // Plan 2026-04-25-03 keys. Defer mode/click validation until
@@ -260,16 +262,31 @@ impl ChannelSpec {
                         .map_err(|e| ChannelSpecError::BadValue("offset", e.to_string()))?;
                 }
                 "delay" => {
-                    let parsed = v
-                        .parse::<f64>()
-                        .map_err(|e| ChannelSpecError::BadValue("delay", e.to_string()))?;
-                    if !parsed.is_finite() {
-                        return Err(ChannelSpecError::BadValue(
-                            "delay",
-                            "must be finite".into(),
-                        ));
-                    }
-                    delay_ms = parsed;
+                    // argv boundary: ms (string) → Micro at this
+                    // line. Try i64 ms first — exact, no f64
+                    // round-trip drift (`micro_from_ms(51.0)` would
+                    // ceil to 51_001 µs because `0.051 × 10⁶`
+                    // overshoots in f64). Fall back to f64 for
+                    // fractional ms inputs like "10.5".
+                    delay = if let Ok(ms_int) = v.parse::<i64>() {
+                        let us = ms_int.checked_mul(1_000).ok_or_else(|| {
+                            ChannelSpecError::BadValue(
+                                "delay",
+                                format!("{ms_int} ms overflows Micro"),
+                            )
+                        })?;
+                        Micro(us)
+                    } else {
+                        let ms_f64 = v
+                            .parse::<f64>()
+                            .map_err(|e| ChannelSpecError::BadValue("delay", e.to_string()))?;
+                        micro_from_ms(ms_f64).ok_or_else(|| {
+                            ChannelSpecError::BadValue(
+                                "delay",
+                                format!("{ms_f64} out of range or non-finite"),
+                            )
+                        })?
+                    };
                 }
                 "snap-quantum-us" => {
                     snap_to_quantum_micro = Some(
@@ -372,7 +389,7 @@ impl ChannelSpec {
             mode,
             swing,
             offset_ticks,
-            delay_ms,
+            delay,
             snap_to_quantum_micro,
             bars,
         })
@@ -384,16 +401,10 @@ impl ChannelSpec {
         // every spec is implicitly MIDI-targeted. The mode/click
         // validation already happened in `parse`, so `self.mode` is
         // the ready-to-use MidiRole (Clock or Click(MidiClickConfig)).
-        // argv boundary: delay (ms) crosses into Micro via F064FD06.
-        let delay = match micro_from_ms(self.delay_ms) {
-            Some(m) => Micro(m.0.clamp(0, MAX_DELAY.0)),
-            None => {
-                return Err(ChannelSpecError::BadValue(
-                    "delay",
-                    format!("{} ms out of range", self.delay_ms),
-                ));
-            }
-        };
+        // delay is already typed as Micro at the spec layer (Q3
+        // closure for audit K). The parser body called micro_from_ms
+        // — into_channel just clamps to MAX_DELAY.
+        let delay = Micro(self.delay.0.clamp(0, MAX_DELAY.0));
 
         // Offset in ticks requires tempo to convert to Micro. Until
         // the tempo-dependent Tick→Micro path is wired, reject non-zero
@@ -569,8 +580,19 @@ impl Display for ChannelSpec {
         if self.offset_ticks != 0 {
             write!(f, ",offset={}", self.offset_ticks)?;
         }
-        if self.delay_ms != 0.0 {
-            write!(f, ",delay={}", self.delay_ms)?;
+        if self.delay != Micro::ZERO {
+            // Print as decimal milliseconds (parser-stable).
+            // Sub-µs precision was already lost through F064FD06.ceil
+            // at parse time; this round-trips bit-exactly through
+            // micro_from_ms.
+            let us = self.delay.0;
+            let ms_int = us / 1_000;
+            let frac = us.unsigned_abs() % 1_000;
+            if frac == 0 {
+                write!(f, ",delay={ms_int}")?;
+            } else {
+                write!(f, ",delay={ms_int}.{frac:03}")?;
+            }
         }
         if let Some(q) = self.snap_to_quantum_micro {
             write!(f, ",snap-quantum-us={}", q)?;
@@ -981,7 +1003,7 @@ mod tests {
             arb_tbase(),
             any::<i8>(),
             any::<i32>(),
-            (0u32..=300).prop_map(|n| n as f64),
+            0u32..=300,
             prop::option::of(any::<i32>().prop_map(|n| n as i64)),
             arb_mode(),
             arb_bars(),
@@ -994,7 +1016,7 @@ mod tests {
                     swing_res,
                     swing_amt,
                     offset_ticks,
-                    delay_ms,
+                    delay_ms_int,
                     snap,
                     mode,
                     bars,
@@ -1009,7 +1031,10 @@ mod tests {
                             amount: swing_amt,
                         },
                         offset_ticks,
-                        delay_ms,
+                        // Generator yields integer milliseconds in
+                        // [0, 300]; convert to Micro at the strategy
+                        // boundary so the spec stays typed.
+                        delay: Micro(i64::from(delay_ms_int) * 1_000),
                         snap_to_quantum_micro: snap,
                         bars,
                     }
