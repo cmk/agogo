@@ -31,13 +31,12 @@ pub struct Quantum(pub Micro);
 impl Quantum {
     pub const ZERO: Self = Self(Micro::ZERO);
 
-    /// Exact integer-bar constructor. Panics if `n × 10⁶` overflows
-    /// `i64` (`n > 9.2 × 10¹²`); realistic callers use `n` ≤ 64 or so.
+    /// Exact integer-bar constructor. Total — `n: u32` max is
+    /// `~4.29e9`, so `n × 10⁶` max is `~4.29e15`, well within
+    /// `i64::MAX` (`~9.22e18`). Realistic callers use `n` ≤ 64
+    /// or so.
     pub const fn from_bars(n: u32) -> Self {
-        match (n as i64).checked_mul(1_000_000) {
-            Some(v) => Self(Micro(v)),
-            None => panic!("Quantum::from_bars: n × 10⁶ overflows i64"),
-        }
+        Self(Micro(n as i64 * 1_000_000))
     }
 }
 
