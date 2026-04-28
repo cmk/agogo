@@ -12,6 +12,7 @@ dependencies = [
  "agogo-host-midi",
  "bpaf",
  "ctrlc",
+ "proptest",
 ]
 
 [[package]]

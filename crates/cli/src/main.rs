@@ -325,15 +325,15 @@ fn parse_non_negative_f64(v: f64) -> Result<f64, String> {
 }
 
 /// Legacy: f64 → Tempo with explicit Err for the three subcommand
-/// `*Args` structs that still expose `bpm: f64`. Same logic as
-/// `parse_bpm_to_tempo` above but takes a parsed f64 (skipping the
-/// String → f64 step that bpaf does upstream).
+/// `*Args` structs that still expose `bpm: f64`. Mirrors
+/// `parse_bpm_to_tempo` in run.rs but takes a parsed f64 (skipping
+/// the String → f64 step that bpaf does upstream).
 fn parse_cli_bpm(arg: f64, flag: &str) -> Result<agogo_core::fxp::Tempo, String> {
-    use agogo_core::fxp::{Tempo, f64_bpm_to_tempo, tempo_to_f64_bpm};
-    let max_bpm = tempo_to_f64_bpm(Tempo(u32::MAX));
-    if !arg.is_finite() || arg <= 0.0 || arg > max_bpm {
+    use agogo_core::fxp::{Tempo, f64_bpm_to_tempo};
+    if !arg.is_finite() || arg <= 0.0 || arg > Tempo::MAX_BPM_F64 {
         return Err(format!(
-            "{flag} {arg} out of range (expected (0, {max_bpm}] BPM)"
+            "{flag} {arg} out of range (expected (0, {}] BPM)",
+            Tempo::MAX_BPM_F64
         ));
     }
     Ok(f64_bpm_to_tempo(arg))

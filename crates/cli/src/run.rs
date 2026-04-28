@@ -43,23 +43,28 @@ const PULSE_PPQ: u32 = 24;
 use crate::parse_positive_u32;
 
 /// bpaf parser: --bpm <f64> → Tempo at the argv-handler boundary.
-/// f64 dies inside this function; downstream sees only Tempo.
+/// String dies inside the FromStr call; f64 dies on the last
+/// line. Paired with `#[bpaf(... argument::<String>("BPM"),
+/// parse(parse_bpm_to_tempo))]` so bpaf treats the field type
+/// (`Tempo`) as the parser's output rather than requiring
+/// `Tempo: FromStr`.
 fn parse_bpm_to_tempo(s: String) -> Result<Tempo, String> {
     use agogo_core::fxp::f64_bpm_to_tempo;
     let f: f64 = s
         .parse()
         .map_err(|e| format!("--bpm {s}: not a number ({e})"))?;
-    let max_bpm = tempo_to_f64_bpm(Tempo(u32::MAX));
-    if !f.is_finite() || f <= 0.0 || f > max_bpm {
+    if !f.is_finite() || f <= 0.0 || f > Tempo::MAX_BPM_F64 {
         return Err(format!(
-            "--bpm {f} out of range (expected (0, {max_bpm}] BPM)"
+            "--bpm {f} out of range (expected (0, {}] BPM)",
+            Tempo::MAX_BPM_F64
         ));
     }
     Ok(f64_bpm_to_tempo(f))
 }
 
 /// bpaf parser: --link-quantum <BEATS> → Quantum at the argv-handler
-/// boundary. f64 dies inside this function.
+/// boundary. Same `argument::<String>` + `parse` shape as
+/// `parse_bpm_to_tempo`.
 fn parse_quantum_from_beats(s: String) -> Result<Quantum, String> {
     use agogo_core::fxp::f64_beats_to_quantum;
     let f: f64 = s
@@ -81,7 +86,7 @@ fn parse_quantum_from_beats(s: String) -> Result<Quantum, String> {
 #[derive(Debug, Clone, Bpaf)]
 pub struct RunArgs {
     /// Tempo in beats per minute. Applies to all channels.
-    #[bpaf(long, argument("BPM"), parse(parse_bpm_to_tempo))]
+    #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
     pub bpm: Tempo,
     /// Sample rate in Hz. Six rates supported: 44100 / 48000 /
     /// 88200 / 96000 / 176400 / 192000.
@@ -107,7 +112,7 @@ pub struct RunArgs {
     pub ch: Vec<String>,
     /// Link quantum in beats. Required when `--source link`;
     /// ignored otherwise. Default 4 (one bar of 4/4).
-    #[bpaf(long, argument("BEATS"), parse(parse_quantum_from_beats), optional)]
+    #[bpaf(long, argument::<String>("BEATS"), parse(parse_quantum_from_beats), optional)]
     pub link_quantum: Option<Quantum>,
     /// Mirror Link's `start_stop_sync` flag (publishes is_playing
     /// transitions to the Link network).
@@ -394,6 +399,112 @@ fn install_ctrlc_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    // ── parse_bpm_to_tempo / parse_quantum_from_beats ────────────
+    //
+    // CLAUDE.md mandates property tests for parsing/transforming
+    // functions. These two bpaf parsers are the only argv-handler
+    // sites where f64 enters the pipeline; pin their validation
+    // contract directly rather than relying on transitive coverage
+    // through downstream Tempo / Quantum proptests.
+
+    #[test]
+    fn parse_bpm_to_tempo_accepts_120_exactly() {
+        let got = parse_bpm_to_tempo("120".to_string()).unwrap();
+        assert_eq!(got, Tempo::from_bpm_integer(120));
+    }
+
+    #[test]
+    fn parse_bpm_to_tempo_accepts_120_5_decimal() {
+        let got = parse_bpm_to_tempo("120.5".to_string()).unwrap();
+        assert_eq!(got, Tempo(120_500_000));
+    }
+
+    #[test]
+    fn parse_bpm_to_tempo_rejects_zero() {
+        let err = parse_bpm_to_tempo("0".to_string()).unwrap_err();
+        assert!(err.contains("out of range"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_bpm_to_tempo_rejects_negative() {
+        let err = parse_bpm_to_tempo("-5".to_string()).unwrap_err();
+        assert!(err.contains("out of range"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_bpm_to_tempo_rejects_nan() {
+        let err = parse_bpm_to_tempo("nan".to_string()).unwrap_err();
+        assert!(err.contains("out of range"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_bpm_to_tempo_rejects_above_max() {
+        // u32::MAX µBPM ≈ 4294.967295 BPM. 5000 is comfortably above.
+        let err = parse_bpm_to_tempo("5000".to_string()).unwrap_err();
+        assert!(err.contains("out of range"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_bpm_to_tempo_rejects_garbage() {
+        let err = parse_bpm_to_tempo("hello".to_string()).unwrap_err();
+        assert!(err.contains("not a number"), "got: {err}");
+    }
+
+    proptest! {
+        /// Validation contract: `parse_bpm_to_tempo` returns Ok iff
+        /// the parsed f64 is finite, positive, and ≤ max_bpm. Test
+        /// the round-tripped f64 (not `f` directly) because String
+        /// formatting can drop NaN payload bits.
+        #[test]
+        fn parse_bpm_to_tempo_ok_iff_in_range(f in prop::num::f64::ANY) {
+            let s = format!("{f}");
+            let parsed: f64 = s.parse().unwrap_or(f64::NAN);
+            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= Tempo::MAX_BPM_F64;
+            prop_assert_eq!(parse_bpm_to_tempo(s).is_ok(), in_range);
+        }
+
+        /// Validation contract: `parse_quantum_from_beats` returns
+        /// Ok iff the parsed f64 is finite and positive.
+        #[test]
+        fn parse_quantum_from_beats_ok_iff_in_range(f in prop::num::f64::ANY) {
+            let s = format!("{f}");
+            let parsed: f64 = s.parse().unwrap_or(f64::NAN);
+            let in_range = parsed.is_finite() && parsed > 0.0;
+            prop_assert_eq!(parse_quantum_from_beats(s).is_ok(), in_range);
+        }
+    }
+
+    #[test]
+    fn parse_quantum_from_beats_accepts_4() {
+        let got = parse_quantum_from_beats("4".to_string()).unwrap();
+        assert_eq!(got, Quantum::from_bars(4));
+    }
+
+    #[test]
+    fn parse_quantum_from_beats_accepts_4_5() {
+        let got = parse_quantum_from_beats("4.5".to_string()).unwrap();
+        assert_eq!(got, agogo_core::fxp::f64_beats_to_quantum(4.5));
+    }
+
+    #[test]
+    fn parse_quantum_from_beats_rejects_zero() {
+        let err = parse_quantum_from_beats("0".to_string()).unwrap_err();
+        assert!(err.contains("invalid"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_quantum_from_beats_rejects_negative() {
+        let err = parse_quantum_from_beats("-1".to_string()).unwrap_err();
+        assert!(err.contains("invalid"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_quantum_from_beats_rejects_nan() {
+        let err = parse_quantum_from_beats("nan".to_string()).unwrap_err();
+        assert!(err.contains("invalid"), "got: {err}");
+    }
 
     fn args_with(ch: Vec<&str>, sr: u32) -> RunArgs {
         RunArgs {
