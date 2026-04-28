@@ -183,10 +183,14 @@ mod tests {
         /// with tiny `bpm_µ` and `ppqn` pushes the numerator past
         /// `u64::MAX`. With the saturating clamp, `inner` returns
         /// `u64::MAX`; without it the wrap modulo `2⁶⁴` returns
-        /// garbage. Generator domain spans the full `u32`/`u32` /
-        /// `192_000` regions where wrap is realistic; the
-        /// `arb_integer_stc()`-driven proptests above cover the
-        /// realistic-input region instead.
+        /// garbage. The generator is intentionally bounded
+        /// (`tick` near `u32::MAX`, `bpm_µ` ∈ `1..=100`, `ppqn` ∈
+        /// `1..=8`) to *target* the overflow region — the realistic-
+        /// input region is covered by the `arb_integer_stc()`-driven
+        /// proptests above. Per CLAUDE.md the anti-pattern is
+        /// bounding to *avoid* boundaries; here the bounds are set
+        /// to *reach* the wrap, which is the legitimate inverse of
+        /// the rule.
         #[test]
         fn sample_tick_inner_saturates_on_overflow(
             tick in (u32::MAX / 2)..=u32::MAX,

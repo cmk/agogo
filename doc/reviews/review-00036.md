@@ -3,8 +3,11 @@
 ## Summary
 
 Two narrow follow-ups from PR #35's review backlog, shipped as one
-small post-merge cleanup. No new features; no API changes outside
-the rename.
+small post-merge cleanup. No new features; no public API/signature
+changes besides the `micro_from_ms` rename. `SampleTickConn::inner`
+gains a behaviour change on overflow inputs — it now saturates to
+`u64::MAX` instead of wrapping modulo 2⁶⁴ (the wrap was a silent
+bug, not contracted behaviour).
 
 ### What's in this PR
 
@@ -159,3 +162,66 @@ caller possible. Zero residual hits confirmed.
 **Must fix before push:** None.
 
 **Follow-up:** None.
+
+<!-- gh-id: 4192236408 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-28 20:40 UTC](https://github.com/cmk/agogo/pull/36#pullrequestreview-4192236408))
+
+## Pull request overview
+
+Post-PR #35 cleanup that fixes an integer overflow wrap in `SampleTickConn::inner` by saturating the u128→u64 narrowing, and renames an argv-boundary helper to better reflect its semantics.
+
+**Changes:**
+- Clamp `SampleTickConn::inner`’s u128 quotient to `u64::MAX` instead of allowing modulo wrap on overflow.
+- Add a targeted proptest (plus regression seed) that exercises the overflow region and validates the saturation behavior.
+- Rename `micro_from_ms` → `micro_from_user_ms` within `machine::spec` to make argv-only semantics explicit.
+
+### Reviewed changes
+
+Copilot reviewed 5 out of 5 changed files in this pull request and generated 2 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00036.md | Adds the review record for PR #36 and documents the rationale/verification. |
+| doc/plans/plan-2026-04-28-04.md | Adds the plan describing the saturation fix + rename, with verification notes. |
+| crates/core/src/sync/sample_tick.rs | Implements u128→u64 saturation in `inner` and adds a new overflow-focused proptest. |
+| crates/core/src/machine/spec.rs | Renames `micro_from_ms` to `micro_from_user_ms` and updates call sites/comments. |
+| crates/core/proptest-regressions/sync/sample_tick.txt | Checks in the proptest regression seed for the overflow case. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3157044396 -->
+### Copilot on [`doc/reviews/review-00036.md:7`](https://github.com/cmk/agogo/pull/36#discussion_r3157044396) (2026-04-28 20:40 UTC)
+
+nit: The summary says “No … API changes outside the rename”, but this PR also changes `SampleTickConn::inner` behavior for overflow inputs (it now saturates instead of wrapping). Consider rephrasing to “no public API/signature changes (besides the rename); `inner` now saturates on overflow” to avoid a misleading top-level claim.
+```suggestion
+small post-merge cleanup. No new features; no public API/signature
+changes besides the rename; `SampleTickConn::inner` now saturates on
+overflow.
+```
+
+<!-- gh-id: 3157044455 -->
+### Copilot on [`crates/core/src/sync/sample_tick.rs:187`](https://github.com/cmk/agogo/pull/36#discussion_r3157044455) (2026-04-28 20:40 UTC)
+
+The proptest doc comment says the generator domain “spans the full `u32`/`u32` / `192_000` regions”, but the strategy is intentionally bounded (`tick` in `u32::MAX/2..=u32::MAX`, `bpm_u` in `1..=100`, `ppqn` in `1..=8`). Please reword to reflect that it *targets* the overflow region rather than covering the full domain.
+```suggestion
+        /// garbage. This generator targets that overflow-prone
+        /// region by using large `tick` values near `u32::MAX`,
+        /// small `bpm_u`/`ppqn`, and `sr = 192_000`; the
+```
+
+<!-- gh-id: 3157100360 -->
+#### ↳ cmk ([2026-04-28 20:50 UTC](https://github.com/cmk/agogo/pull/36#discussion_r3157100360))
+
+Done — rephrased the summary to call out the saturation behaviour change explicitly. The wrap-on-overflow was a silent bug, not contracted behaviour, so I framed it that way.
+
+<!-- gh-id: 3157100591 -->
+#### ↳ cmk ([2026-04-28 20:50 UTC](https://github.com/cmk/agogo/pull/36#discussion_r3157100591))
+
+Done — reworded to clarify the generator is *targeting* the overflow region (with the realistic-input region covered separately by `arb_integer_stc()`-driven proptests). Also linked it explicitly to the CLAUDE.md anti-pattern: bounding to *avoid* boundaries is the bug, bounding to *reach* a specific failure region is fine.
