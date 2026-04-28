@@ -118,7 +118,7 @@ pub fn transform(
     common: &ChannelCommon,
     stc: &SampleTickConn,
 ) -> Vec<ScheduledEvent> {
-    let divisor = common.divider.tick_count();
+    let divisor = u64::from(common.divider.tick_count());
     let delay_clamped = Micro(common.delay.0.clamp(0, MAX_DELAY.0));
     let delay_samples = micro_to_samples(delay_clamped, stc.sr()).max(0) as u64;
     let offset_samples = micro_to_samples(common.offset, stc.sr());
@@ -249,9 +249,9 @@ mod tests {
         // Divider T4 (960 ticks). Master stream contains every tick in
         // [0, 1000]; only 0 and 960 survive the filter.
         let common = zero_common(Grid::T4);
-        let master: Vec<Tick> = (0..=1000).map(Tick).collect();
+        let master: Vec<Tick> = (0u64..=1000).map(Tick).collect();
         let ev = transform(master, &common, &stc_120_48k());
-        let ticks: Vec<u32> = ev.iter().map(|e| e.tick.0).collect();
+        let ticks: Vec<u64> = ev.iter().map(|e| e.tick.0).collect();
         assert_eq!(ticks, vec![0, 960]);
     }
 
@@ -260,9 +260,9 @@ mod tests {
         // T8Q = 192 ticks (5 per quarter). Master stream covers
         // [0, 1000] → ticks 0, 192, 384, 576, 768, 960.
         let common = zero_common(Grid::T8Q);
-        let master: Vec<Tick> = (0..=1000).map(Tick).collect();
+        let master: Vec<Tick> = (0u64..=1000).map(Tick).collect();
         let ev = transform(master, &common, &stc_120_48k());
-        let ticks: Vec<u32> = ev.iter().map(|e| e.tick.0).collect();
+        let ticks: Vec<u64> = ev.iter().map(|e| e.tick.0).collect();
         assert_eq!(ticks, vec![0, 192, 384, 576, 768, 960]);
     }
 
@@ -326,7 +326,7 @@ mod tests {
             (divider, shuffle) in arb_divider_with_bounded_swing(),
             delay_us in 0_i64..=MAX_DELAY.0,
             offset_us in -5_000_i64..=5_000,
-            max_tick in 960u32..=10_000,
+            max_tick in 960u64..=10_000,
         ) {
             let common = ChannelCommon {
                 divider,
@@ -357,14 +357,14 @@ mod tests {
         #[test]
         fn divider_rate_preservation(
             divider in arb_grid(),
-            beats in 1u32..=16,
+            beats in 1u64..=16,
         ) {
             let common = zero_common(divider);
             let span = beats * 960;
             let master: Vec<Tick> = (0..span).map(Tick).collect();
             let ev = transform(master, &common, &stc_120_48k());
-            let expected = span.div_ceil(divider.tick_count());
-            prop_assert_eq!(ev.len() as u32, expected);
+            let expected = span.div_ceil(u64::from(divider.tick_count()));
+            prop_assert_eq!(ev.len() as u64, expected);
         }
 
         /// Plan property `shift_clamping`, upper bound.
@@ -398,7 +398,7 @@ mod tests {
                 amount,
             };
             let stc = stc_120_48k();
-            for step in [0u32, 480, 960, 1440] {
+            for step in [0u64, 480, 960, 1440] {
                 let ev = transform([Tick(step)], &common, &stc);
                 prop_assert_eq!(ev[0].tick, Tick(step));
             }

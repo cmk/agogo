@@ -88,7 +88,7 @@ impl SampleTickConn {
     }
 
     fn to_tick(x: u128) -> Tick {
-        Tick(x.min(u128::from(u32::MAX)) as u32)
+        Tick(x.min(u128::from(u64::MAX)) as u64)
     }
 }
 
@@ -153,7 +153,7 @@ mod tests {
         #[test]
         fn sample_tick_round_trip(
             stc in arb_integer_stc(),
-            t in 0u32..=1_000_000,
+            t in 0u64..=1_000_000,
         ) {
             let tick = Tick(t);
             let sample = stc.inner(tick);
@@ -193,7 +193,7 @@ mod tests {
         /// the rule.
         #[test]
         fn sample_tick_inner_saturates_on_overflow(
-            tick in (u32::MAX / 2)..=u32::MAX,
+            tick in u64::from(u32::MAX / 2)..=u64::from(u32::MAX),
             bpm_u in 1u32..=100,
             ppqn in 1u32..=8,
         ) {
@@ -360,7 +360,7 @@ mod tests {
             #[test]
             fn stc_samples_per_tick_is_exact_at_48k(
                 bpm in arb_exact_48k_bpm(),
-                t in 0u32..=10_000_000,
+                t in 0u64..=10_000_000,
             ) {
                 let stc = SampleTickConn::new(48_000, Tempo::from_bpm_integer(bpm), PPQN);
                 assert_exact(&stc, Tick(t));
@@ -371,7 +371,7 @@ mod tests {
             #[test]
             fn stc_samples_per_tick_is_exact_at_96k(
                 bpm in arb_exact_96k_bpm(),
-                t in 0u32..=10_000_000,
+                t in 0u64..=10_000_000,
             ) {
                 let stc = SampleTickConn::new(96_000, Tempo::from_bpm_integer(bpm), PPQN);
                 assert_exact(&stc, Tick(t));
@@ -384,7 +384,7 @@ mod tests {
             #[test]
             fn stc_round_trip_identity_48k_96k(
                 (sr, bpm) in arb_exact_sr_bpm(),
-                t in 0u32..=1_000_000,
+                t in 0u64..=1_000_000,
             ) {
                 let stc = SampleTickConn::new(sr, Tempo::from_bpm_integer(bpm), PPQN);
                 let tick = Tick(t);

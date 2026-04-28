@@ -40,8 +40,14 @@ const TPW: i64 = (4 * PPQN) as i64;
 
 // ── ticks: Conn<Tick, Time> ──────────────────────────────────────
 
+/// Precondition: `n.0 ≤ u32::MAX × Grid::T1.tick_count()`. The
+/// `ticks` Conn unwraps `from_ticks` here because `Conn::ceil` is
+/// total `fn(Tick) -> Time`. Proptest callers stay inside the
+/// horizon via [`arb_tick`](crate::arb::arb_tick); runtime callers
+/// (transport, scheduler) call `from_ticks` directly and pick their
+/// own out-of-range semantics.
 fn ticks_ceil(n: Tick) -> Time {
-    from_ticks(n)
+    from_ticks(n).expect("ticks Conn requires n ≤ u32::MAX × Grid::T1.tick_count()")
 }
 
 fn ticks_inner(t: Time) -> Tick {
@@ -49,7 +55,7 @@ fn ticks_inner(t: Time) -> Tick {
 }
 
 fn ticks_floor(n: Tick) -> Time {
-    from_ticks_floor(n)
+    from_ticks_floor(n).expect("ticks Conn requires n ≤ u32::MAX × Grid::T1.tick_count()")
 }
 
 /// Master `Tick ↔ Time` connection. Ceiling rounds up to the
@@ -66,11 +72,12 @@ fn tpw_rational() -> Rational64 {
     Rational64::new(TPW, 1)
 }
 
-// Clamp an `i64` into the `u32` range. Saturates at both ends so a
-// huge rational produces `u32::MAX` ticks (not a wrapped value) and
-// a negative one produces 0.
+// Clamp an `i64` into the non-negative `u64` range. Saturates at 0
+// so a negative rational produces `Tick(0)` rather than wrapping.
+// `i64::MAX` maps to `Tick(i64::MAX as u64)`, well inside Tick's u64
+// horizon.
 fn i64_to_tick(n: i64) -> Tick {
-    Tick(n.clamp(0, i64::from(u32::MAX)) as u32)
+    Tick(n.max(0) as u64)
 }
 
 fn rt_ceil(r: Whole) -> Tick {
@@ -79,7 +86,12 @@ fn rt_ceil(r: Whole) -> Tick {
 }
 
 fn rt_inner(n: Tick) -> Whole {
-    Rational64::new(i64::from(n.0), TPW)
+    // Tick is u64; Whole's numerator is i64. Saturate at i64::MAX so
+    // Tick values past i64's positive range produce a finite (large)
+    // rational rather than wrapping. In practice arb_tick is capped
+    // well below i64::MAX.
+    let num = i64::try_from(n.0).unwrap_or(i64::MAX);
+    Rational64::new(num, TPW)
 }
 
 fn rt_floor(r: Whole) -> Tick {
@@ -103,14 +115,22 @@ fn qa_inner(t: Time) -> Tick {
 macro_rules! qa_variant {
     ($variant:ident, $ceil:ident, $floor:ident) => {
         fn $ceil(n: Tick) -> Time {
+            let tc = u64::from(Grid::$variant.tick_count());
+            let beats = n.0.div_ceil(tc);
             Time {
-                beats: n.0.div_ceil(Grid::$variant.tick_count()),
+                beats: u32::try_from(beats).expect(
+                    "quantize_at Conn requires n.0.div_ceil(tc) ≤ u32::MAX",
+                ),
                 base: Grid::$variant,
             }
         }
         fn $floor(n: Tick) -> Time {
+            let tc = u64::from(Grid::$variant.tick_count());
+            let beats = n.0 / tc;
             Time {
-                beats: n.0 / Grid::$variant.tick_count(),
+                beats: u32::try_from(beats).expect(
+                    "quantize_at Conn requires n.0 / tc ≤ u32::MAX",
+                ),
                 base: Grid::$variant,
             }
         }
@@ -264,9 +284,8 @@ fn lcm_u64(a: u64, b: u64) -> u64 {
 
 fn time_pair_ceil(ab: (Time, Time)) -> Time {
     let (a, b) = ab;
-    let g = gcd_u64(u64::from(time_to_tick(a).0), u64::from(time_to_tick(b).0));
-    // GCD of u32 values fits in u32.
-    from_ticks(Tick(g as u32))
+    let g = gcd_u64(time_to_tick(a).0, time_to_tick(b).0);
+    from_ticks(Tick(g)).expect("time_pair_ceil: GCD of representable ticks is itself representable")
 }
 
 fn time_pair_inner(t: Time) -> (Time, Time) {
@@ -275,12 +294,12 @@ fn time_pair_inner(t: Time) -> (Time, Time) {
 
 fn time_pair_floor(ab: (Time, Time)) -> Time {
     let (a, b) = ab;
-    let l = lcm_u64(u64::from(time_to_tick(a).0), u64::from(time_to_tick(b).0));
-    // LCM can overflow u32 in general; property tests bound inputs via
-    // `arb_small_time` so `l <= u32::MAX`.
-    from_ticks(Tick(
-        u32::try_from(l).expect("LCM of tick counts overflows u32"),
-    ))
+    let l = lcm_u64(time_to_tick(a).0, time_to_tick(b).0);
+    // LCM can exceed `u32::MAX × Grid::T1.tick_count()` in general;
+    // property tests bound inputs via `arb_small_time` so `l` stays
+    // representable. For larger inputs `from_ticks` returns `None`
+    // and we panic loudly rather than silently picking a wrong value.
+    from_ticks(Tick(l)).expect("time_pair_floor: LCM exceeds the from_ticks horizon")
 }
 
 /// Divisibility-lattice connection on `Time`.
@@ -292,9 +311,10 @@ fn time_pair_floor(ab: (Time, Time)) -> Time {
 /// # Panics
 ///
 /// `floor` panics if the LCM of the two input tick counts exceeds
-/// `u32::MAX`. For musically-bounded `Time` values this is
-/// unreachable; tests use `arb_small_time` (tick counts ≤ 192_000,
-/// LCM well inside `u32`) to stay safely bounded.
+/// the `from_ticks` horizon (`u32::MAX × Grid::T1.tick_count()`).
+/// For musically-bounded `Time` values this is unreachable; tests
+/// use `arb_small_time` (tick counts ≤ 192_000) to stay safely
+/// bounded.
 pub fn time() -> Conn<(Time, Time), Time> {
     Conn::new(time_pair_ceil, time_pair_inner, time_pair_floor)
 }
@@ -546,9 +566,9 @@ mod tests {
         /// At 960 PPQN, every tick is on `Grid::T512P` (= 1) so this
         /// is the identity on every tick.
         #[test]
-        fn ticks_round_trip_on_aligned(q in 0u32..=1_000_000) {
+        fn ticks_round_trip_on_aligned(q in 0u64..=1_000_000) {
             let c = ticks();
-            let n = Tick(q * Grid::T512P.tick_count());
+            let n = Tick(q * u64::from(Grid::T512P.tick_count()));
             prop_assert_eq!(c.inner(c.floor(n)), n);
         }
 
@@ -635,7 +655,7 @@ mod tests {
             g in arb_grid(), q in 0u32..=10_000,
         ) {
             let c = quantize_at(g);
-            let n = Tick(q * g.tick_count());
+            let n = Tick(u64::from(q) * u64::from(g.tick_count()));
             prop_assert_eq!(c.inner(c.floor(n)), n);
             prop_assert_eq!(c.inner(c.ceil(n)), n);
         }
@@ -708,12 +728,13 @@ mod tests {
     }
 
     /// True when `quantize_at(g).ceil(n)` fits back through
-    /// `time_to_tick` without `checked_mul` overflow. Used to skip
-    /// `arb_tick()`'s `u32::MAX` boundary in proptests that compose
-    /// `time_to_tick` on the ceil result.
+    /// `time_to_tick` — i.e. `n.0.div_ceil(tc) ≤ u32::MAX`, the
+    /// horizon of `Time.beats`. Used to skip `arb_tick()`'s upper
+    /// boundary in proptests that compose `time_to_tick` on the ceil
+    /// result.
     fn ceil_fits(n: Tick, g: Grid) -> bool {
-        let tc = g.tick_count();
-        n.0.div_ceil(tc).checked_mul(tc).is_some()
+        let tc = u64::from(g.tick_count());
+        n.0.div_ceil(tc) <= u64::from(u32::MAX)
     }
 
     proptest! {
@@ -794,9 +815,9 @@ mod tests {
             a in arb_small_time(), b in arb_small_time(),
         ) {
             let c = time();
-            let ta = u64::from(time_to_tick(a).0);
-            let tb = u64::from(time_to_tick(b).0);
-            prop_assert_eq!(time_to_tick(c.ceil((a, b))).0 as u64, gcd_u64(ta, tb));
+            let ta = time_to_tick(a).0;
+            let tb = time_to_tick(b).0;
+            prop_assert_eq!(time_to_tick(c.ceil((a, b))).0, gcd_u64(ta, tb));
         }
 
         #[test]
@@ -804,9 +825,9 @@ mod tests {
             a in arb_small_time(), b in arb_small_time(),
         ) {
             let c = time();
-            let ta = u64::from(time_to_tick(a).0);
-            let tb = u64::from(time_to_tick(b).0);
-            prop_assert_eq!(time_to_tick(c.floor((a, b))).0 as u64, lcm_u64(ta, tb));
+            let ta = time_to_tick(a).0;
+            let tb = time_to_tick(b).0;
+            prop_assert_eq!(time_to_tick(c.floor((a, b))).0, lcm_u64(ta, tb));
         }
 
         #[test]

@@ -102,12 +102,16 @@ pub fn tick_stream_into(
     // tick space; we store the negation here so the existing
     // `min(0)/max(0)` window-expansion math stays untouched) are
     // included.
-    let swing_d: i64 = -(common.shuffle.amount as i64);
-    let lo_from_sample = stc.floor(swung_lo).0 as i64;
-    let hi_from_sample = stc.ceil(swung_hi).0 as i64;
-    let lo_tick = lo_from_sample.saturating_add(swing_d.min(0)).max(0) as u32;
+    //
+    // Tick is u64; widen to i128 throughout this stretch so the
+    // signed swing window can't overflow at either edge of the u64
+    // range.
+    let swing_d: i128 = -i128::from(common.shuffle.amount);
+    let lo_from_sample = i128::from(stc.floor(swung_lo).0);
+    let hi_from_sample = i128::from(stc.ceil(swung_hi).0);
+    let lo_tick = lo_from_sample.saturating_add(swing_d.min(0)).max(0) as u64;
     let hi_tick_i = hi_from_sample.saturating_add(swing_d.max(0));
-    let hi_tick = hi_tick_i.clamp(0, u32::MAX as i64) as u32;
+    let hi_tick = hi_tick_i.clamp(0, i128::from(u64::MAX)) as u64;
 
     if lo_tick > hi_tick {
         return;
@@ -121,7 +125,7 @@ pub fn tick_stream_into(
     // the `scheduler_block_equivalence` /
     // `tick_stream_into_matches_transform_filtered` proptests both
     // trip.
-    let divisor = common.divider.tick_count();
+    let divisor = u64::from(common.divider.tick_count());
     let delay_fwd = delay_samples.max(0) as u64;
     for t in (lo_tick..=hi_tick).map(Tick) {
         if t.0 % divisor != 0 {
@@ -309,7 +313,7 @@ mod tests {
             // the inlined pipeline in `tick_stream_into` cannot
             // shadow drift behind a delegation chain.
             let reference: Vec<ScheduledEvent> = transform(
-                (0..=65_536u32).map(Tick),
+                (0u64..=65_536).map(Tick),
                 &common,
                 &stc,
             )
