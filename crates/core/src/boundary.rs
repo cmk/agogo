@@ -35,13 +35,12 @@ use crate::time::tempo::Tempo;
 /// that want to reject "out of range" BPM rather than silently
 /// saturate.
 ///
-/// Computed as a plain `u32 as f64 / 1.0e6` because
-/// `tempo_to_f64_bpm(Tempo(u32::MAX))` returns a much larger
-/// value (the `I064U032.inner` saturating-widen step lifts
-/// `u32::MAX` to `i64::MAX` before the F-ladder inverse, so
-/// the result is `i64::MAX / 10⁶` ≈ 9.22 × 10¹²). The `× 10⁻⁶`
-/// here is a one-off domain-boundary constant, not a per-input
-/// scale shift.
+/// `Tempo` stores BPM in micro-BPM units in a `u32`, so the
+/// corresponding `f64` bound is just the raw maximum divided by
+/// `1.0e6`. This matches the normal `Tempo` → `f64` conversion
+/// for `Tempo(u32::MAX)`; the `× 10⁻⁶` here is the domain-unit
+/// conversion from micro-BPM to BPM, not a special saturation
+/// workaround.
 ///
 /// Lives here in `boundary` (rather than as `Tempo::MAX_BPM_F64`)
 /// so `crate::time::tempo` stays f64-free per the workspace's

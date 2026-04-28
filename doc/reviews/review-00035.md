@@ -185,3 +185,114 @@ structural Rust moves).
    single helper across `boundary.rs` and `host-link::link.rs`.
 4. The plan's deferred items (T6–T8 borrow tasks; T9/T11/T12
    kitchen-sink splits) all remain reasonable post-merge follow-ups.
+
+<!-- gh-id: 3153870594 -->
+### Copilot on [`crates/core/src/boundary.rs:44`](https://github.com/cmk/agogo/pull/35#discussion_r3153870594) (2026-04-28 11:54 UTC)
+
+The doc comment for `MAX_BPM_F64` claims `tempo_to_f64_bpm(Tempo(u32::MAX))` returns ~`i64::MAX / 1e6` due to `I064U032.inner` “saturating-widen”, but `tempo_to_f64_bpm` uses `I064U032.inner` as a lossless u32→i64 widen (and the property test below expects `raw as f64 / 1_000_000.0` for all `u32`). This explanation looks incorrect/misleading—please update the comment to reflect the actual conversion behavior (or adjust the code if saturation is intended).
+```suggestion
+/// `Tempo` stores BPM in micro-BPM units in a `u32`, so the
+/// corresponding `f64` bound is just the raw maximum divided by
+/// `1.0e6`. This matches the normal `Tempo` → `f64` conversion
+/// for `Tempo(u32::MAX)`; the `× 10⁻⁶` here is the domain-unit
+/// conversion from micro-BPM to BPM, not a special saturation
+/// workaround.
+```
+
+<!-- gh-id: 3153870693 -->
+### Copilot on [`crates/core/src/sync/sample_tick.rs:68`](https://github.com/cmk/agogo/pull/35#discussion_r3153870693) (2026-04-28 11:54 UTC)
+
+`SampleTickConn::inner` computes the result in `u128` but then narrows with `as u64` without any bounds check/saturation. For some valid inputs (`Tick` up to `u32::MAX`, very small `bpm`/`ppqn`), the quotient can exceed `u64::MAX`, and the cast will truncate (wrap) rather than saturate or error. Consider clamping to `u64::MAX`, returning `Option<u64>`, or asserting the result fits—similar to how `to_tick` saturates to `u32::MAX`.
+
+<!-- gh-id: 4188474005 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-28 11:54 UTC](https://github.com/cmk/agogo/pull/35#pullrequestreview-4188474005))
+
+## Pull request overview
+
+This PR performs a workspace re-organization by deleting the former `crates/core/src/fxp.rs` “kitchen sink” module and relocating its responsibilities into narrower, single-purpose modules across `core::{boundary,time,sync}` and `host-link`, while also updating float-allowlist enforcement and Link-FFI float containment.
+
+**Changes:**
+- Delete `crates/core/src/fxp.rs` and introduce focused replacements: `core::boundary`, `time::{tempo,float}`, `sync::{phase,sample_tick}`, plus envelope/sample utilities.
+- Move Link-specific `Quantum` + parsing/conversion helpers into `crates/host-link/src/quantum.rs` and re-export through `agogo-host-link`.
+- Update float-usage allowlisting (`scripts/check-floats.sh`) and related documentation (`CLAUDE.md`), plus rewrite imports/call sites across crates.
+
+### Reviewed changes
+
+Copilot reviewed 45 out of 46 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| scripts/check-floats.sh | Update f32/f64 allowlist to reflect module moves (fxp→boundary, decimal→float, add host-link quantum). |
+| CLAUDE.md | Update documented float gate/allowlist narrative to match new file layout. |
+| doc/reviews/review-00035.md | Add review record documenting the reorg plan, verification, and risks. |
+| crates/host-link/src/lib.rs | Add `quantum` module and re-export `Quantum` + helpers. |
+| crates/host-link/src/quantum.rs | New Link-shaped `Quantum` type and f64 parsing/conversion helpers + tests. |
+| crates/host-link/src/link.rs | Update imports to new `core::{boundary,time,sync}` modules; inline quantum-boundary math near FFI calls. |
+| crates/host-link/src/session.rs | Update imports for moved types; use `host-link::Quantum`. |
+| crates/host-link/src/source.rs | Update imports for moved `Phase`/`Tempo`; add missing `// PCM ABI` marker on `&[f32]`. |
+| crates/host-link/src/transport.rs | Formatting-only adjustments in tests. |
+| crates/host-link/tests/bidirectional.rs | Update imports to new `Tempo` + `Quantum` locations; formatting tweaks. |
+| crates/host-cpal/src/cpal/callback.rs | Update `SampleTime`, `Tempo`, `Micro`, `S048` imports to new modules. |
+| crates/cli/src/main.rs | Update CLI types/imports for moved `Tempo`/`Phase`/`Pico`/`Micro`; re-export `parse_quantum_from_beats` from host-link under `feature=link`. |
+| crates/cli/src/run.rs | Update imports for moved `Tempo`/sample-rate types and `Quantum`; use `boundary::tempo_to_f64_bpm`. |
+| crates/core/src/lib.rs | Remove `fxp` module; add new `boundary` module export. |
+| crates/core/src/boundary.rs | New f64↔fxp boundary helpers (argv/FFI/PI seams) split out of `fxp`. |
+| crates/core/src/fxp.rs | Delete former kitchen-sink module. |
+| crates/core/src/sync.rs | Add `phase` + `sample_tick` modules and re-exports. |
+| crates/core/src/sync/phase.rs | New `Phase` module (Q0.32 NCO accumulator) split from `fxp`. |
+| crates/core/src/sync/sample_tick.rs | New home for tempo-coupled `SampleTickConn` and absorbed exactness tests. |
+| crates/core/src/sync/source.rs | Update imports to moved `Phase`/`Tempo`/`SampleTime`/`Pico`. |
+| crates/core/src/sync/pll.rs | Update imports to moved types/helpers (`boundary`, `time`, `sync`). |
+| crates/core/src/sync/detect.rs | Update `SampleTime` import to `time::sample`. |
+| crates/core/src/time.rs | Add `time::float` and `time::tempo`; remove `exact_rates` module; clarify tempo-coupling note. |
+| crates/core/src/time/tempo.rs | New `Tempo` type module split from `fxp`. |
+| crates/core/src/time/float.rs | New `F064FDxx` Conn definitions split out of `time::decimal`. |
+| crates/core/src/time/decimal.rs | Remove float Conn machinery; keep integer ladder + add `Micro`/`Pico` aliases. |
+| crates/core/src/time/sample.rs | Add `SampleTime` trait + `samples_f64` moved from `fxp`. |
+| crates/core/src/time/envelope.rs | Move `linear_u8`/`smoothstep_u8` primitives here from `fxp` and update envelope functions/tests. |
+| crates/core/src/time/conn.rs | Remove `SampleTickConn` (moved to `sync`); minor import ordering. |
+| crates/core/src/time/exact_rates.rs | Delete standalone exactness test module (moved under `sync::sample_tick` tests). |
+| crates/core/src/time/grid.rs | Formatting changes + minor error-message formatting consolidation. |
+| crates/core/src/time/tick.rs | Formatting-only changes in struct literals/tests. |
+| crates/core/src/time/tbase.rs | Formatting-only change in error return. |
+| crates/core/src/time/swing.rs | Formatting-only change in test helper. |
+| crates/core/src/arb.rs | Update imports to moved `Tempo`/`Pico` and boundary helpers; minor formatting. |
+| crates/core/src/channel/role.rs | Update `Micro` import to `time::decimal`. |
+| crates/core/src/channel/scheduler.rs | Update imports (`SampleTickConn`, `Micro`) to new locations. |
+| crates/core/src/channel/transform.rs | Update imports (`pico_to_samples`, `SampleTickConn`, `Micro`) to new locations. |
+| crates/core/src/out/midi.rs | Update imports to moved `SampleTickConn`, `Tempo`, `Micro`. |
+| crates/core/src/machine.rs | Update imports (`SampleTickConn`, `Tempo`, `SampleTime`, `Micro`); formatting tweaks in tests. |
+| crates/core/src/machine/spec.rs | Update imports for moved `Micro`/`F064FD06` and `Extended*`; change `snap_intent()` return type to `Option<Micro>`. |
+| crates/core/src/dsl.rs | Formatting-only changes in tests. |
+| crates/core/src/dsl/eval.rs | Formatting-only changes (single-line match arms/tests). |
+| crates/core/src/dsl/display.rs | Formatting-only change in test construction. |
+| crates/core/src/dsl/parser.rs | Formatting-only change in `UnexpectedEof` handling. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3153870735 -->
+### Copilot on [`crates/host-link/src/quantum.rs:40`](https://github.com/cmk/agogo/pull/35#discussion_r3153870735) (2026-04-28 11:54 UTC)
+
+The `from_bars` docs say it panics if `n × 10^6` overflows `i64` (with a threshold `n > 9.2 × 10^12`), but `n` is a `u32`, so it can’t reach a value that would overflow `i64` when multiplied by 1,000,000. Either simplify the implementation (no `checked_mul`) or adjust the comment to match the actual bounds and when a panic is possible.
+
+<!-- gh-id: 3153962366 -->
+#### ↳ cmk ([2026-04-28 12:08 UTC](https://github.com/cmk/agogo/pull/35#discussion_r3153962366))
+
+Done — replaced the doc with your suggested wording. The 'saturating-widen' framing was wrong: `I064U032.inner: u32 → i64` is lossless, so `tempo_to_f64_bpm(Tempo(u32::MAX))` does land at `u32::MAX as f64 / 1e6`. Thanks for catching it.
+
+<!-- gh-id: 3153962609 -->
+#### ↳ cmk ([2026-04-28 12:08 UTC](https://github.com/cmk/agogo/pull/35#discussion_r3153962609))
+
+Done — dropped the unreachable `checked_mul` arm. `u32::MAX × 10⁶ ≈ 4.29e15` is well below `i64::MAX ≈ 9.22e18`, so the panic was decorative. Updated the doc to spell out the bound.
+
+<!-- gh-id: 3153962841 -->
+#### ↳ cmk ([2026-04-28 12:08 UTC](https://github.com/cmk/agogo/pull/35#discussion_r3153962841))
+
+Deferring this to a follow-up plan. Real concern, but the function was moved verbatim from `time/conn.rs` in T3 — this PR is a pure structural reorg with no logic changes, and saturation vs wrap is a behaviour shift that deserves its own commit (probably with a proptest exposing the wrap region). Tracked in the deferred section of plan-2026-04-28-03 as a follow-up alongside the `compose!`/`ceiling1` body cleanups.
