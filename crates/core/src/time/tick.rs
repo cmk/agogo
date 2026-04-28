@@ -14,8 +14,6 @@
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 
-use crate::preorder::Ple;
-
 use crate::time::grid::Grid;
 
 /// Ticks per quarter note. 960 PPQN master resolution.
@@ -28,12 +26,6 @@ pub const PPQN: u32 = 960;
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord, Default)]
 pub struct Tick(pub u64);
-
-impl Ple for Tick {
-    fn ple(&self, other: &Self) -> bool {
-        self.0 <= other.0
-    }
-}
 
 /// Musical time as (count × grid): `beats` positions on a `Grid` of
 /// resolution `base`.
@@ -129,12 +121,6 @@ impl Ord for Time {
 impl Hash for Time {
     fn hash<H: Hasher>(&self, state: &mut H) {
         time_to_tick(*self).hash(state);
-    }
-}
-
-impl Ple for Time {
-    fn ple(&self, other: &Self) -> bool {
-        time_to_tick(*self).ple(&time_to_tick(*other))
     }
 }
 

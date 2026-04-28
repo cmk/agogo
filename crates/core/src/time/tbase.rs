@@ -6,11 +6,11 @@
 //! lattice lives in [`crate::time::grid`].
 //!
 //! `TBase` is totally ordered by divisibility of tick counts (a chain):
-//! `T256 ≤ … ≤ T4 ≤ T2 ≤ T1` in the lattice's divisibility order
-//! (finer grids — smaller tick counts — are lower under `Ple`),
-//! with `T1` (= bar) at the top and `T256` (= bar/256) at the bottom.
-
-use crate::preorder::Ple;
+//! `T256 < … < T4 < T2 < T1` (finer grids — smaller tick counts — are
+//! lower in the lattice), with `T1` (= bar) at the top and `T256`
+//! (= bar/256) at the bottom. The custom `PartialOrd` / `Ord`
+//! implementation below encodes this — `derive(PartialOrd)` would
+//! produce declaration order, the inverse direction.
 
 use crate::time::tick::PPQN;
 
@@ -22,7 +22,7 @@ pub const BAR: u32 = 4 * PPQN;
 /// whose tick count is `BAR / n`, so `T1 = BAR` (whole note),
 /// `T4 = BAR/4 = PPQN` (quarter), and `T256 = BAR/256` (smallest
 /// useful 16th-of-16th-of-16th-of-… subdivision at 960 PPQN).
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum TBase {
     T1,
     T2,
@@ -89,13 +89,21 @@ impl TBase {
     }
 }
 
-/// Divisibility preorder on tick counts: `a.ple(&b)` iff `a`'s tick
-/// count divides `b`'s. On the binary chain this is just
-/// `a.exp() >= b.exp()` (more `exp` = smaller tick count = "finer"
-/// grid = lower in the lattice).
-impl Ple for TBase {
-    fn ple(&self, other: &Self) -> bool {
-        self.exp() >= other.exp()
+/// Divisibility ordering: `a ≤ b` iff `a`'s tick count divides
+/// `b`'s. On the binary chain this is just `a.exp() >= b.exp()`
+/// (more `exp` = smaller tick count = "finer" grid = lower in the
+/// lattice). Total since the chain is a single linear order.
+impl PartialOrd for TBase {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TBase {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // `a ≤ b ⟺ a.exp() ≥ b.exp()`, so `cmp` flips the direction
+        // of `exp().cmp`.
+        other.exp().cmp(&self.exp())
     }
 }
 
@@ -211,59 +219,78 @@ mod tests {
         assert!("t".parse::<TBase>().is_err());
     }
 
-    // ── Spot checks on divisibility preorder ──────────────────────
+    // ── Spot checks on divisibility ordering ──────────────────────
 
     #[test]
-    fn ple_t16_below_t4() {
+    fn t16_below_t4() {
         // T16 = 240 divides T4 = 960.
-        assert!(TBase::T16.ple(&TBase::T4));
+        assert!(TBase::T16 <= TBase::T4);
     }
 
     #[test]
-    fn ple_t4_not_below_t16() {
-        assert!(!TBase::T4.ple(&TBase::T16));
+    fn t4_not_below_t16() {
+        assert!(TBase::T4 > TBase::T16);
     }
 
     #[test]
     fn t256_is_bottom() {
         for tb in TBase::ALL {
-            assert!(TBase::T256.ple(&tb), "T256 should be ≤ {tb:?}");
+            assert!(TBase::T256 <= tb, "T256 should be ≤ {tb:?}");
         }
     }
 
     #[test]
     fn t1_is_top() {
         for tb in TBase::ALL {
-            assert!(tb.ple(&TBase::T1), "{tb:?} should be ≤ T1");
+            assert!(tb <= TBase::T1, "{tb:?} should be ≤ T1");
         }
     }
 
-    // ── Preorder property tests ───────────────────────────────────
+    /// Divisibility chain: `T256 < T128 < … < T1`.
+    #[test]
+    fn divisibility_chain_strictly_ascending() {
+        let chain = [
+            TBase::T256,
+            TBase::T128,
+            TBase::T64,
+            TBase::T32,
+            TBase::T16,
+            TBase::T8,
+            TBase::T4,
+            TBase::T2,
+            TBase::T1,
+        ];
+        for w in chain.windows(2) {
+            assert!(w[0] < w[1], "{:?} should be < {:?}", w[0], w[1]);
+        }
+    }
+
+    // ── Order property tests ──────────────────────────────────────
 
     proptest! {
         #[test]
         fn ple_reflexive(a in arb_tbase()) {
-            prop_assert!(a.ple(&a));
+            prop_assert!(a <= a);
         }
 
         #[test]
         fn ple_antisymmetric(a in arb_tbase(), b in arb_tbase()) {
-            if a.ple(&b) && b.ple(&a) {
+            if a <= b && b <= a {
                 prop_assert_eq!(a, b);
             }
         }
 
         #[test]
         fn ple_transitive(a in arb_tbase(), b in arb_tbase(), c in arb_tbase()) {
-            if a.ple(&b) && b.ple(&c) {
-                prop_assert!(a.ple(&c));
+            if a <= b && b <= c {
+                prop_assert!(a <= c);
             }
         }
 
         /// Total order on the binary chain: every pair is comparable.
         #[test]
         fn ple_total(a in arb_tbase(), b in arb_tbase()) {
-            prop_assert!(a.ple(&b) || b.ple(&a));
+            prop_assert!(a <= b || b <= a);
         }
 
         /// `tick_count` matches the formula `BAR >> exp()`.

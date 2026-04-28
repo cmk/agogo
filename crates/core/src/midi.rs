@@ -17,8 +17,6 @@
 
 use connections::conn::Conn;
 
-use crate::preorder::Ple;
-
 // ── U7 — 7-bit unsigned (0..=127). ──
 
 #[repr(transparent)]
@@ -32,12 +30,6 @@ impl U7 {
     /// Returns `Some(U7(x))` iff `x <= 127`.
     pub const fn new(x: u8) -> Option<Self> {
         if x <= Self::MAX { Some(Self(x)) } else { None }
-    }
-}
-
-impl Ple for U7 {
-    fn ple(&self, other: &Self) -> bool {
-        self.0 <= other.0
     }
 }
 
@@ -66,12 +58,6 @@ impl U4 {
     /// Returns `Some(U4(x))` iff `x <= 15`.
     pub const fn new(x: u8) -> Option<Self> {
         if x <= Self::MAX { Some(Self(x)) } else { None }
-    }
-}
-
-impl Ple for U4 {
-    fn ple(&self, other: &Self) -> bool {
-        self.0 <= other.0
     }
 }
 
@@ -186,9 +172,9 @@ mod tests {
 
     #[test]
     fn ple_compares_inner() {
-        assert!(U7(10).ple(&U7(20)));
-        assert!(U7(20).ple(&U7(20)));
-        assert!(!U7(20).ple(&U7(10)));
+        assert!(U7(10) <= U7(20));
+        assert!(U7(20) <= U7(20));
+        assert!(U7(20) > U7(10));
     }
 
     // ── Property tests ───────────────────────────────────────────

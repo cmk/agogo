@@ -19,11 +19,11 @@
 //! connections: the pair side carries the divisibility product order,
 //! not magnitude. Following the Haskell convention,
 //! `ceil = meet (GCD)` and `floor = join (LCM)`. The generic
-//! adjoint-law tests from `connections/src/conn.rs` that use a single
-//! preorder (e.g. via `Ple`) therefore need a *divisibility* `≤` on
-//! the input/output side — applying Time's magnitude `Ple` would give
-//! a different (and non-adjoint) structure. The tests below build
-//! ad-hoc `div_le` helpers for that reason.
+//! adjoint-law tests from `connections/src/conn.rs` use a single
+//! `PartialOrd` and therefore need a *divisibility* `≤` on the
+//! input/output side — `Time`'s and `Grid`'s magnitude order would
+//! give a non-adjoint structure. The tests below build ad-hoc
+//! `*_refine_le` helpers for that reason.
 
 use connections::conn::Conn;
 use num_rational::Rational64;
@@ -349,7 +349,6 @@ pub fn grid() -> Conn<(Grid, Grid), Grid> {
 mod tests {
     use super::*;
     use crate::arb::{arb_grid, arb_rational_nonneg, arb_small_time, arb_tick, arb_time};
-    use crate::preorder::Ple;
     use proptest::prelude::*;
 
     // ── Spot checks ──────────────────────────────────────────────
@@ -524,21 +523,21 @@ mod tests {
         #[test]
         fn ticks_adjoint(a in arb_tick(), b in arb_time()) {
             let c = ticks();
-            let lhs = c.ceil(a).ple(&b);
-            let rhs = a.ple(&c.inner(b));
+            let lhs = c.ceil(a) <= b;
+            let rhs = a <= c.inner(b);
             prop_assert_eq!(lhs, rhs);
         }
 
         #[test]
         fn ticks_closed(a in arb_tick()) {
             let c = ticks();
-            prop_assert!(a.ple(&c.inner(c.ceil(a))));
+            prop_assert!(a <= c.inner(c.ceil(a)));
         }
 
         #[test]
         fn ticks_kernel(b in arb_time()) {
             let c = ticks();
-            prop_assert!(c.ceil(c.inner(b)).ple(&b));
+            prop_assert!(c.ceil(c.inner(b)) <= b);
         }
 
         #[test]
@@ -547,11 +546,11 @@ mod tests {
             b1 in arb_time(), b2 in arb_time(),
         ) {
             let c = ticks();
-            if a1.ple(&a2) {
-                prop_assert!(c.ceil(a1).ple(&c.ceil(a2)));
+            if a1 <= a2 {
+                prop_assert!(c.ceil(a1) <= c.ceil(a2));
             }
-            if b1.ple(&b2) {
-                prop_assert!(c.inner(b1).ple(&c.inner(b2)));
+            if b1 <= b2 {
+                prop_assert!(c.inner(b1) <= c.inner(b2));
             }
         }
 
@@ -577,7 +576,7 @@ mod tests {
         #[test]
         fn rat_tick_adjoint(a in arb_rational_nonneg(), b in arb_tick()) {
             let c = rat_tick();
-            let lhs = c.ceil(a).ple(&b);
+            let lhs = c.ceil(a) <= b;
             let rhs = a <= c.inner(b);
             prop_assert_eq!(lhs, rhs);
         }
@@ -591,7 +590,7 @@ mod tests {
         #[test]
         fn rat_tick_kernel(b in arb_tick()) {
             let c = rat_tick();
-            prop_assert!(c.ceil(c.inner(b)).ple(&b));
+            prop_assert!(c.ceil(c.inner(b)) <= b);
         }
 
         #[test]
@@ -601,9 +600,9 @@ mod tests {
         ) {
             let c = rat_tick();
             if a1 <= a2 {
-                prop_assert!(c.ceil(a1).ple(&c.ceil(a2)));
+                prop_assert!(c.ceil(a1) <= c.ceil(a2));
             }
-            if b1.ple(&b2) {
+            if b1 <= b2 {
                 prop_assert!(c.inner(b1) <= c.inner(b2));
             }
         }
@@ -622,7 +621,7 @@ mod tests {
         ) {
             let c = rat_tick();
             if a <= b {
-                prop_assert!(c.floor(a).ple(&c.floor(b)));
+                prop_assert!(c.floor(a) <= c.floor(b));
             }
         }
 
@@ -646,8 +645,8 @@ mod tests {
             prop_assume!(ceil_fits(n, g));
             let lo = time_to_tick(c.floor(n));
             let hi = time_to_tick(c.ceil(n));
-            prop_assert!(lo.ple(&n));
-            prop_assert!(n.ple(&hi));
+            prop_assert!(lo <= n);
+            prop_assert!(n <= hi);
         }
 
         #[test]
@@ -667,8 +666,8 @@ mod tests {
             let c = quantize_at(g);
             prop_assume!(ceil_fits(n, g));
             let t = Time { beats: k, base: g };
-            let lhs = c.ceil(n).ple(&t);
-            let rhs = n.ple(&c.inner(t));
+            let lhs = c.ceil(n) <= t;
+            let rhs = n <= c.inner(t);
             prop_assert_eq!(lhs, rhs);
         }
 
@@ -676,14 +675,14 @@ mod tests {
         fn quantize_at_closed(g in arb_grid(), n in arb_tick()) {
             let c = quantize_at(g);
             prop_assume!(ceil_fits(n, g));
-            prop_assert!(n.ple(&c.inner(c.ceil(n))));
+            prop_assert!(n <= c.inner(c.ceil(n)));
         }
 
         #[test]
         fn quantize_at_kernel(g in arb_grid(), k in 0u32..=10_000) {
             let c = quantize_at(g);
             let t = Time { beats: k, base: g };
-            prop_assert!(c.ceil(c.inner(t)).ple(&t));
+            prop_assert!(c.ceil(c.inner(t)) <= t);
         }
 
         #[test]
@@ -693,9 +692,9 @@ mod tests {
         ) {
             let c = quantize_at(g);
             prop_assume!(ceil_fits(a1, g) && ceil_fits(a2, g));
-            if a1.ple(&a2) {
-                prop_assert!(c.ceil(a1).ple(&c.ceil(a2)));
-                prop_assert!(c.floor(a1).ple(&c.floor(a2)));
+            if a1 <= a2 {
+                prop_assert!(c.ceil(a1) <= c.ceil(a2));
+                prop_assert!(c.floor(a1) <= c.floor(a2));
             }
         }
 
