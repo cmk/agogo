@@ -29,8 +29,8 @@ stateDiagram-v2
     gh_review --> items_pulled: /pull-reviews
     items_pulled --> fix_unpushed: address items, local fix commit
     fix_unpushed --> replies_amended: /reply-reviews (post + mirror + amend)
-    replies_amended --> gh_review: git push (code + replies + doc in one trip)
-    gh_review --> merged: no more items, rebase + ff to main
+    replies_amended --> gh_review: git push (mandatory before merge)
+    gh_review --> merged: no more items, scripts/safe_merge.sh (rebase + ff)
     merged --> [*]
 ```
 
