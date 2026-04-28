@@ -57,14 +57,19 @@ impl SampleTickConn {
     /// Tick → Sample. Exact when `tick × sr × 60 × 10⁶` is divisible
     /// by `bpm_µ × ppqn` (e.g. 48 kHz / 120 BPM / 960 PPQN is exact);
     /// otherwise rounded to the nearest `u64` (half-away-from-zero —
-    /// both quantities are non-negative).
+    /// both quantities are non-negative). Saturates to `u64::MAX`
+    /// for pathological inputs whose quotient exceeds `u64::MAX`
+    /// (e.g. `Tick(u32::MAX)` with `bpm_µ = 1`, `ppqn = 1`); mirrors
+    /// the `to_tick` clamp on the inverse direction. The wrap was
+    /// flagged on PR #35; saturation closes it.
     pub fn inner(&self, tick: Tick) -> u64 {
         // sample = tick · sr · 60 · 10⁶ / (bpm_µ · ppqn)
         let num = u128::from(tick.0) * u128::from(self.sr) * 60 * 1_000_000;
         let denom = u128::from(self.bpm.0) * u128::from(self.ppqn);
         // Round to nearest: (num + denom/2) / denom. Half-up because
         // both num and denom are non-negative.
-        ((num + denom / 2) / denom) as u64
+        let q = (num + denom / 2) / denom;
+        q.min(u128::from(u64::MAX)) as u64
     }
 
     /// Sample → Tick, rounding down (latest tick at-or-before `sample`).
@@ -171,6 +176,35 @@ mod tests {
             s in 0u64..=10_000_000,
         ) {
             prop_assert!(stc.floor(s).0 <= stc.ceil(s).0);
+        }
+
+        /// Pathological inputs deliberately fish for the u128→u64
+        /// narrow inside `SampleTickConn::inner`. `Tick(u32::MAX)`
+        /// with tiny `bpm_µ` and `ppqn` pushes the numerator past
+        /// `u64::MAX`. With the saturating clamp, `inner` returns
+        /// `u64::MAX`; without it the wrap modulo `2⁶⁴` returns
+        /// garbage. Generator domain spans the full `u32`/`u32` /
+        /// `192_000` regions where wrap is realistic; the
+        /// `arb_integer_stc()`-driven proptests above cover the
+        /// realistic-input region instead.
+        #[test]
+        fn sample_tick_inner_saturates_on_overflow(
+            tick in (u32::MAX / 2)..=u32::MAX,
+            bpm_u in 1u32..=100,
+            ppqn in 1u32..=8,
+        ) {
+            // Highest-rate sr maximises the numerator and so the
+            // wrap region.
+            let sr = 192_000u32;
+            let stc = SampleTickConn::new(sr, Tempo(bpm_u), ppqn);
+            let result = stc.inner(Tick(tick));
+            // Independent reference: the exact (un-narrowed)
+            // quotient in u128, saturated to u64::MAX.
+            let num = u128::from(tick) * u128::from(sr) * 60 * 1_000_000;
+            let denom = u128::from(bpm_u) * u128::from(ppqn);
+            let exact = (num + denom / 2) / denom;
+            let expected = exact.min(u128::from(u64::MAX)) as u64;
+            prop_assert_eq!(result, expected);
         }
     }
 
