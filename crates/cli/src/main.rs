@@ -324,19 +324,10 @@ fn parse_non_negative_f64(v: f64) -> Result<f64, String> {
     }
 }
 
-/// Parse a BPM `f64` argv value into `Tempo`, returning an explicit
-/// error for out-of-range / non-finite inputs.
-///
-/// Wraps `f64_bpm_to_tempo` (which silently saturates) for CLI use,
-/// where the user wants a hard error message rather than silent
-/// fallback behavior. Used by three argv-handler sites
-/// (channel_trace, midi_trace, demo) — each previously open-coded a
-/// nearly-identical 10-line `(args.bpm * 1.0e6).round()` body
-/// (audit M4 + N5).
-///
-/// Q3 (the float surface-area sweep) will obsolete this helper by
-/// moving the validation into the bpaf parser, so `RunArgs.bpm`
-/// becomes `Tempo` directly.
+/// Legacy: f64 → Tempo with explicit Err for the three subcommand
+/// `*Args` structs that still expose `bpm: f64`. Same logic as
+/// `parse_bpm_to_tempo` above but takes a parsed f64 (skipping the
+/// String → f64 step that bpaf does upstream).
 fn parse_cli_bpm(arg: f64, flag: &str) -> Result<agogo_core::fxp::Tempo, String> {
     use agogo_core::fxp::{Tempo, f64_bpm_to_tempo, tempo_to_f64_bpm};
     let max_bpm = tempo_to_f64_bpm(Tempo(u32::MAX));

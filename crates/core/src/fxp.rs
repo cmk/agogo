@@ -327,8 +327,17 @@ pub fn tempo_to_f64_bpm(t: Tempo) -> f64 {
     let widened = I064U032.inner(t.0);
     match F064FD06.inner(Extended::Finite(FD06(widened))) {
         ExtendedFloat::Extend(b) => b,
-        ExtendedFloat::Bot => f64::NEG_INFINITY,
-        ExtendedFloat::Top => f64::INFINITY,
+        // Q3 closure of the Q2 follow-up: `I064U032.inner` of a u32
+        // is always a finite i64; `F064FD06.inner` of `Extended::
+        // Finite(_)` always lifts to `Extend(_)`. The Bot/Top arms
+        // are unreachable by construction. `unreachable!()` —
+        // not silent ±∞ — so a future drift in the upstream Conn
+        // contract surfaces as a loud panic. The
+        // `tempo_to_f64_bpm_full_domain` proptest pins the
+        // assertion across `any::<u32>()`.
+        ExtendedFloat::Bot | ExtendedFloat::Top => {
+            unreachable!("F064FD06.inner of Extended::Finite cannot lift to Bot/Top")
+        }
     }
 }
 
@@ -341,8 +350,12 @@ pub fn pico_to_f64_seconds(p: Pico) -> f64 {
     // PI-exempt.
     match F064FD12.inner(Extended::Finite(p)) {
         ExtendedFloat::Extend(s) => s,
-        ExtendedFloat::Bot => f64::NEG_INFINITY,
-        ExtendedFloat::Top => f64::INFINITY,
+        // Same Q3 unreachable-arms argument as `tempo_to_f64_bpm`.
+        // `pico_to_f64_seconds_full_domain` proptest pins the
+        // assertion across `any::<i64>()`.
+        ExtendedFloat::Bot | ExtendedFloat::Top => {
+            unreachable!("F064FD12.inner of Extended::Finite cannot lift to Bot/Top")
+        }
     }
 }
 
