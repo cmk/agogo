@@ -39,8 +39,6 @@
 
 use connections::lattice::{Coheyting, Heyting, Join, Meet};
 
-use crate::preorder::Ple;
-
 use crate::time::tbase::{BAR, TBase};
 
 /// Lattice element at 960 PPQN. `(n, t, q)` coordinates with
@@ -182,24 +180,20 @@ impl Grid {
     ];
 }
 
-/// Divisibility preorder: `a.ple(&b)` iff `a`'s tick count divides
-/// `b`'s. Factors component-wise — `a.ple(&b) ⟺ a.n.ple(&b.n) ∧
-/// (a.t ≥ b.t) ∧ (a.q ≥ b.q)` (treating `true < false`, since
-/// `t = true` / `q = true` mean the corresponding factor is absent,
-/// making the tick count finer / lower on those axes).
-impl Ple for Grid {
-    fn ple(&self, other: &Self) -> bool {
-        self.n.ple(&other.n)
-            && (self.t as u8) >= (other.t as u8)
-            && (self.q as u8) >= (other.q as u8)
-    }
-}
+// ── PartialOrd: divisibility preorder ──────────────────────────────
 
-// ── PartialOrd (divisibility preorder for trait supertraits) ─────
+/// Divisibility preorder: `a ≤ b` iff `a`'s tick count divides `b`'s.
+/// Factors component-wise — `a ≤ b ⟺ a.n ≤ b.n ∧ (a.t ≥ b.t) ∧
+/// (a.q ≥ b.q)` (treating `true < false`, since `t = true` /
+/// `q = true` mean the corresponding factor is absent, making the
+/// tick count finer / lower on those axes).
+fn grid_divides(a: &Grid, b: &Grid) -> bool {
+    a.n <= b.n && (a.t as u8) >= (b.t as u8) && (a.q as u8) >= (b.q as u8)
+}
 
 impl PartialOrd for Grid {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        match (self.ple(other), other.ple(self)) {
+        match (grid_divides(self, other), grid_divides(other, self)) {
             (true, true) => Some(std::cmp::Ordering::Equal),
             (true, false) => Some(std::cmp::Ordering::Less),
             (false, true) => Some(std::cmp::Ordering::Greater),
@@ -245,7 +239,7 @@ impl Heyting for Grid {
         Grid::ALL
             .iter()
             .copied()
-            .filter(|c| self.meet(c).ple(other))
+            .filter(|c| self.meet(c) <= *other)
             .reduce(|a, b| a.join(&b))
             .expect("T512P always satisfies self.meet(&T512P) ⊑ other")
     }
@@ -256,7 +250,7 @@ impl Coheyting for Grid {
         Grid::ALL
             .iter()
             .copied()
-            .filter(|c| self.ple(&other.join(c)))
+            .filter(|c| *self <= other.join(c))
             .reduce(|a, b| a.meet(&b))
             .expect("T1 always satisfies self ⊑ join(other, T1)")
     }
@@ -417,14 +411,14 @@ mod tests {
     #[test]
     fn t1_is_top() {
         for g in Grid::ALL {
-            assert!(g.ple(&Grid::T1), "{g:?} should be ≤ T1");
+            assert!(g <= Grid::T1, "{g:?} should be ≤ T1");
         }
     }
 
     #[test]
     fn t512p_is_bottom() {
         for g in Grid::ALL {
-            assert!(Grid::T512P.ple(&g), "T512P should be ≤ {g:?}");
+            assert!(Grid::T512P <= g, "T512P should be ≤ {g:?}");
         }
     }
 
@@ -546,20 +540,20 @@ mod tests {
     proptest! {
         #[test]
         fn ple_reflexive(a in arb_grid()) {
-            prop_assert!(a.ple(&a));
+            prop_assert!(a <= a);
         }
 
         #[test]
         fn ple_antisymmetric(a in arb_grid(), b in arb_grid()) {
-            if a.ple(&b) && b.ple(&a) {
+            if a <= b && b <= a {
                 prop_assert_eq!(a, b);
             }
         }
 
         #[test]
         fn ple_transitive(a in arb_grid(), b in arb_grid(), c in arb_grid()) {
-            if a.ple(&b) && b.ple(&c) {
-                prop_assert!(a.ple(&c));
+            if a <= b && b <= c {
+                prop_assert!(a <= c);
             }
         }
 
@@ -635,8 +629,8 @@ mod tests {
             x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
             prop_assert_eq!(
-                x.meet(&y).ple(&z),
-                x.ple(&y.imp(&z))
+                x.meet(&y) <= z,
+                x <= y.imp(&z)
             );
         }
 
@@ -645,7 +639,7 @@ mod tests {
         fn h1_imply_monotone_join_2nd(
             x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
-            prop_assert!(x.imp(&y).ple(&x.imp(&y.join(&z))));
+            prop_assert!(x.imp(&y) <= x.imp(&y.join(&z)));
         }
 
         /// h2: imply antitone in 1st arg under join
@@ -653,7 +647,7 @@ mod tests {
         fn h2_imply_antitone_join_1st(
             x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
-            prop_assert!(x.join(&z).imp(&y).ple(&x.imp(&y)));
+            prop_assert!(x.join(&z).imp(&y) <= x.imp(&y));
         }
 
         /// h3: imply monotone in 2nd arg under ple
@@ -661,8 +655,8 @@ mod tests {
         fn h3_imply_monotone_ple_2nd(
             x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
-            if x.ple(&y) {
-                prop_assert!(z.imp(&x).ple(&z.imp(&y)));
+            if x <= y {
+                prop_assert!(z.imp(&x) <= z.imp(&y));
             }
         }
 
@@ -688,7 +682,7 @@ mod tests {
         /// h6: weakening
         #[test]
         fn h6_weakening(x in arb_grid(), y in arb_grid()) {
-            prop_assert!(y.ple(&x.imp(&x.meet(&y))));
+            prop_assert!(y <= x.imp(&x.meet(&y)));
         }
 
         /// h7: modus ponens
@@ -700,19 +694,19 @@ mod tests {
         /// h9: neg-join ≤ imply
         #[test]
         fn h9_neg_join_le_imply(x in arb_grid(), y in arb_grid()) {
-            prop_assert!(x.neg().join(&y).ple(&x.imp(&y)));
+            prop_assert!(x.neg().join(&y) <= x.imp(&y));
         }
 
         /// h10: imply = top iff ple
         #[test]
         fn h10_imply_top_iff_ple(x in arb_grid(), y in arb_grid()) {
-            prop_assert_eq!(x.ple(&y), x.imp(&y) == Grid::T1);
+            prop_assert_eq!(x <= y, x.imp(&y) == Grid::T1);
         }
 
         /// h11: neg antitone under join
         #[test]
         fn h11_neg_antitone_join(x in arb_grid(), y in arb_grid()) {
-            prop_assert!(x.join(&y).neg().ple(&x.neg()));
+            prop_assert!(x.join(&y).neg() <= x.neg());
         }
 
         /// h12: neg-imply de Morgan
@@ -748,7 +742,7 @@ mod tests {
         /// h17: double neg monad
         #[test]
         fn h17_double_neg_monad(x in arb_grid()) {
-            prop_assert!(x.ple(&x.neg().neg()));
+            prop_assert!(x <= x.neg().neg());
         }
 
         // ── Co-Heyting (coimp / coneg / comid) ───────────────────
@@ -759,8 +753,8 @@ mod tests {
             x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
             prop_assert_eq!(
-                x.coimp(&y).ple(&z),
-                x.ple(&y.join(&z))
+                x.coimp(&y) <= z,
+                x <= y.join(&z)
             );
         }
 
@@ -769,7 +763,7 @@ mod tests {
         fn c1_coimp_monotone_meet_1st(
             x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
-            prop_assert!(x.meet(&z).coimp(&y).ple(&x.coimp(&y)));
+            prop_assert!(x.meet(&z).coimp(&y) <= x.coimp(&y));
         }
 
         /// c2: coimp antitone (meet in 2nd arg)
@@ -777,7 +771,7 @@ mod tests {
         fn c2_coimp_antitone_meet_2nd(
             x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
-            prop_assert!(x.coimp(&y).ple(&x.coimp(&y.meet(&z))));
+            prop_assert!(x.coimp(&y) <= x.coimp(&y.meet(&z)));
         }
 
         /// c3: coimp monotone (ple in 1st arg)
@@ -785,8 +779,8 @@ mod tests {
         fn c3_coimp_monotone_ple_1st(
             x in arb_grid(), y in arb_grid(), z in arb_grid(),
         ) {
-            if y.ple(&x) {
-                prop_assert!(y.coimp(&z).ple(&x.coimp(&z)));
+            if y <= x {
+                prop_assert!(y.coimp(&z) <= x.coimp(&z));
             }
         }
 
@@ -812,7 +806,7 @@ mod tests {
         /// c6: coimp ≤ self
         #[test]
         fn c6_coimp_le_self(x in arb_grid(), y in arb_grid()) {
-            prop_assert!(x.coimp(&y).ple(&x));
+            prop_assert!(x.coimp(&y) <= x);
         }
 
         /// c7: join absorption
@@ -824,19 +818,19 @@ mod tests {
         /// c9: meet-coneg ≥ coimp
         #[test]
         fn c9_meet_coneg_ge_coimp(x in arb_grid(), y in arb_grid()) {
-            prop_assert!(x.coimp(&y).ple(&x.meet(&y.coneg())));
+            prop_assert!(x.coimp(&y) <= x.meet(&y.coneg()));
         }
 
         /// c10: coimp = bottom iff ple
         #[test]
         fn c10_coimp_bot_iff_ple(x in arb_grid(), y in arb_grid()) {
-            prop_assert_eq!(y.ple(&x), y.coimp(&x) == Grid::T512P);
+            prop_assert_eq!(y <= x, y.coimp(&x) == Grid::T512P);
         }
 
         /// c11: coneg antitone under meet
         #[test]
         fn c11_coneg_antitone_meet(x in arb_grid(), y in arb_grid()) {
-            prop_assert!(x.coneg().ple(&x.meet(&y).coneg()));
+            prop_assert!(x.coneg() <= x.meet(&y).coneg());
         }
 
         /// c12: coneg-coimp de Morgan
@@ -875,7 +869,7 @@ mod tests {
         /// c17: double coneg comonad
         #[test]
         fn c17_double_coneg_comonad(x in arb_grid()) {
-            prop_assert!(x.coneg().coneg().ple(&x));
+            prop_assert!(x.coneg().coneg() <= x);
         }
 
         /// c18: comid decomposition
@@ -907,13 +901,13 @@ mod tests {
         /// s1: neg ≤ coneg
         #[test]
         fn s1_neg_le_coneg(x in arb_grid()) {
-            prop_assert!(x.neg().ple(&x.coneg()));
+            prop_assert!(x.neg() <= x.coneg());
         }
 
         #[test]
         fn lattice_top_bottom(a in arb_grid()) {
-            prop_assert!(a.ple(&Grid::T1));
-            prop_assert!(Grid::T512P.ple(&a));
+            prop_assert!(a <= Grid::T1);
+            prop_assert!(Grid::T512P <= a);
         }
     }
 
