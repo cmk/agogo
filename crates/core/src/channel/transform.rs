@@ -18,7 +18,7 @@
 
 use crate::channel::role::{ChannelCommon, CvRole, DinRole, MidiRole};
 use crate::fxp::pico_to_samples;
-use crate::time::conn::SampleTickConn;
+use crate::sync::sample_tick::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
 use crate::fxp::{FD12FD06, Micro};

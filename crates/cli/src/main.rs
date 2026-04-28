@@ -953,7 +953,7 @@ mod sync_trace {
 pub mod channel_trace {
     use agogo_core::channel::{ChannelCommon, tick_stream};
     use agogo_core::fxp::{Micro, Tempo};
-    use agogo_core::time::conn::SampleTickConn;
+    use agogo_core::sync::sample_tick::SampleTickConn;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
@@ -1045,7 +1045,7 @@ pub mod midi_trace {
     use agogo_core::channel::{ChannelCommon, MidiRole, scheduler::tick_stream};
     use agogo_core::fxp::{Micro, Tempo};
     use agogo_core::out::midi::{MidiRtByte, TestSink, render_midi_channel};
-    use agogo_core::time::conn::SampleTickConn;
+    use agogo_core::sync::sample_tick::SampleTickConn;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
