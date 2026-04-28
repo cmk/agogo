@@ -54,7 +54,7 @@ pub use crate::time::float::{
 };
 pub use crate::time::sample::{
     FD12S044, FD12S048, FD12S088, FD12S096, FD12S176, FD12S192, Q48_16, S044, S048, S088, S096,
-    S176, S192, SampleRate,
+    S176, S192, SampleRate, SampleTime,
 };
 
 // ────────────────────────────────────────────────────────────────────
@@ -76,66 +76,8 @@ pub use crate::time::decimal::FD06 as Micro;
 /// `arb::pulse_train`, `sync::pll` jitter math.
 pub use crate::time::decimal::FD12 as Pico;
 
-// ────────────────────────────────────────────────────────────────────
-// SampleTime — agogo-local convenience trait over the rate types.
-//
-// Provides uniform `from_bits` / `to_bits` / `from_sample` / `sample`
-// methods so generic code (notably `arb::pulse_train` and `sync::*`)
-// can construct and read any rate type without a match arm.
-// ────────────────────────────────────────────────────────────────────
-
-/// Common Q48.16-bits interface over the `Sxxx` rate types from
-/// [`crate::time::sample`]. Lets generic DSP code accept an arbitrary
-/// `R: SampleTime` rather than committing to a single rate.
-pub trait SampleTime: SampleRate + Copy + Default + Ord + core::fmt::Debug {
-    /// Construct from raw Q48.16 bits.
-    fn from_bits_q48_16(bits: i64) -> Self;
-    /// Extract raw Q48.16 bits.
-    fn to_bits_q48_16(self) -> i64;
-
-    /// Construct from an integer sample count.
-    fn from_sample(n: i64) -> Self {
-        Self::from_bits_q48_16(n << 16)
-    }
-
-    /// Integer sample part (arithmetic shift, rounds toward −∞ for negatives).
-    fn sample(self) -> i64 {
-        self.to_bits_q48_16() >> 16
-    }
-
-    /// Q48.16 sample position as `f64` — integer sample count plus
-    /// sub-sample fraction. The `bits / 2^16` arithmetic is the
-    /// standard binary-fixed → float conversion; the `1u64 << 16`
-    /// divisor is intrinsic to the Q48.16 representation, not an
-    /// SI unit shift, so it doesn't fall under the M-family
-    /// "open-coded unit arithmetic" prohibition. Wrapped here as a
-    /// named method so call sites read as intent ("fractional sample
-    /// position") rather than open-coded scale division.
-    fn samples_f64(self) -> f64 {
-        // PI-exempt: Q48.16 → f64 (binary scale, not SI).
-        self.to_bits_q48_16() as f64 / (1u64 << 16) as f64
-    }
-}
-
-macro_rules! impl_sample_time {
-    ($Rate:ident) => {
-        impl SampleTime for $Rate {
-            fn from_bits_q48_16(bits: i64) -> Self {
-                <$Rate>::from_bits(bits)
-            }
-            fn to_bits_q48_16(self) -> i64 {
-                self.to_bits()
-            }
-        }
-    };
-}
-
-impl_sample_time!(S044);
-impl_sample_time!(S048);
-impl_sample_time!(S088);
-impl_sample_time!(S096);
-impl_sample_time!(S176);
-impl_sample_time!(S192);
+// `SampleTime` trait moved to `crate::time::sample` (Plan 2026-04-28-03 T2);
+// re-exported above alongside the `Sxxx` rate types it lives over.
 
 // ────────────────────────────────────────────────────────────────────
 // Phase — Q0.32 cycles.
