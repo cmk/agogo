@@ -265,3 +265,85 @@ End-to-end smoke checks confirm the new error paths fire on
 
 **Plan + review docs updated** to reflect the expanded scope before
 push (Goal section, Implementation deviations, Final state).
+
+<!-- gh-id: 3153077581 -->
+### Copilot on [`crates/cli/src/main.rs:367`](https://github.com/cmk/agogo/pull/34#discussion_r3153077581) (2026-04-28 09:47 UTC)
+
+`parse_bpm_to_tempo` hardcodes `--bpm` in its error messages, but this parser is also used for `--initial-bpm` (LinkSub::Probe.initial_bpm). That will produce misleading CLI errors (e.g. user passes `--initial-bpm` but sees `--bpm ...`). Consider making the message option-name-agnostic (e.g. "invalid BPM") or providing thin wrapper parsers per flag so the correct option name is reflected in errors.
+
+<!-- gh-id: 3153077622 -->
+### Copilot on [`crates/cli/src/main.rs:385`](https://github.com/cmk/agogo/pull/34#discussion_r3153077622) (2026-04-28 09:47 UTC)
+
+`parse_quantum_from_beats` hardcodes `--quantum` in its error messages, but it is also used for `--link-quantum` (run::RunArgs.link_quantum). This will report the wrong flag name to users when parsing `agogo run --link-quantum ...`. Suggest making the message flag-agnostic or adding wrapper parsers so each option reports its own name consistently.
+```suggestion
+/// bpaf parser for quantum values (`--link-quantum`, `--quantum`,
+/// etc.) at the argv-handler boundary. Same shape as
+/// `parse_bpm_to_tempo`. Only referenced under `link` / `run`
+/// features; allow dead_code so a default-feature build doesn't
+/// warn.
+#[allow(dead_code)]
+pub(crate) fn parse_quantum_from_beats(s: String) -> Result<agogo_core::fxp::Quantum, String> {
+    use agogo_core::fxp::f64_beats_to_quantum;
+    let f: f64 = s
+        .parse()
+        .map_err(|e| format!("quantum value {s}: not a number ({e})"))?;
+    if !f.is_finite() || f <= 0.0 {
+        return Err(format!(
+            "quantum value {f} invalid (must be finite and > 0)"
+```
+
+<!-- gh-id: 3153077649 -->
+### Copilot on [`scripts/check-floats.sh:21`](https://github.com/cmk/agogo/pull/34#discussion_r3153077649) (2026-04-28 09:47 UTC)
+
+The allowlist comment for `crates/cli/src/main.rs` mentions `parse_non_negative_f64`, but that helper no longer exists in main.rs (it was replaced by typed parsers like `parse_jitter_us_to_pico` / `parse_ms_to_micro`). Update the comment to reflect the current set of float-using argv parsers so the gate documentation stays accurate.
+```suggestion
+#   crates/cli/src/main.rs                        argv parsers (`parse_bpm_to_tempo` / `parse_quantum_from_beats` / `parse_jitter_us_to_pico` / `parse_ms_to_micro`)
+```
+
+<!-- gh-id: 4187562659 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-28 09:47 UTC](https://github.com/cmk/agogo/pull/34#pullrequestreview-4187562659))
+
+## Pull request overview
+
+Migrates the remaining CLI subcommand argv float fields (`bpm`, `quantum`, `jitter_us`, `delay`) from `f64` to typed fixed-point wrappers (`Tempo`, `Quantum`, `Pico`, `Micro`) so floats only exist at the parser boundary, completing the L-tail of the structural-type audit.
+
+**Changes:**
+- Introduces/relocates shared bpaf parsers in `crates/cli/src/main.rs` to convert argv strings into typed fixed-point values.
+- Updates CLI subcommand variants, handler signatures, and test fixtures to use typed values end-to-end (removing transitional helpers and open-coded unit shifts).
+- Updates float-allowlist documentation in `scripts/check-floats.sh` and adds plan/review docs for the sweep.
+
+### Reviewed changes
+
+Copilot reviewed 5 out of 5 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| scripts/check-floats.sh | Updates allowlist commentary for CLI float usage. |
+| doc/reviews/review-00034.md | Adds review record for the sweep and follow-up fixes. |
+| doc/plans/plan-2026-04-28-02.md | Adds implementation plan and verification notes for the sweep. |
+| crates/cli/src/run.rs | Switches to importing shared parsers from `main.rs`; keeps typed argv in `RunArgs`. |
+| crates/cli/src/main.rs | Converts subcommand fields + handlers to typed args; adds new parser fns for BPM/quantum/jitter/delay. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3153094601 -->
+#### ↳ cmk ([2026-04-28 09:50 UTC](https://github.com/cmk/agogo/pull/34#discussion_r3153094601))
+
+Fixed — error messages now read "BPM value {f} out of range" / "BPM value {s}: not a number", flag-agnostic so both `--bpm` and `--initial-bpm` callers see the correct wording.
+
+<!-- gh-id: 3153095038 -->
+#### ↳ cmk ([2026-04-28 09:50 UTC](https://github.com/cmk/agogo/pull/34#discussion_r3153095038))
+
+Fixed — messages now read "quantum value {f} ..." / "quantum value {s}: not a number ..." instead of hardcoding `--quantum`, so `--link-quantum` callers report correctly too.
+
+<!-- gh-id: 3153095468 -->
+#### ↳ cmk ([2026-04-28 09:50 UTC](https://github.com/cmk/agogo/pull/34#discussion_r3153095468))
+
+Fixed — comment now enumerates the four current parsers (`parse_bpm_to_tempo` / `parse_quantum_from_beats` / `parse_jitter_us_to_pico` / `parse_ms_to_micro`).

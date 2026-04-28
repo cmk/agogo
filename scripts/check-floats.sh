@@ -18,7 +18,7 @@
 #   crates/host-link/src/source.rs                PCM ABI (PhaseSourceImpl::feed_samples slice param)
 #   crates/host-cpal/src/cpal.rs                  PCM ABI (cpal stream callback)
 #   crates/host-cpal/src/cpal/callback.rs         PCM ABI (AudioIo input/output slices)
-#   crates/cli/src/main.rs                        argv parsers (`parse_bpm_to_tempo` / `parse_quantum_from_beats` / `parse_non_negative_f64`)
+#   crates/cli/src/main.rs                        argv parsers (`parse_bpm_to_tempo` / `parse_quantum_from_beats` / `parse_jitter_us_to_pico` / `parse_ms_to_micro`)
 #   crates/cli/src/run.rs                         argv-parser proptests + `--ch shift-ms` parsing helper
 #
 # Any `f32` / `f64` in a non-allowlisted file is a build failure.
