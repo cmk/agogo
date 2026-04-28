@@ -350,39 +350,39 @@ pub(crate) fn parse_jitter_us_to_pico(s: String) -> Result<agogo_core::fxp::Pico
     }
 }
 
-/// bpaf parser: --bpm <f64> → Tempo at the argv-handler boundary.
-/// String dies inside the FromStr call; f64 dies on the last
-/// line. Paired with `#[bpaf(... argument::<String>("BPM"),
-/// parse(parse_bpm_to_tempo))]` so bpaf treats the field type
-/// (`Tempo`) as the parser's output rather than requiring
-/// `Tempo: FromStr`.
+/// bpaf parser: BPM `<f64>` → `Tempo` at the argv-handler boundary.
+/// Used by every `--bpm` / `--initial-bpm` flag across the CLI;
+/// errors avoid hardcoding a flag name so the message reads
+/// correctly regardless of which option triggered the parse.
+/// String dies inside the FromStr call; f64 dies on the last line.
 pub(crate) fn parse_bpm_to_tempo(s: String) -> Result<agogo_core::fxp::Tempo, String> {
     use agogo_core::fxp::{Tempo, f64_bpm_to_tempo};
     let f: f64 = s
         .parse()
-        .map_err(|e| format!("--bpm {s}: not a number ({e})"))?;
+        .map_err(|e| format!("BPM value {s}: not a number ({e})"))?;
     if !f.is_finite() || f <= 0.0 || f > Tempo::MAX_BPM_F64 {
         return Err(format!(
-            "--bpm {f} out of range (expected (0, {}] BPM)",
+            "BPM value {f} out of range (expected (0, {}] BPM)",
             Tempo::MAX_BPM_F64
         ));
     }
     Ok(f64_bpm_to_tempo(f))
 }
 
-/// bpaf parser: --link-quantum / --quantum <BEATS> → Quantum at the
-/// argv-handler boundary. Same shape as `parse_bpm_to_tempo`. Only
-/// referenced under `link` / `run` features; allow dead_code so a
+/// bpaf parser: beats `<f64>` → `Quantum` at the argv-handler
+/// boundary. Used by both `--link-quantum` (run) and `--quantum`
+/// (link transport); errors are flag-agnostic. Only referenced
+/// under `link` / `run` features; allow dead_code so a
 /// default-feature build doesn't warn.
 #[allow(dead_code)]
 pub(crate) fn parse_quantum_from_beats(s: String) -> Result<agogo_core::fxp::Quantum, String> {
     use agogo_core::fxp::f64_beats_to_quantum;
     let f: f64 = s
         .parse()
-        .map_err(|e| format!("--quantum {s}: not a number ({e})"))?;
+        .map_err(|e| format!("quantum value {s}: not a number ({e})"))?;
     if !f.is_finite() || f <= 0.0 {
         return Err(format!(
-            "--quantum {f} invalid (must be finite and > 0)"
+            "quantum value {f} invalid (must be finite and > 0)"
         ));
     }
     Ok(f64_beats_to_quantum(f))
