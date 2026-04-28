@@ -42,6 +42,14 @@ stateDiagram-v2
   cycle runs once per review round. Pushing before the amend breaks
   the cycle — it forces either a wasted `doc:` commit (extra CI
   round-trip) or a disallowed force-push.
+- **Never merge from `replies_amended`.** There is no
+  `replies_amended → merged` edge in the FSM — only `gh_review →
+  merged`. `gh pr merge` is GitHub-side and doesn't see local state,
+  so a merge with an unpushed amend silently drops the local commit.
+  Use `scripts/safe_merge.sh <pr-args>` instead of `gh pr merge` —
+  it refuses to invoke the merge while the local branch is ahead of
+  origin. (Equivalent local check: `git log origin/<branch>..HEAD
+  --oneline` must be empty.)
 - `local_reviewed → impl_green` is the must-fix loop-back. The fix
   commits stay on the same branch; re-append any new Deferred/Review
   notes, then `/sprint-review` re-runs against the new tip.
@@ -52,6 +60,26 @@ stateDiagram-v2
   `## Summary`. Committing the description pre-push is what lets a
   silent PR merge without an extra round-trip — `gh pr create`
   feeds GitHub a direct copy via `scripts/extract_pr_body.sh`.
+
+**Recovery: stranded fix commit after merge from `replies_amended`.**
+
+If a merge happened while the round was at `replies_amended` and a
+local fix commit got stranded, the round-2 work isn't lost — it's
+sitting on the local feature branch's tip. Don't open a tiny
+standalone PR for it; per repo convention, fold the stranded commit
+into the next plan branch's first commit:
+
+```
+# On the next plan branch, after the plan: commit:
+git cherry-pick <stranded-sha>
+# Squash into the first feat/fix commit you make on this branch,
+# OR keep as a separate `fix:` commit if the change stands alone.
+```
+
+The previously-posted GitHub replies remain accurate (they reference
+the right SHAs at the time of posting). The next PR's review file
+should reference the prior PR's `gh-id` URLs in a `### History`
+section so the chain isn't orphaned.
 
 ## `/watch-pr` dynamic-mode loop
 
