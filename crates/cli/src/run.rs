@@ -40,49 +40,13 @@ use std::num::NonZeroU32;
 /// scheduler uses [`PPQN`] (960).
 const PULSE_PPQ: u32 = 24;
 
-use crate::parse_positive_u32;
-
-/// bpaf parser: --bpm <f64> → Tempo at the argv-handler boundary.
-/// String dies inside the FromStr call; f64 dies on the last
-/// line. Paired with `#[bpaf(... argument::<String>("BPM"),
-/// parse(parse_bpm_to_tempo))]` so bpaf treats the field type
-/// (`Tempo`) as the parser's output rather than requiring
-/// `Tempo: FromStr`.
-fn parse_bpm_to_tempo(s: String) -> Result<Tempo, String> {
-    use agogo_core::fxp::f64_bpm_to_tempo;
-    let f: f64 = s
-        .parse()
-        .map_err(|e| format!("--bpm {s}: not a number ({e})"))?;
-    if !f.is_finite() || f <= 0.0 || f > Tempo::MAX_BPM_F64 {
-        return Err(format!(
-            "--bpm {f} out of range (expected (0, {}] BPM)",
-            Tempo::MAX_BPM_F64
-        ));
-    }
-    Ok(f64_bpm_to_tempo(f))
-}
-
-/// bpaf parser: --link-quantum <BEATS> → Quantum at the argv-handler
-/// boundary. Same `argument::<String>` + `parse` shape as
-/// `parse_bpm_to_tempo`.
-fn parse_quantum_from_beats(s: String) -> Result<Quantum, String> {
-    use agogo_core::fxp::f64_beats_to_quantum;
-    let f: f64 = s
-        .parse()
-        .map_err(|e| format!("--link-quantum {s}: not a number ({e})"))?;
-    if !f.is_finite() || f <= 0.0 {
-        return Err(format!(
-            "--link-quantum {f} invalid (must be finite and > 0)"
-        ));
-    }
-    Ok(f64_beats_to_quantum(f))
-}
+use crate::{parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats};
 
 /// Argv container for `agogo run`. Used by both the bpaf derive and
 /// the dispatcher in `main.rs`. The two formerly-`f64` fields
 /// (`bpm`, `link_quantum`) now land as typed `Tempo` / `Quantum`
 /// directly — the f64 surface area collapses to the bodies of
-/// `parse_bpm_to_tempo` and `parse_quantum_from_beats` above.
+/// `parse_bpm_to_tempo` and `parse_quantum_from_beats` (in `main.rs`).
 #[derive(Debug, Clone, Bpaf)]
 pub struct RunArgs {
     /// Tempo in beats per minute. Applies to all channels.
