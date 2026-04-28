@@ -170,6 +170,36 @@ mod tests {
         assert_eq!(spec, reparsed);
     }
 
+    /// Regression: `Micro(116)` (= 0.116 ms) used to round-trip to
+    /// `Micro(117)` because Display emitted `delay=0.116` and the
+    /// parser fell to its f64 path (`0.116 × 10⁻³` doesn't represent
+    /// exactly in f64; `F064FD06.ceil` rounded up by one µs). Pin
+    /// the bit-exact round-trip for a handful of fractional-µs
+    /// values so a future regression to the f64 path is caught
+    /// without waiting for proptest shrinking.
+    #[test]
+    fn display_round_trip_fractional_us_no_drift() {
+        for us in [1, 116, 123, 999, 1_001, 51_123, 300_000_001] {
+            let spec = ChannelSpec {
+                id: None,
+                out: None,
+                grid: Grid::ALL[0],
+                mode: MidiRole::Clock,
+                swing: SwingConfig {
+                    resolution: TBase::T8,
+                    amount: 0,
+                },
+                offset_ticks: 0,
+                delay: Micro(us),
+                snap_to_quantum_micro: None,
+                bars: None,
+            };
+            let s = spec.to_string();
+            let reparsed = ChannelSpec::parse(&s, &[]).unwrap();
+            assert_eq!(reparsed.delay, Micro(us), "drift on {us} µs (Display: {s})");
+        }
+    }
+
     // ── Proptest ─────────────────────────────────────────────────
 
     fn arb_grid() -> impl Strategy<Value = Grid> {
@@ -227,6 +257,33 @@ mod tests {
         )
     }
 
+    /// Non-negative `Micro` values across the full whole-ms-representable
+    /// range. The parser's integer path requires `ms_int.checked_mul(1_000)`
+    /// to succeed, so values above `i64::MAX / 1_000` would overflow the
+    /// fast path and fall to the f64 fallback (lossy beyond 2^53 µs).
+    /// Cap at `i64::MAX / 1_000` so every generated value can round-trip
+    /// through Display's `{ms}.{frac:03}` form via the integer-fast-path
+    /// parser. The cap is the documented hazard, per CLAUDE.md: bounding
+    /// for arithmetic overflow at the parser surface is a real
+    /// constraint, not "keep arithmetic safe" cargo-culting.
+    ///
+    /// Biased toward boundary cases that the previous `0..=300 ms`
+    /// generator missed: zero, sub-ms (`Display` emits `0.{frac}`),
+    /// the `MAX_DELAY = 300_000 µs` clamp threshold, and large values
+    /// where the f64 fallback would have drifted.
+    fn arb_delay() -> impl Strategy<Value = Micro> {
+        const MAX_US: i64 = i64::MAX / 1_000;
+        prop_oneof![
+            10 => Just(Micro::ZERO),
+            10 => (1_i64..=999).prop_map(Micro),                  // sub-ms, fractional Display
+            10 => (1_i64..=10_000).prop_map(|ms| Micro(ms * 1_000)), // small whole-ms
+            10 => (1_i64..=10_000_000).prop_map(Micro),           // small with fractional µs
+            5  => Just(Micro(300_000)),                            // MAX_DELAY clamp boundary
+            5  => Just(Micro(MAX_US)),                             // upper integer-fast-path edge
+            1  => (0_i64..=MAX_US).prop_map(Micro),                // full domain sweep
+        ]
+    }
+
     fn arb_spec() -> impl Strategy<Value = ChannelSpec> {
         (
             arb_grid(),
@@ -235,8 +292,8 @@ mod tests {
             arb_tbase(),
             any::<i8>(),
             any::<i32>(),
-            0u32..=300,
-            prop::option::of(any::<i32>().prop_map(|n| n as i64)),
+            arb_delay(),
+            prop::option::of(any::<i64>()),
             arb_mode(),
             arb_bars(),
         )
@@ -248,7 +305,7 @@ mod tests {
                     swing_res,
                     swing_amt,
                     offset_ticks,
-                    delay_ms_int,
+                    delay,
                     snap,
                     mode,
                     bars,
@@ -263,10 +320,7 @@ mod tests {
                             amount: swing_amt,
                         },
                         offset_ticks,
-                        // Generator yields integer milliseconds in
-                        // [0, 300]; convert to Micro at the strategy
-                        // boundary so the spec stays typed.
-                        delay: Micro(i64::from(delay_ms_int) * 1_000),
+                        delay,
                         snap_to_quantum_micro: snap,
                         bars,
                     }

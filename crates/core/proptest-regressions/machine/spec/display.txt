@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc f570b0d3235174b29930590ef2560f1a6c7852537a2cad752e85a1a3246552d4 # shrinks to spec = ChannelSpec { id: None, out: None, grid: Grid { n: T1, t: false, q: false }, mode: Clock, swing: SwingConfig { resolution: T1, amount: 0 }, offset_ticks: 0, delay: FD06(51000), snap_to_quantum_micro: None, bars: None }
+cc 8e59b4f7c63ec3518e3ef52b0b64ff5d6828a1f1ea152fbb1bd63961ebcb20ec # shrinks to spec = ChannelSpec { id: None, out: None, grid: Grid { n: T1, t: false, q: false }, mode: Clock, swing: SwingConfig { resolution: T1, amount: 0 }, offset_ticks: 0, delay: FD06(116), snap_to_quantum_micro: None, bars: None }
