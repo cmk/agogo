@@ -369,7 +369,7 @@ mod tests {
         ($mod:ident, $conn:ident, $Fine:ident, $Coarse:ident, $num:expr, $den:expr) => {
             mod $mod {
                 use super::*;
-                use connections::property::laws;
+                use connections::prop::conn as laws;
 
                 proptest! {
                     #[test]
@@ -496,7 +496,7 @@ mod tests {
         ($mod:ident, $conn:ident, $Rate:ident, $num:expr, $den:expr) => {
             mod $mod {
                 use super::*;
-                use connections::property::laws;
+                use connections::prop::conn as laws;
 
                 proptest! {
                     #[test]

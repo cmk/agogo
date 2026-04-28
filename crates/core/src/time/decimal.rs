@@ -32,7 +32,7 @@
 //! plain `div`, matching this port.)
 
 use connections::conn::Conn;
-use connections::conn::float::ExtendedFloat;
+use connections::float::ExtendedFloat;
 use connections::extended::Extended;
 
 macro_rules! def_fixed {
@@ -296,7 +296,7 @@ mod tests {
         extended_fd00, extended_fd01, extended_fd02, extended_fd03, extended_fd06, extended_fd09,
         extended_fd12, fixed_coarse, fixed_fine, fixed_safe_fine,
     };
-    use connections::property::arb::extended_float_f64;
+    use connections::prop::arb::extended_float_f64;
     use proptest::prelude::*;
 
     // Sanity spot checks (hand-computed).
@@ -341,7 +341,7 @@ mod tests {
         ($mod:ident, $conn:ident, $Fine:ident, $Coarse:ident, $prec:expr) => {
             mod $mod {
                 use super::*;
-                use connections::property::laws;
+                use connections::prop::conn as laws;
 
                 proptest! {
                     #[test]
@@ -581,7 +581,7 @@ mod tests {
         ($mod:ident, $conn:ident, $Rung:ident, $arb_src:ident, $arb_tgt:ident) => {
             mod $mod {
                 use super::*;
-                use connections::property::laws;
+                use connections::prop::conn as laws;
 
                 proptest! {
                     // Float-Conn shrinks on this domain are expensive:
