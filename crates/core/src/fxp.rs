@@ -283,8 +283,9 @@ pub fn f64_phase_to_phase(p: f64) -> Phase {
     Phase(bits)
 }
 
-/// f64 BPM → `Tempo` with round-to-nearest. Negative or NaN
-/// inputs saturate to `ZERO`; out-of-u32-range to `Tempo(u32::MAX)`.
+/// f64 BPM → `Tempo` with round-to-nearest. Non-finite (NaN /
+/// ±∞) and non-positive inputs saturate to `ZERO`; values whose
+/// scaled µBPM exceed `u32::MAX` saturate to `Tempo(u32::MAX)`.
 ///
 /// **Round-to-nearest, not Conn-composed.** Same FFI-parity
 /// reasoning as `f64_beats_to_quantum`: agogo's `Tempo` is the
@@ -632,6 +633,26 @@ mod tests {
             prop_assert!(
                 (got - expected).abs() < 1e-9,
                 "tempo_to_f64_bpm({raw}) = {got}, expected {expected}",
+            );
+        }
+
+        /// `pico_to_f64_seconds` round-trip across the full signed
+        /// `i64` domain (including negatives). Same rationale as
+        /// `tempo_to_f64_bpm_full_domain`: the helper is used by
+        /// `arb::pulse_train` for `PULSE_WIDTH_PS` and `jitter_sigma`
+        /// and has no other direct test. Independent reference:
+        /// `raw / 1.0e12`.
+        #[test]
+        fn pico_to_f64_seconds_full_domain(raw in any::<i64>()) {
+            let got = pico_to_f64_seconds(Pico(raw));
+            let expected = raw as f64 / 1.0e12;
+            // i64 → f64 loses precision for |raw| beyond 2^53, so
+            // compare with a relative tolerance.
+            let abs_err = (got - expected).abs();
+            let rel_tol = expected.abs().max(1.0) * 1e-12;
+            prop_assert!(
+                abs_err < rel_tol,
+                "pico_to_f64_seconds({raw}) = {got}, expected {expected}",
             );
         }
 
