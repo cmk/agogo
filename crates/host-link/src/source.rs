@@ -68,7 +68,10 @@ impl PhaseSourceImpl for LinkPhaseSource {
     }
 
     fn feed_samples(&mut self, _samples: &[f32], _start: u64) {
-        // Link derives tempo from the network; no PCM coupling.
+        // PCM ABI: `&[f32]` is the cpal audio I/O slice shape; the
+        // parameter is required by the `PhaseSourceImpl` trait but
+        // ignored here because Link derives tempo from the network,
+        // not the audio stream. No PCM coupling.
     }
 }
 

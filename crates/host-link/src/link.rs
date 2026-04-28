@@ -209,12 +209,10 @@ impl LinkClock {
     pub fn snap_offset_micro(&mut self, quantum: Quantum) -> Micro {
         // Quantum (Micro / microbeats) → f64 beats via the lawful
         // F064FD06 Conn inverse. The `10⁶` unit shift lives inside
-        // `F064FD06`'s definition (`agogo_core::time::float`), not
-        // open-coded here (audit findings M5/N6 closed for this call
-        // site by Plan 23 / audit P5). `Extended::Finite` lifts the
-        // `Micro` into the saturation lattice F064FD06 operates on;
-        // `Bot`/`Top` are unreachable for a finite `Quantum` but the
-        // match keeps the result total.
+        // `F064FD06`'s definition (`agogo_core::time::float`).
+        // `Extended::Finite` lifts the `Micro` into the saturation
+        // lattice F064FD06 operates on; `Bot`/`Top` are unreachable
+        // for a finite `Quantum` but the match keeps the result total.
         let q_f64 = match F064FD06.inner(Extended::Finite(quantum.0)) {
             ExtendedFloat::Extend(b) => b,
             ExtendedFloat::Bot | ExtendedFloat::Top => return Micro::ZERO,
@@ -224,29 +222,15 @@ impl LinkClock {
         }
         self.link.capture_audio_session_state(&mut self.session);
         let now = self.link.clock_micros();
-        let next_boundary_us = self.next_quantum_boundary_us(q_f64, now);
-        Micro(next_boundary_us.saturating_sub(now).max(0))
-    }
-
-    /// Inner FFI-math helper: given an already-validated `q_f64`
-    /// (positive, finite) and a host-time `now_us`, return the
-    /// host-time (microseconds) of the next quantum boundary at or
-    /// after `now_us`.
-    ///
-    /// Confines the `f64` footprint to a single named function —
-    /// every f64 use lives inside the FFI calls or the immediate
-    /// `(current/q).ceil() * q` boundary computation. Audit P5
-    /// extraction (Plan 23) so CLAUDE.md exception 5's "within
-    /// 1–2 lines of the FFI call" rule holds at the public
-    /// `snap_offset_micro` API surface.
-    fn next_quantum_boundary_us(&mut self, q_f64: f64, now_us: i64) -> i64 {
-        // Link FFI calls take/return f64 beats. `ceil(current/q) * q`
-        // gives the smallest multiple of `q` ≥ `current`; stable under
-        // f64 rounding on exact-boundary inputs (a beat already on a
-        // boundary stays on it).
-        let current_beat = self.session.beat_at_time(now_us, q_f64);
-        let next_boundary = (current_beat / q_f64).ceil() * q_f64;
-        self.session.time_at_beat(next_boundary, q_f64)
+        // Link FFI: beat_at_time / time_at_beat both take/return f64
+        // beats. The arithmetic on f64 stays within 1–2 lines of each
+        // FFI call (CLAUDE.md exception 5). Plan 2026-04-28-03 T10
+        // inlined this from a helper to keep the f64 footprint
+        // visible at the API boundary.
+        let current_beat = self.session.beat_at_time(now, q_f64); // Link FFI
+        let next_boundary = (current_beat / q_f64).ceil() * q_f64; // Link FFI (f64 next to call)
+        let next_us = self.session.time_at_beat(next_boundary, q_f64); // Link FFI
+        Micro(next_us.saturating_sub(now).max(0))
     }
 }
 
