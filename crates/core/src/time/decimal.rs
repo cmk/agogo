@@ -2,13 +2,13 @@
 //!
 //! Each type is an `i64` numerator with an implicit 10⁻ᵏ denominator:
 //!
-//! - `FD00(i) = i × 10⁰`   (Uni,   1 s)
-//! - `FD01(i) = i × 10⁻¹`  (Deci,  100 ms)
-//! - `FD02(i) = i × 10⁻²`  (Centi, 10 ms)
-//! - `FD03(i) = i × 10⁻³`  (Milli, 1 ms)
-//! - `FD06(i) = i × 10⁻⁶`  (Micro, 1 µs)
-//! - `FD09(i) = i × 10⁻⁹`  (Nano,  1 ns)
-//! - `FD12(i) = i × 10⁻¹²` (Pico,  1 ps)
+//! - `FD00(i) = i × 10⁰`   (1 s)
+//! - `FD01(i) = i × 10⁻¹`  (100 ms)
+//! - `FD02(i) = i × 10⁻²`  (10 ms)
+//! - `FD03(i) = i × 10⁻³`  (1 ms)
+//! - `FD06(i) = i × 10⁻⁶`  (1 µs)
+//! - `FD09(i) = i × 10⁻⁹`  (1 ns)
+//! - `FD12(i) = i × 10⁻¹²` (1 ps)
 //!
 //! For every ordered pair `(Fine, Coarse)` where `Fine`'s resolution is
 //! strictly smaller, there is a [`Conn`]`<Fine, Coarse>` named

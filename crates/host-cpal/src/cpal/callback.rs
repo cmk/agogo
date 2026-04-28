@@ -23,7 +23,7 @@ use agogo_core::machine::Machine;
 ///
 /// The `R: SampleTime` parameter binds the [`Machine`]'s rate at
 /// compile time. The CLI dispatches it via a static match on
-/// `--sr` (Plan 14 T5: `S44 | S48 | S88 | S96 | S176 | S192`).
+/// `--sr` (Plan 14 T5: `S044 | S048 | S088 | S096 | S176 | S192`).
 pub struct CallbackState<R: SampleTime> {
     /// N-channel orchestrator. Owns channels, phase source,
     /// transport policy, and the per-channel scratch buffer.
@@ -59,7 +59,7 @@ mod tests {
     use super::*;
     use crate::cpal::control::spsc;
     use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
-    use agogo_core::fxp::{Micro, S48, Tempo};
+    use agogo_core::fxp::{Micro, S048, Tempo};
     use agogo_core::machine::TransportPolicy;
     use agogo_core::sync::PhaseSource;
     use agogo_core::time::grid::Grid;
@@ -73,7 +73,7 @@ mod tests {
         divider: Grid,
         frames: usize,
     ) -> (
-        CallbackState<S48>,
+        CallbackState<S048>,
         crate::cpal::control::ControlConsumer,
     ) {
         let (producer, consumer) = spsc(1024);
@@ -90,7 +90,7 @@ mod tests {
             },
             role: MidiRole::Clock,
         };
-        let machine = Machine::<S48>::new(
+        let machine = Machine::<S048>::new(
             vec![channel],
             PhaseSource::Internal { bpm },
             48_000,
@@ -102,7 +102,7 @@ mod tests {
             },
             frames,
         );
-        let state = CallbackState::<S48> { machine, producer };
+        let state = CallbackState::<S048> { machine, producer };
         (state, consumer)
     }
 

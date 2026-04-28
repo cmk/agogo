@@ -24,7 +24,7 @@
 //!
 //! [`ChannelSpec`] holds the parsed form; [`ChannelSpec::into_channel`]
 //! converts to a [`Channel`] at the CLI argv boundary, where the only
-//! `f64` field (`delay_ms`) crosses via the `F64F06` Conn per CLAUDE.md
+//! `f64` field (`delay_ms`) crosses via the `F064FD06` Conn per CLAUDE.md
 //! float exception 4.
 
 use core::num::{NonZeroU16, NonZeroU32};
@@ -34,7 +34,7 @@ use crate::channel::role::{ChannelCommon, MidiClickAccent, MidiClickConfig, Midi
 use crate::channel::transform::MAX_DELAY;
 use crate::channel::Channel;
 use crate::dsl;
-use crate::fxp::{Extended, ExtendedFloat, F64F06, Micro};
+use crate::fxp::{Extended, ExtendedFloat, F064FD06, Micro};
 use crate::midi::{U4, U7};
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
@@ -384,7 +384,7 @@ impl ChannelSpec {
         // every spec is implicitly MIDI-targeted. The mode/click
         // validation already happened in `parse`, so `self.mode` is
         // the ready-to-use MidiRole (Clock or Click(MidiClickConfig)).
-        // argv boundary: delay (ms) crosses into Micro via F64F06.
+        // argv boundary: delay (ms) crosses into Micro via F064FD06.
         let delay = match micro_from_ms(self.delay_ms) {
             Some(m) => Micro(m.0.clamp(0, MAX_DELAY.0)),
             None => {
@@ -503,11 +503,11 @@ fn parse_swing(v: &str) -> Result<SwingConfig, ChannelSpecError> {
 }
 
 /// Convert a finite millisecond `f64` value to `Micro` via the
-/// `F64F06` Conn.
+/// `F064FD06` Conn.
 fn micro_from_ms(ms: f64) -> Option<Micro> {
     // argv boundary
     let seconds = ms * 1.0e-3; // argv boundary
-    match F64F06.ceil(ExtendedFloat::Extend(seconds)) {
+    match F064FD06.ceil(ExtendedFloat::Extend(seconds)) {
         Extended::Finite(m) => Some(m),
         Extended::PosInf | Extended::NegInf => None,
     }

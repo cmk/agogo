@@ -380,7 +380,7 @@ impl<R: SampleTime> Machine<R> {
 mod tests {
     use super::*;
     use crate::channel::{ChannelCommon, MidiRole};
-    use crate::fxp::{Micro, S48};
+    use crate::fxp::{Micro, S048};
     use crate::out::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn machine_buffer_matches_plan13_demo() {
         let bpm = Tempo::from_bpm_integer(120);
-        let mut machine = Machine::<S48>::new(
+        let mut machine = Machine::<S048>::new(
             vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -472,7 +472,7 @@ mod tests {
     #[test]
     fn transport_internal_emits_start_then_stop() {
         let bpm = Tempo::from_bpm_integer(120);
-        let mut machine = Machine::<S48>::new(
+        let mut machine = Machine::<S048>::new(
             vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -556,7 +556,7 @@ mod tests {
             let queue: Arc<std::sync::Mutex<VecDeque<bool>>> =
                 Arc::new(std::sync::Mutex::new(states.iter().copied().collect()));
             let q_for_query = Arc::clone(&queue);
-            let mut machine = Machine::<S48>::new(
+            let mut machine = Machine::<S048>::new(
                 vec![zero_channel(Grid::T4)],
                 PhaseSource::Internal { bpm },
                 48_000,
@@ -611,7 +611,7 @@ mod tests {
             None,
             Some(MidiRtByte::Stop),
         ]);
-        let mut machine = Machine::<S48>::new(
+        let mut machine = Machine::<S048>::new(
             vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -666,7 +666,7 @@ mod tests {
             let frames = 4_096usize;
 
             // Multi-channel run.
-            let mut multi = Machine::<S48>::new(
+            let mut multi = Machine::<S048>::new(
                 dividers.iter().copied().map(zero_channel).collect(),
                 PhaseSource::Internal { bpm },
                 48_000,
@@ -695,7 +695,7 @@ mod tests {
             let mut reference: Vec<u64> = Vec::new();
             for b in 0..n_buffers {
                 for d in &dividers {
-                    let mut single = Machine::<S48>::new(
+                    let mut single = Machine::<S048>::new(
                         vec![zero_channel(*d)],
                         PhaseSource::Internal { bpm },
                         48_000,
@@ -769,7 +769,7 @@ mod tests {
             ch: U4(9),
             accent: None,
         };
-        let mut machine = Machine::<S48>::new(
+        let mut machine = Machine::<S048>::new(
             vec![click_channel(Grid::T4, cfg, None)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -861,14 +861,14 @@ mod tests {
                 role: make_role(),
             };
 
-            let mut m_un = Machine::<S48>::new(
+            let mut m_un = Machine::<S048>::new(
                 vec![mk_channel(None)],
                 PhaseSource::Internal { bpm },
                 sr, bpm, PPQN,
                 TransportPolicy::Scripted { schedule: VecDeque::new() },
                 frames,
             );
-            let mut m_fi = Machine::<S48>::new(
+            let mut m_fi = Machine::<S048>::new(
                 vec![mk_channel(Some(NonZeroU16::new(bars).unwrap()))],
                 PhaseSource::Internal { bpm },
                 sr, bpm, PPQN,
@@ -904,7 +904,7 @@ mod tests {
     fn bars_filter_huge_n_keeps_only_first_event() {
         let bpm = Tempo::from_bpm_integer(120);
         let cfg = MidiClickConfig { note: U7(76), vel: U7(100), ch: U4(9), accent: None };
-        let mut machine = Machine::<S48>::new(
+        let mut machine = Machine::<S048>::new(
             vec![click_channel(Grid::T16, cfg, NonZeroU16::new(u16::MAX))],
             PhaseSource::Internal { bpm },
             48_000, bpm, PPQN,
@@ -948,7 +948,7 @@ mod tests {
                     note: U7(38), vel: U7(120),
                 }),
             };
-            let mut machine = Machine::<S48>::new(
+            let mut machine = Machine::<S048>::new(
                 vec![click_channel(divider, cfg, NonZeroU16::new(bars))],
                 PhaseSource::Internal { bpm },
                 48_000, bpm, PPQN,
@@ -1004,7 +1004,7 @@ mod tests {
                 vel: U7(120),
             }),
         };
-        let mut machine = Machine::<S48>::new(
+        let mut machine = Machine::<S048>::new(
             vec![click_channel(
                 Grid::T1,
                 cfg,

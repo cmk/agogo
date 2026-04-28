@@ -155,7 +155,7 @@ impl<R: SampleTime> PeakDetector<R> {
 mod tests {
     use super::*;
     use crate::arb::{arb_bpm, pulse_train};
-    use crate::fxp::{Tempo, Pico, S48, SampleRate};
+    use crate::fxp::{Tempo, Pico, S048, SampleRate};
     use proptest::prelude::*;
 
     /// Stamp a Hann-bell pulse into `buf`. Mirrors `pulse_train`'s
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn empty_block_yields_no_peaks() {
-        let mut det = PeakDetector::<S48>::new(DetectorConfig {
+        let mut det = PeakDetector::<S048>::new(DetectorConfig {
             threshold_q15: 3_277, // ≈ 0.1
             hold_samples: 10,
         });
@@ -199,7 +199,7 @@ mod tests {
         for &c in &centres {
             emit_hann(&mut buf, c, 72.0);
         }
-        let mut det = PeakDetector::<S48>::new(DetectorConfig {
+        let mut det = PeakDetector::<S048>::new(DetectorConfig {
             threshold_q15: THRESHOLD_HALF,
             hold_samples: 500,
         });
@@ -222,7 +222,7 @@ mod tests {
         // Place a peak that straddles two process() calls.
         let mut buf = vec![0.0_f32; 1024];
         emit_hann(&mut buf, 510.0, 72.0);
-        let mut det = PeakDetector::<S48>::new(DetectorConfig {
+        let mut det = PeakDetector::<S048>::new(DetectorConfig {
             threshold_q15: THRESHOLD_HALF,
             hold_samples: 100,
         });
@@ -235,7 +235,7 @@ mod tests {
 
     proptest! {
         // P1: every truth peak is reported exactly once, no extras.
-        // Pinned to S48 for this sprint; multi-rate coverage deferred
+        // Pinned to S048 for this sprint; multi-rate coverage deferred
         // (the detector algorithm is rate-agnostic — it operates on
         // &[f32] — so the rate only affected the test's own expected-
         // values math).
@@ -245,14 +245,14 @@ mod tests {
             seed in any::<u64>(),
             n_pulses in 4u32..32u32,
         ) {
-            let sr = S48::HZ;
+            let sr = S048::HZ;
             let ppq = 24u32;
-            let (samples, truth): (Vec<f32>, Vec<S48>) =
-                pulse_train::<S48>(bpm, ppq, Pico(0), n_pulses, seed);
+            let (samples, truth): (Vec<f32>, Vec<S048>) =
+                pulse_train::<S048>(bpm, ppq, Pico(0), n_pulses, seed);
             let pulse_rate_hz = (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0;
             let spacing_samples = sr as f64 / pulse_rate_hz;
             let hold = (spacing_samples * 0.5) as u32;
-            let mut det = PeakDetector::<S48>::new(DetectorConfig {
+            let mut det = PeakDetector::<S048>::new(DetectorConfig {
                 threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
@@ -283,14 +283,14 @@ mod tests {
             seed in any::<u64>(),
             n_pulses in 4u32..16u32,
         ) {
-            let sr = S48::HZ;
+            let sr = S048::HZ;
             let ppq = 24u32;
-            let (samples, truth): (Vec<f32>, Vec<S48>) =
-                pulse_train::<S48>(bpm, ppq, Pico(0), n_pulses, seed);
+            let (samples, truth): (Vec<f32>, Vec<S048>) =
+                pulse_train::<S048>(bpm, ppq, Pico(0), n_pulses, seed);
             let pulse_rate_hz = (bpm.0 as f64 / 1.0e6) * ppq as f64 / 60.0;
             let spacing_samples = sr as f64 / pulse_rate_hz;
             let hold = (spacing_samples * 0.5) as u32;
-            let mut det = PeakDetector::<S48>::new(DetectorConfig {
+            let mut det = PeakDetector::<S048>::new(DetectorConfig {
                 threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
@@ -321,7 +321,7 @@ mod tests {
             let mut buf = Vec::new();
             emit_hann(&mut buf, first_centre, pulse_width);
             emit_hann(&mut buf, second_centre, pulse_width);
-            let mut det = PeakDetector::<S48>::new(DetectorConfig {
+            let mut det = PeakDetector::<S048>::new(DetectorConfig {
                 threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
@@ -347,7 +347,7 @@ mod tests {
             let mut buf = Vec::new();
             emit_hann(&mut buf, first_centre, pulse_width);
             emit_hann(&mut buf, second_centre, pulse_width);
-            let mut det = PeakDetector::<S48>::new(DetectorConfig {
+            let mut det = PeakDetector::<S048>::new(DetectorConfig {
                 threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
