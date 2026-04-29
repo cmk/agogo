@@ -72,8 +72,7 @@ fn ticktime_floor(n: Tick) -> Time {
 /// `Grid::T512P` grid (= 1 tick at 960 PPQN, so every tick is
 /// already aligned) then canonicalises; floor rounds down; embed is
 /// exact.
-pub const TICKTIME: Conn<Tick, Time> =
-    Conn::new(ticktime_ceil, ticktime_inner, ticktime_floor);
+pub const TICKTIME: Conn<Tick, Time> = Conn::new(ticktime_ceil, ticktime_inner, ticktime_floor);
 
 // ── wholtick: Conn<Whole, Tick> ──────────────────────────────────
 
@@ -111,8 +110,7 @@ fn wholtick_floor(r: Whole) -> Tick {
 /// Galois connection between rational whole-note durations and ticks.
 /// Floor rounds down, ceiling rounds up, embed is exact:
 /// `wholtick_inner(Tick(n)) = n / 3840` at 960 PPQN.
-pub const WHOLTICK: Conn<Whole, Tick> =
-    Conn::new(wholtick_ceil, wholtick_inner, wholtick_floor);
+pub const WHOLTICK: Conn<Whole, Tick> = Conn::new(wholtick_ceil, wholtick_inner, wholtick_floor);
 
 // ── quantize_at: Conn<Tick, Time> per Grid ───────────────────────
 
@@ -126,9 +124,8 @@ macro_rules! qa_variant {
             let tc = u64::from(Grid::$variant.tick_count());
             let beats = n.0.div_ceil(tc);
             Time {
-                beats: u32::try_from(beats).expect(
-                    "quantize_at Conn requires n.0.div_ceil(tc) ≤ u32::MAX",
-                ),
+                beats: u32::try_from(beats)
+                    .expect("quantize_at Conn requires n.0.div_ceil(tc) ≤ u32::MAX"),
                 base: Grid::$variant,
             }
         }
@@ -136,9 +133,7 @@ macro_rules! qa_variant {
             let tc = u64::from(Grid::$variant.tick_count());
             let beats = n.0 / tc;
             Time {
-                beats: u32::try_from(beats).expect(
-                    "quantize_at Conn requires n.0 / tc ≤ u32::MAX",
-                ),
+                beats: u32::try_from(beats).expect("quantize_at Conn requires n.0 / tc ≤ u32::MAX"),
                 base: Grid::$variant,
             }
         }
