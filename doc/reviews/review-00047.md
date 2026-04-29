@@ -154,30 +154,38 @@ a follow-up in the plan's Review section.
 
 ### Plan Conformance
 
-- T1 (apply_snap_offsets helper + cli wiring) — `host-link/src/session.rs:230-250`,
-  re-exported in `lib.rs:206`, called from `run.rs:278`. ✓
-- T2 (CI no-link gate, reframed mid-sprint) — `.github/workflows/ci.yml:100-113`.
-  Reframe honestly captured in plan's T2 section. ✓
-- T3 (cli/run.rs Source::Link scoping doc-comment) — `run.rs:16-34`. ✓
-- T4 (drop agogo-cli binary alias) — `cli/Cargo.toml`. ✓
-- T5 (`#[bpaf(version)]`) — `cli/src/main.rs:62`. ✓
-- T6 (`#[doc(hidden)]` on `CvRole`/`DinRole`) — `core/src/channel.rs:24-25`. ✓
+- T1 (apply_snap_offsets helper + cli wiring) —
+  `crates/host-link/src/session.rs:230-250`, re-exported in
+  `crates/host-link/src/lib.rs:38`, called from
+  `crates/cli/src/run.rs:278`. ✓
+- T2 (CI no-link gate, reframed mid-sprint) —
+  `.github/workflows/ci.yml:100-113`. Reframe honestly captured in
+  plan's T2 section. ✓
+- T3 (cli/run.rs Source::Link scoping doc-comment) —
+  `crates/cli/src/run.rs:16-34`. ✓
+- T4 (drop agogo-cli binary alias) — `crates/cli/Cargo.toml`. ✓
+- T5 (`#[bpaf(version)]`) — `crates/cli/src/main.rs:11`
+  (`#[bpaf(options, version)]`). ✓
+- T6 (`#[doc(hidden)]` on `CvRole`/`DinRole`) —
+  `crates/core/src/channel.rs:24-25`. ✓
 
 No code in the diff outside the plan's scope.
 
 ### Risks
 
-- `apply_snap_offsets` uses `debug_assert_eq!` + `.zip` for arity
-  mismatch. In release builds, mismatched lengths silently process
-  `min(len1, len2)` channels with no diagnostic. Doc-commented as
-  intentional. Raised as a follow-up: `assert_eq!` would fail loud
-  in release for a programming error in an internal helper.
+- ~~`apply_snap_offsets` uses `debug_assert_eq!` + `.zip` for arity
+  mismatch.~~ **Resolved this round** (commit `5ab2d7f`): promoted
+  to plain `assert_eq!` so release builds also panic at the boundary
+  on a programming error in the caller, instead of silently
+  partial-applying.
 - The `cli-no-link` CI job installs `libasound2-dev` on Linux —
   necessary because `--features cpal,midi` pulls in `agogo-host-cpal`
   which links cpal which needs ALSA on Linux. Verified, not spurious.
 - No new dependencies, no unsafe, no path/injection vectors.
-- `doc/todo.md` sweep recommended as a separate `doc:` commit after
-  merge (closes 4–6 items). Tracked in plan's Review section.
+- ~~`doc/todo.md` sweep recommended as a separate `doc:` commit after
+  merge (closes 4–6 items).~~ **Resolved this round** (commit
+  `713aa4b`): six items closed (4 by Plan 09 implementation, 2 stale
+  entries the T2 exploration confirmed already done).
 
 ### Recommendations
 
@@ -190,16 +198,112 @@ No code in the diff outside the plan's scope.
    → `task:` on the polish commit; `ci:` → `task:` on the no-link
    gate. All eight commits now use accepted prefixes per CLAUDE.md.
 
-**Follow-up (deferred):**
+**Follow-up — resolved this round (out-of-scope when first
+recommended; user pulled them into the round):**
 
-3. `host-link/src/session.rs:236` — `debug_assert_eq!` arity
-   guard could promote to `assert_eq!` for release-build safety.
-   Judgment call; document either way.
-4. Add a `host-link --features rusty-link` CI job (cmake on
-   runners) so `apply_snap_offsets`'s tests run in CI, not just
-   locally.
-5. Sweep `doc/todo.md` to mark closed items: snap_intent wiring,
-   `agogo-cli` alias removal, `bpaf(version)` flag, `channel.rs`
-   re-export audit, plus the two stale items the T2 exploration
-   confirmed already done (Tempo→f64 link.rs sweep, PLL Tempo
-   `abs_diff` collapse).
+3. `crates/host-link/src/session.rs:235` — `debug_assert_eq!` arity
+   guard promoted to `assert_eq!` so release builds panic on caller
+   programming error instead of silently partial-applying. Commit
+   `5ab2d7f`.
+4. ~~Add a `host-link --features rusty-link` CI job.~~ Still
+   deferred — needs `cmake` on the runners; tracked for whoever
+   owns CI infra.
+5. Swept `doc/todo.md` to close items resolved by Plan 09 (snap
+   wiring, alias removal, bpaf version, channel.rs audit) plus the
+   two stale entries the T2 exploration confirmed already done
+   (Tempo→f64 link.rs sweep, PLL Tempo `abs_diff` collapse).
+   Commit `713aa4b`.
+
+<!-- gh-id: 3158867513 -->
+### Copilot on [`doc/reviews/review-00047.md:174`](https://github.com/cmk/agogo/pull/47#discussion_r3158867513) (2026-04-29 05:50 UTC)
+
+The risk write-up claims `apply_snap_offsets` uses `debug_assert_eq!` and would silently `.zip` partial-apply in release builds, but the implementation uses `assert_eq!` (fail-loud in release) before the `.zip` loop. Please update this risk section (and the follow-up item later that mentions promoting `debug_assert_eq!`) to match the current code behavior.
+
+<!-- gh-id: 3158867536 -->
+### Copilot on [`doc/plans/plan-2026-04-28-09.md:28`](https://github.com/cmk/agogo/pull/47#discussion_r3158867536) (2026-04-29 05:50 UTC)
+
+This bullet claims the `--quantum` field at `main.rs:215-216` is not feature-gated and breaks builds without `link`, but later in the same plan (T2) you note it’s already inside `Command::Transport` under `#[cfg(feature = "link")]`. Please reconcile these statements so the plan doesn’t contradict itself about the current coupling.
+
+<!-- gh-id: 3158867566 -->
+### Copilot on [`doc/plans/plan-2026-04-28-11.md:87`](https://github.com/cmk/agogo/pull/47#discussion_r3158867566) (2026-04-29 05:50 UTC)
+
+In the `step` example, `target.abs_diff(observed)` can’t yield a signed error: in the current codebase `Tempo::abs_diff` returns a `u32` (and is explicitly documented as absolute value). The example’s `let err: Tempo = ... // signed` is therefore incorrect/misleading; either show an unsigned error type or a separate signed-diff helper and use a signed type in the sketch.
+
+<!-- gh-id: 3158867582 -->
+### Copilot on [`crates/host-link/src/session.rs:211`](https://github.com/cmk/agogo/pull/47#discussion_r3158867582) (2026-04-29 05:50 UTC)
+
+The doc comment says `session.snap_offset_for(spec.snap_intent())`, but `snap_offset_for` takes `Option<Quantum>` while `ChannelSpec::snap_intent()` returns an `Option<Micro>` (as shown by the implementation using `.map(Quantum)`). Please update the comment to reflect the actual call shape/types so it’s not suggesting code that won’t compile.
+```suggestion
+/// pair, fold the result of
+/// `session.snap_offset_for(spec.snap_intent().map(Quantum))`
+```
+
+<!-- gh-id: 3158867601 -->
+### Copilot on [`doc/reviews/review-00047.md:161`](https://github.com/cmk/agogo/pull/47#discussion_r3158867601) (2026-04-29 05:50 UTC)
+
+This section references file/line locations that don’t match the current diff (e.g., `lib.rs:206` but `crates/host-link/src/lib.rs` is only ~45 lines, and `cli/src/main.rs:62` doesn’t match the `#[bpaf(options, version)]` change location). Please update these references so readers can reliably jump to the cited locations.
+
+<!-- gh-id: 4194473729 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-29 05:50 UTC](https://github.com/cmk/agogo/pull/47#pullrequestreview-4194473729))
+
+## Pull request overview
+
+Decouples `agogo-cli` orchestration logic from direct `agogo-host-link` session walking by moving snap-offset application into a host-link helper, while also adding a CI regression gate to ensure the CLI remains buildable without the `link` feature enabled.
+
+**Changes:**
+- Added `agogo_host_link::apply_snap_offsets(specs, session, channels)` and wired it into `cli/src/run.rs` for `--source link`.
+- Added a `cli-no-link` CI job that builds + clippies `agogo-cli` with `--no-default-features --features core,cpal,midi`.
+- CLI polish + API surface cleanup: removed `agogo-cli` legacy bin alias, enabled `bpaf` version output, and hid `CvRole`/`DinRole` re-exports from docs.
+
+### Reviewed changes
+
+Copilot reviewed 12 out of 12 changed files in this pull request and generated 5 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/todo.md | Removes now-closed deferred items and adds “archaeological grep” notes for historical tracking. |
+| doc/reviews/review-00047.md | Adds a PR review record (but currently contains a few factual mismatches vs the actual diff). |
+| doc/plans/plan-2026-04-28-09.md | Adds the sprint plan for this PR (but contains an internal contradiction about `--quantum` gating). |
+| doc/plans/plan-2026-04-28-10.md | Adds deferred Plan 10 doc (audio-click channel proposal). |
+| doc/plans/plan-2026-04-28-11.md | Adds deferred Plan 11 doc (LpfPid proposal; has a type/sign mismatch in an example). |
+| crates/host-link/src/session.rs | Implements `apply_snap_offsets` + unit tests. |
+| crates/host-link/src/lib.rs | Re-exports `apply_snap_offsets` under `feature = "rusty-link"`. |
+| crates/core/src/channel.rs | Splits re-exports and marks `CvRole`/`DinRole` as `#[doc(hidden)]`. |
+| crates/cli/src/run.rs | Keeps specs alongside channels and applies snap offsets inside the `Source::Link` branch. |
+| crates/cli/src/main.rs | Enables `bpaf` version output (`#[bpaf(options, version)]`). |
+| crates/cli/Cargo.toml | Removes the `agogo-cli` legacy `[[bin]]` alias. |
+| .github/workflows/ci.yml | Adds `cli-no-link` build/clippy gate. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3158930458 -->
+#### ↳ cmk ([2026-04-29 06:06 UTC](https://github.com/cmk/agogo/pull/47#discussion_r3158930458))
+
+Fixed — Risks and Follow-up sections updated to reflect that the `debug_assert_eq!` was promoted to plain `assert_eq!` in commit `5ab2d7f`, and the `doc/todo.md` sweep landed in `713aa4b`. Both items now show as resolved-this-round, not deferred.
+
+<!-- gh-id: 3158930736 -->
+#### ↳ cmk ([2026-04-29 06:06 UTC](https://github.com/cmk/agogo/pull/47#discussion_r3158930736))
+
+Reconciled — the "coupling targets" list at the top of the plan now flags the original framing as what the plan was *initially* drafted with, and points forward to T2's investigation which corrected the picture (`--quantum` is already inside `#[cfg(feature = "link")]` via `Command::Transport`'s gate at `main.rs:159`).
+
+<!-- gh-id: 3158930981 -->
+#### ↳ cmk ([2026-04-29 06:06 UTC](https://github.com/cmk/agogo/pull/47#discussion_r3158930981))
+
+Fixed — the sketch now uses a `signed_tempo_diff` placeholder returning `(u32, i8)` (magnitude + sign) rather than `Tempo::abs_diff`'s u32 dressed up as signed. The paragraph below still spells out the two T1-time options (extend `Tempo::signed_diff` vs compute the sign locally and pair with `abs_diff`).
+
+<!-- gh-id: 3158931254 -->
+#### ↳ cmk ([2026-04-29 06:06 UTC](https://github.com/cmk/agogo/pull/47#discussion_r3158931254))
+
+Applied the suggestion. Both call-shape examples in the file — the one in `snap_offset_for`'s doc-comment and the one in `apply_snap_offsets`'s — now show `spec.snap_intent().map(Quantum)`, so the snippets actually compile against the real types.
+
+<!-- gh-id: 3158931706 -->
+#### ↳ cmk ([2026-04-29 06:06 UTC](https://github.com/cmk/agogo/pull/47#discussion_r3158931706))
+
+Fixed — `lib.rs:206` → `lib.rs:38` (the actual `pub use session::{..., apply_snap_offsets}` site) and `cli/src/main.rs:62` → `:11` (where `#[bpaf(options, version)]` actually lives). The other refs in the same block were correct; I qualified them with `crates/...` paths for unambiguity.
