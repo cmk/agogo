@@ -71,15 +71,6 @@ PID-smoothed phase source rather than the raw bridge.
   [plan-2026-04-25-05 §Deferred](plans/plan-2026-04-25-05.md)
 - Status: **open** — v0.5 Sprint 02. Depends on `LpfPid`.
 
-### Tempo → f64 sweep at `link.rs:68, :160`
-Two `Tempo → f64` BPM call sites still open-code; M3/M5 sweep work.
-- Sources: [plan-2026-04-26-04 §Deferred](plans/plan-2026-04-26-04.md)
-- Status: **open** — was tabled with audit P0a/P0b under the
-  "blocked on `Conn::then`" framing; with `Conn::then` formally
-  abandoned in favor of upstream `connections::compose!` (memory:
-  `project_conn_then_upstream_blocking.md`), this is unblocked and
-  ready to sweep.
-
 ### `f64_bpm_to_tempo` / `f64_beats_to_quantum` re-base on lawful Conns
 The argv-boundary helpers in `boundary.rs` and
 `host-link/src/quantum.rs` still hand-roll the conversion.
@@ -228,26 +219,6 @@ the post-v0.5 sugar over it.
   [plan-2026-04-25-05 §Deferred](plans/plan-2026-04-25-05.md)
 - Status: **open** — post-v0.5.
 
-### Wire `snap_intent` into the orchestrator
-Plan 20 shipped `LinkSession::snap_offset_for(spec.snap_intent())` and
-the `snap_to_quantum_micro` field, but `crates/cli/src/run.rs` doesn't
-walk the parsed specs and apply the delta to `Channel.offset`. Today
-only the `host-link/tests/bidirectional.rs` integration test calls it.
-- Sources: [plan-2026-04-26-01 §Deferred](plans/plan-2026-04-26-01.md)
-- Status: **open** — small, local, ready when someone picks it up.
-
-### `agogo-cli` binary alias removal
-Plan 14 ships both `agogo` and `agogo-cli` for the v0.1 release; remove
-the alias in v0.2 once external scripts migrate.
-- Sources: [plan-2026-04-25-05 §Deferred](plans/plan-2026-04-25-05.md)
-- Status: **open** — v0.2. Confirmed: `crates/cli/Cargo.toml` still
-  ships both binary names.
-
-### `#[bpaf(version)]` flag
-Pre-existing follow-up from the bpaf parser swap.
-- Sources: [plan-2026-04-23-03 §Deferred](plans/plan-2026-04-23-03.md)
-- Status: **open** — small, local.
-
 ### Optional `dev=` key
 Defaulting `dev=midi` and omitting from Display would shrink the
 user-facing surface. CLI behaviour change; tabled until Audit P4.
@@ -300,15 +271,6 @@ byte-oriented. Plan 23 explicitly tagged this "low marginal value".
   [plan-2026-04-26-04 §Deferred](plans/plan-2026-04-26-04.md)
 - Status: **open** — low priority.
 
-### Collapse PLL Tempo `abs_diff` sites
-Audit finding N3. Currently `Tempo` exposes its own `abs_diff` method
-used at six call sites (`crates/core/src/sync/pll.rs:219, 238, 296, 363,
-405` + `sync/source.rs:226`); whether finding N3's "collapse via
-`i32::abs_diff`" is still actionable on top of that needs a fresh look.
-- Sources: [plan-2026-04-26-01 §Deferred](plans/plan-2026-04-26-01.md)
-- Status: **partial** — was tabled under the `Conn::then` block; with
-  `compose!` shipped, re-audit and either close or finish.
-
 ### `compose!` / `ceiling1` body cleanups
 The rev bump unlocked `compose!` and `ceiling1` upstream. A pass
 through agogo to use them where the ad-hoc inline arithmetic still
@@ -327,12 +289,6 @@ plan.
   [plan-2026-04-28-05 §Deferred](plans/plan-2026-04-28-05.md),
   [plan-2026-04-28-06 §Deferred](plans/plan-2026-04-28-06.md)
 - Status: **open**.
-
-### `channel.rs` re-export hub audit (`CvRole` / `DinRole`)
-Are these forward-compat scaffolding or v0.1-required? If forward-compat,
-mark `#[doc(hidden)]`.
-- Sources: [plan-2026-04-28-03 §Deferred](plans/plan-2026-04-28-03.md)
-- Status: **open** — small, local.
 
 ---
 
@@ -478,9 +434,25 @@ when a future plan grep brings up a stale promise.
 - **Transport FSM minimal `{Stopped, Playing}` shim** — Plan 09;
   `crates/host-link/src/transport.rs:33-46`. NEG/POS extension is the
   open follow-on listed above.
-- **`snap_intent` accessor on `ChannelSpec`** — Plan 20; orchestrator
-  wiring in `run.rs` is still open (see CLI section).
+- **`snap_intent` accessor on `ChannelSpec`** — Plan 20 shipped the
+  accessor; Plan 28-09 T1 wired it into the orchestrator via
+  `agogo_host_link::apply_snap_offsets` (the walk lives on the
+  host-link side, not in cli, to avoid widening cli/Link coupling).
 - **`Quantum::from_bars(N)` typed fallbacks** — Plan 28-02 confirmed
   `bpaf` accepts the `pub const fn` directly; the `fallback_with`
   workaround was never needed.
 - **bpaf parser swap (clap → bpaf)** — Plan 04.
+- **`agogo-cli` binary alias** — Plan 28-09 T4; `crates/cli/Cargo.toml`
+  now declares one `[[bin]]` entry. External scripts have migrated.
+- **`#[bpaf(version)]` flag** — Plan 28-09 T5; `agogo --version`
+  prints the workspace version.
+- **`channel.rs` re-export hub audit (`CvRole` / `DinRole`)** —
+  Plan 28-09 T6; both re-exports marked `#[doc(hidden)]` (forward-
+  compat scaffolding for v0.4 / v0.2 backends with no v0.1 renderer).
+- **Tempo → f64 sweep at `link.rs:68, :160`** — confirmed already
+  done in Plan 28-09's exploration: both call sites now use
+  `tempo_to_f64_bpm()`. Listed here for the archaeological grep.
+- **Collapse PLL Tempo `abs_diff` sites** — confirmed already done
+  via `Tempo::abs_diff()` (`crates/core/src/time/tempo.rs:33`); the
+  five PLL call sites + `sync/source.rs:226` use it. Plan 28-09
+  exploration finding N3 closure.
