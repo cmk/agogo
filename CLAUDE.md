@@ -452,9 +452,9 @@ For PRs where you don't want to manually ping "check the replies", pair
 
 Each tick does one of: (a) heartbeat if no new activity, (b) one
 finish-the-round cycle — auto-fix the trivially-clear items, push back
-or defer the rest, run the `/reply-reviews` flow, **stop before push**,
-or (c) `holding: fix commit pending push` if a previous round is still
-awaiting your push.
+or defer the rest, run the `/reply-reviews` flow, **push the round
+commit**, or (c) `paused at round_unpushed: push failed` if the push
+itself errored (network, non-fast-forward).
 
 Auto-fix is scoped tightly: only items where the reviewer's intent is
 unambiguous and the change is local (one file, under ~20 lines, no
@@ -462,9 +462,12 @@ API removal, no cross-module reasoning). Anything involving judgment
 is classified as **needs you** and surfaced in the round report with
 `path:line` — those threads stay open on GitHub for you to resolve.
 
-The command never pushes. You still review the fix commit and run
-`git push` yourself — the single safety net that stays even when the
-rest of the loop runs unattended.
+The command never **merges**. The merge is the user's safety gate:
+each PR is reviewed manually before `gh pr merge` /
+`scripts/safe_merge.sh`. Pushing the round commit advances the
+branch to `gh_review` so CI re-runs and the reviewer sees replies
+attached to the right tip — that's normal mid-PR motion, not a risk
+worth gating on.
 
 ## TDD workflow
 

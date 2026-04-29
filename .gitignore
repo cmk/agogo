@@ -42,3 +42,4 @@ crates/host-midi/Cargo.lock
 *.p12
 *.pfx
 
+.claude/scheduled_tasks.lock

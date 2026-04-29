@@ -115,16 +115,18 @@ backoff and auto-quit on the 6th consecutive quiet tick (after the
 stateDiagram-v2
     [*] --> scheduled
     scheduled --> tick: ScheduleWakeup fires
-    tick --> holding: unpushed fix commit exists
+    tick --> push_failed: unpushed commit (prior tick's push errored)
     tick --> polling: clean, ready to poll
-    holding --> reschedule_quiet: count+1
+    push_failed --> reschedule_quiet: count+1
     polling --> no_activity: no new items
     polling --> triaging: new items
     no_activity --> reschedule_quiet: count+1
     triaging --> auto_fixing: auto-fix items present
     triaging --> replying: no auto-fix, replies only
     auto_fixing --> replying
-    replying --> reschedule_active: count=0
+    replying --> pushing: round commit ready
+    pushing --> reschedule_active: push OK, count=0
+    pushing --> reschedule_quiet: push failed (network / non-ff)
     reschedule_quiet --> quitting: count > 5
     reschedule_quiet --> scheduled: count <= 5, delay per backoff
     reschedule_active --> scheduled: 5m delay
@@ -132,9 +134,11 @@ stateDiagram-v2
 ```
 
 **Legend:**
-- `holding` is not a failure — it's the safety valve that keeps the
-  loop from stepping on a fix commit you haven't reviewed and pushed.
-  It still counts as a quiet tick.
+- `push_failed` is the recovery state when a previous tick's
+  `git push` errored (network, non-fast-forward). The next tick
+  surfaces the unpushed commit to the user without polling further.
+  It counts as a quiet tick — successive failures still trigger
+  backoff and quit.
 - `reschedule_quiet` reads the backoff table: count 1→5m, 2→5m, 3→5m,
   4→10m, 5→10m, >5 → quit (total silence budget ≈ 35 minutes).
 - Any `reschedule_active` edge resets the counter to 0, so a burst of
