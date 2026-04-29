@@ -57,6 +57,50 @@ default = ["core"]
 core = ["dep:project-core"]
 ```
 
+## The gardener rule — flag and fix drift inline
+
+Weeds are weeds, regardless of who planted them. Whenever an agent
+encounters a violation of any rule in this file — stale comment
+referencing a renamed identifier, proptest generator bounded to
+dodge a wrap, `expect()` string that lies about its precondition,
+`#[ignore]`d test without a re-enablement plan, stored `f64` outside
+the allowlist, missing `tbase_le_*` proptest the verification table
+mandated, etc. — it does not get to silently walk past because "I
+didn't write that."
+
+**Minimum bar:**
+
+- **Flag it.** List the violation in the plan's `## Review` section:
+  `file:line — rule — one-sentence consequence`.
+- **Offer to fix the minor ones.** Local, single-file, no API
+  change, doesn't expand sprint scope: ask the user in chat before
+  merging. ("I noticed `foo/bar.rs:42` still says `old_name`; fold
+  the fix into this branch?") The user decides.
+- **Defer the rest with a tracking note.** If the fix is too big to
+  absorb in the current sprint, the `## Review` entry IS the plan:
+  name the cleanup specifically enough that the next plan branch
+  can pick it up.
+
+**What does NOT need surfacing.** Drift CI already catches: `cargo
+fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+`gitleaks`, `scripts/check-floats.sh`, `scripts/check-pii.sh`. The
+gate is the safety net for those.
+
+**What MUST be surfaced.** Anything that lives below the CI gate
+because compilation and clippy are blind to it: stale prose, doc
+links to renamed-away identifiers, decorative tests that pass
+trivially, mis-bounded generators that fake coverage, section
+headers that name the old thing, `expect()` panic strings that
+contradict the actual precondition, deferred properties from a
+previous plan's Verification table that never got written. Those
+are exactly the weeds humans don't notice on a fast skim.
+
+This rule applies to every agent — `feat:`, `debt:`, `fix:`, the
+review agents, `/watch-pr` auto-fix. A `feat:` agent that walks past
+a stale comment in the file it's editing plants a weed that sprouts
+three sprints later, when somebody trusts the comment and writes
+code based on it.
+
 ## Repository conventions
 
 - **Each commit must leave the repo in a state where `cargo test` passes.**
@@ -564,5 +608,9 @@ What was intentionally left out and why.
 ## Review
 - Any `#[ignore]`d properties: which ones, why, re-enablement plan
 - Design deviations from the plan
+- **Drift caught** (file:line — rule — fixed-here / deferred). See
+  "The gardener rule" above. Even a clean sprint usually finds a few
+  stale comments or test names; an empty list usually means the
+  agent didn't look.
 - Recommendations
 ```
