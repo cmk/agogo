@@ -169,10 +169,13 @@ impl LinkSession {
     /// snap intent).
     ///
     /// Stateless w.r.t. the channel — callers fold the returned delta
-    /// into their own `Channel.offset` if they want arming behaviour:
+    /// into their own `Channel.offset` if they want arming behaviour.
+    /// `ChannelSpec::snap_intent()` returns `Option<Micro>` (microbeats
+    /// in `core`'s vocabulary) which the caller wraps into the
+    /// host-link-shaped `Option<Quantum>` via `.map(Quantum)`:
     ///
     /// ```ignore
-    /// let delta = session.snap_offset_for(spec.snap_intent());
+    /// let delta = session.snap_offset_for(spec.snap_intent().map(Quantum));
     /// ch.offset = Micro(ch.offset.0.saturating_add(delta.0));
     /// ```
     ///
@@ -208,8 +211,12 @@ impl LinkSession {
 }
 
 /// Apply per-channel snap deltas in bulk: for each `(spec, channel)`
-/// pair, fold the result of `session.snap_offset_for(spec.snap_intent())`
-/// into `channel.common_mut().offset`.
+/// pair, fold the result of
+/// `session.snap_offset_for(spec.snap_intent().map(Quantum))` into
+/// `channel.common_mut().offset`. The `.map(Quantum)` step wraps
+/// `core`'s `Option<Micro>` into host-link's `Option<Quantum>` —
+/// `core` doesn't know about `Quantum` (host-link-shaped type) so
+/// the wrap happens here, at the host-link boundary.
 ///
 /// Replaces the manual loop the orchestrator would otherwise duplicate
 /// (Plan 20 shipped `snap_offset_for` as a per-call helper but left
