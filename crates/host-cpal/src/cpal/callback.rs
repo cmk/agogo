@@ -12,9 +12,9 @@
 //! integer arithmetic and one ring-buffer push per emitted event.
 
 use crate::cpal::control::RtProducer;
-use agogo_core::time::sample::SampleTime;
 use agogo_core::host::AudioIo;
 use agogo_core::machine::Machine;
+use agogo_core::time::sample::SampleTime;
 
 /// State the audio thread owns by-value across the stream's
 /// lifetime. Built on the control thread, moved into the cpal
@@ -59,14 +59,14 @@ mod tests {
     use super::*;
     use crate::cpal::control::spsc;
     use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
-    use agogo_core::time::decimal::Micro;
-    use agogo_core::time::sample::S048;
-    use agogo_core::time::tempo::Tempo;
     use agogo_core::machine::TransportPolicy;
     use agogo_core::sync::PhaseSource;
+    use agogo_core::time::decimal::Micro;
     use agogo_core::time::grid::Grid;
+    use agogo_core::time::sample::S048;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;
+    use agogo_core::time::tempo::Tempo;
     use agogo_core::time::tick::PPQN;
     use std::collections::VecDeque;
 
@@ -74,10 +74,7 @@ mod tests {
         bpm: Tempo,
         divider: Grid,
         frames: usize,
-    ) -> (
-        CallbackState<S048>,
-        crate::cpal::control::ControlConsumer,
-    ) {
+    ) -> (CallbackState<S048>, crate::cpal::control::ControlConsumer) {
         let (producer, consumer) = spsc(1024);
         let channel = Channel::Midi {
             common: ChannelCommon {
@@ -118,21 +115,11 @@ mod tests {
     /// stays semantics-equivalent.
     #[test]
     fn callback_emits_expected_clock_schedule() {
-        let (mut state, mut cons) = build_state(
-            Tempo::from_bpm_integer(120),
-            Grid::T4,
-            24_000,
-        );
+        let (mut state, mut cons) = build_state(Tempo::from_bpm_integer(120), Grid::T4, 24_000);
         let input = vec![0.0_f32; 24_000];
         let mut output: [f32; 0] = []; // PCM ABI
         for b in 0..4u64 {
-            let mut io = AudioIo::new(
-                &input,
-                &mut output,
-                b * 24_000,
-                48_000,
-                24_000,
-            );
+            let mut io = AudioIo::new(&input, &mut output, b * 24_000, 48_000, 24_000);
             state.on_buffer(&mut io);
         }
         let mut samples = Vec::new();
@@ -159,11 +146,7 @@ mod tests {
     /// allocation-free contract end-to-end.
     #[test]
     fn callback_does_not_realloc_events() {
-        let (mut state, _cons) = build_state(
-            Tempo::from_bpm_integer(120),
-            Grid::T4,
-            24_000,
-        );
+        let (mut state, _cons) = build_state(Tempo::from_bpm_integer(120), Grid::T4, 24_000);
         let cap_before = state.machine.max_events_per_buffer();
         let input = vec![0.0_f32; 24_000];
         let mut output: [f32; 0] = []; // PCM ABI
