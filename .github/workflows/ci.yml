@@ -91,3 +91,23 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run: cargo test
       - run: cargo clippy --all-targets -- -D warnings
+
+  # Plan 2026-04-28-09 T2: pin the no-link cli build so future PRs
+  # can't accidentally re-couple agogo-cli to agogo-host-link. The
+  # `link` feature is gated behind `Command::Transport` and
+  # `RunArgs.link_quantum` (in `cfg(feature = "run")`); this job
+  # exercises the resulting feature graph.
+  cli-no-link:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: install ALSA dev headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: cli builds without --features link
+        run: cargo build -p agogo-cli --no-default-features --features core,cpal,midi
+      - name: cli clippy without --features link
+        run: cargo clippy -p agogo-cli --no-default-features --features core,cpal,midi --all-targets -- -D warnings
