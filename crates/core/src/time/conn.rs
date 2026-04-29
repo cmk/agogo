@@ -4,24 +4,26 @@
 //!
 //! | Rust            | Haskell      | Shape                        |
 //! |-----------------|--------------|------------------------------|
-//! | [`ticktime`]    | `ticks`      | `Conn<Tick, Time>`           |
-//! | [`wholtick`]    | `ratTick`    | `Conn<Whole, Tick>`          |
+//! | [`TICKTIME`]    | `ticks`      | `Conn<Tick, Time>`           |
+//! | [`WHOLTICK`]    | `ratTick`    | `Conn<Whole, Tick>`          |
 //! | [`quantize_at`] | `quantizeAt` | `Conn<Tick, Time>` per Grid  |
-//! | [`timetime`]    | `time`       | `Conn<(Time, Time), Time>`   |
-//! | [`gridgrid`]    | `tbase`      | `Conn<(Grid, Grid), Grid>`   |
+//! | [`TIMETIME`]    | `time`       | `Conn<(Time, Time), Time>`   |
+//! | [`GRIDGRID`]    | `tbase`      | `Conn<(Grid, Grid), Grid>`   |
 //!
 //! Naming: per CLAUDE.md, Conn accessors are 8-char identifiers
 //! built from two 4-char side names. Single-type-side Conns
-//! (`ticktime`, `wholtick`) follow the rule directly. Pair-side Conns
-//! (`timetime`, `gridgrid`) duplicate the side name. `quantize_at` is
+//! (`TICKTIME`, `WHOLTICK`) follow the rule directly. Pair-side Conns
+//! (`TIMETIME`, `GRIDGRID`) duplicate the side name. `quantize_at` is
 //! a Conn *constructor* (parametric family), not a Conn constant —
 //! exempt from the 8-char rule, since each instance is named by the
 //! parameter `g: Grid`.
 //!
 //! All use bare `fn` pointers from [`connections::conn::Conn`] — no
-//! closure capture, tempo-independent. `Conn::new` isn't `const fn`
-//! upstream, so each accessor returns a freshly-built `Conn` (still
-//! cheap: three `fn` pointers).
+//! closure capture, tempo-independent. `Conn::new` is `const fn`
+//! upstream, so the four single-type-side Conns are exposed as
+//! `pub const` constants matching the convention used by upstream's
+//! `F032F016` / `F064FD12` / similar. `quantize_at` stays a function
+//! because its inner / ceil / floor pointers vary per `Grid` value.
 //!
 //! **Orientation of `timetime` and `gridgrid`.** These are lattice
 //! connections: the pair side carries the divisibility product order,
@@ -70,9 +72,8 @@ fn ticktime_floor(n: Tick) -> Time {
 /// `Grid::T512P` grid (= 1 tick at 960 PPQN, so every tick is
 /// already aligned) then canonicalises; floor rounds down; embed is
 /// exact.
-pub fn ticktime() -> Conn<Tick, Time> {
-    Conn::new(ticktime_ceil, ticktime_inner, ticktime_floor)
-}
+pub const TICKTIME: Conn<Tick, Time> =
+    Conn::new(ticktime_ceil, ticktime_inner, ticktime_floor);
 
 // ── wholtick: Conn<Whole, Tick> ──────────────────────────────────
 
@@ -110,9 +111,8 @@ fn wholtick_floor(r: Whole) -> Tick {
 /// Galois connection between rational whole-note durations and ticks.
 /// Floor rounds down, ceiling rounds up, embed is exact:
 /// `wholtick_inner(Tick(n)) = n / 3840` at 960 PPQN.
-pub fn wholtick() -> Conn<Whole, Tick> {
-    Conn::new(wholtick_ceil, wholtick_inner, wholtick_floor)
-}
+pub const WHOLTICK: Conn<Whole, Tick> =
+    Conn::new(wholtick_ceil, wholtick_inner, wholtick_floor);
 
 // ── quantize_at: Conn<Tick, Time> per Grid ───────────────────────
 
@@ -323,9 +323,8 @@ fn timetime_floor(ab: (Time, Time)) -> Time {
 /// For musically-bounded `Time` values this is unreachable; tests
 /// use `arb_small_time` (tick counts ≤ 192_000) to stay safely
 /// bounded.
-pub fn timetime() -> Conn<(Time, Time), Time> {
-    Conn::new(timetime_ceil, timetime_inner, timetime_floor)
-}
+pub const TIMETIME: Conn<(Time, Time), Time> =
+    Conn::new(timetime_ceil, timetime_inner, timetime_floor);
 
 // ── gridgrid: Conn<(Grid, Grid), Grid> ───────────────────────────
 
@@ -345,9 +344,8 @@ fn gridgrid_floor(ab: (Grid, Grid)) -> Grid {
 
 /// Divisibility-lattice connection on `Grid`. `ceil = meet (GCD of
 /// tick counts)`, `floor = join (LCM)`, `inner = diagonal`.
-pub fn gridgrid() -> Conn<(Grid, Grid), Grid> {
-    Conn::new(gridgrid_ceil, gridgrid_inner, gridgrid_floor)
-}
+pub const GRIDGRID: Conn<(Grid, Grid), Grid> =
+    Conn::new(gridgrid_ceil, gridgrid_inner, gridgrid_floor);
 
 // `SampleTickConn` (the tempo-coupled Sample↔Tick bridge) moved to
 // `crate::sync::sample_tick` (Plan 2026-04-28-03 T3) to satisfy the
@@ -363,7 +361,7 @@ mod tests {
 
     #[test]
     fn ticktime_inner_is_exact() {
-        let c = ticktime();
+        let c = TICKTIME;
         let t = Time {
             beats: 3,
             base: Grid::T16,
@@ -374,7 +372,7 @@ mod tests {
 
     #[test]
     fn ticktime_ceil_aligned() {
-        let c = ticktime();
+        let c = TICKTIME;
         // 240 ticks → exactly 1 T16.
         assert_eq!(
             c.ceil(Tick(240)),
@@ -387,7 +385,7 @@ mod tests {
 
     #[test]
     fn ticktime_floor_unaligned() {
-        let c = ticktime();
+        let c = TICKTIME;
         // 50 ticks: T512P = 1, so exact (no rounding); coarsest divisor
         // of 50 in the lattice.  50 = 2 · 5² → factors out 5 (q-flag);
         // 50 / Grid::T256Q.tick_count() should hit. T256Q = 6, doesn't
@@ -398,7 +396,7 @@ mod tests {
 
     #[test]
     fn ticktime_ceil_unaligned() {
-        let c = ticktime();
+        let c = TICKTIME;
         // At 960 PPQN every Tick is on Grid::T512P (=1). So ceil and
         // floor both yield the canonical form for `n` itself.
         let t = c.ceil(Tick(50));
@@ -406,23 +404,23 @@ mod tests {
     }
 
     #[test]
-    fn rat_tick_quarter_is_960() {
-        let c = wholtick();
+    fn wholtick_quarter_is_960() {
+        let c = WHOLTICK;
         assert_eq!(c.floor(Rational64::new(1, 4)), Tick(960));
         assert_eq!(c.ceil(Rational64::new(1, 4)), Tick(960));
     }
 
     #[test]
-    fn rat_tick_three_sixteenths_is_720() {
-        let c = wholtick();
+    fn wholtick_three_sixteenths_is_720() {
+        let c = WHOLTICK;
         // 3/16 × 3840 = 720.
         assert_eq!(c.floor(Rational64::new(3, 16)), Tick(720));
     }
 
     #[test]
-    fn rat_tick_one_seventh_ceils_correctly() {
+    fn wholtick_one_seventh_ceils_correctly() {
         // 3840 / 7 = 548.57…, ceil = 549, floor = 548.
-        let c = wholtick();
+        let c = WHOLTICK;
         assert_eq!(c.ceil(Rational64::new(1, 7)), Tick(549));
         assert_eq!(c.floor(Rational64::new(1, 7)), Tick(548));
     }
@@ -469,7 +467,7 @@ mod tests {
 
     #[test]
     fn timetime_ceil_gcd_of_t4_t8() {
-        let c = timetime();
+        let c = TIMETIME;
         let a = Time {
             beats: 1,
             base: Grid::T4,
@@ -490,7 +488,7 @@ mod tests {
 
     #[test]
     fn timetime_floor_lcm_of_t16_and_t16t() {
-        let c = timetime();
+        let c = TIMETIME;
         let a = Time {
             beats: 1,
             base: Grid::T16,
@@ -511,14 +509,14 @@ mod tests {
 
     #[test]
     fn gridgrid_ceil_meet_of_t4_t8() {
-        let c = gridgrid();
+        let c = GRIDGRID;
         // gcd of tick counts: gcd(960, 480) = 480 = T8.
         assert_eq!(c.ceil((Grid::T4, Grid::T8)), Grid::T8);
     }
 
     #[test]
     fn gridgrid_floor_join_of_t4_t8t() {
-        let c = gridgrid();
+        let c = GRIDGRID;
         // T4 = 960, T8T = 320; lcm(960, 320) = 960 = T4.
         assert_eq!(c.floor((Grid::T4, Grid::T8T)), Grid::T4);
     }
@@ -526,11 +524,11 @@ mod tests {
     // ── Generic connections-tests laws for magnitude connections ──
 
     proptest! {
-        // ── ticks ────────────────────────────────────────────────
+        // ── ticktime ─────────────────────────────────────────────
 
         #[test]
         fn ticktime_adjoint(a in arb_tick(), b in arb_time()) {
-            let c = ticktime();
+            let c = TICKTIME;
             let lhs = c.ceil(a) <= b;
             let rhs = a <= c.inner(b);
             prop_assert_eq!(lhs, rhs);
@@ -538,13 +536,13 @@ mod tests {
 
         #[test]
         fn ticktime_closed(a in arb_tick()) {
-            let c = ticktime();
+            let c = TICKTIME;
             prop_assert!(a <= c.inner(c.ceil(a)));
         }
 
         #[test]
         fn ticktime_kernel(b in arb_time()) {
-            let c = ticktime();
+            let c = TICKTIME;
             prop_assert!(c.ceil(c.inner(b)) <= b);
         }
 
@@ -553,7 +551,7 @@ mod tests {
             a1 in arb_tick(), a2 in arb_tick(),
             b1 in arb_time(), b2 in arb_time(),
         ) {
-            let c = ticktime();
+            let c = TICKTIME;
             if a1 <= a2 {
                 prop_assert!(c.ceil(a1) <= c.ceil(a2));
             }
@@ -564,7 +562,7 @@ mod tests {
 
         #[test]
         fn ticktime_idempotent(a in arb_tick()) {
-            let c = ticktime();
+            let c = TICKTIME;
             let once = c.inner(c.ceil(a));
             let twice = c.inner(c.ceil(once));
             prop_assert_eq!(once, twice);
@@ -574,7 +572,7 @@ mod tests {
         /// is the identity on every tick.
         #[test]
         fn ticktime_round_trip_on_aligned(q in 0u64..=1_000_000) {
-            let c = ticktime();
+            let c = TICKTIME;
             let n = Tick(q * u64::from(Grid::T512P.tick_count()));
             prop_assert_eq!(c.inner(c.floor(n)), n);
         }
@@ -582,31 +580,31 @@ mod tests {
         // ── wholtick ─────────────────────────────────────────────
 
         #[test]
-        fn rat_tick_adjoint(a in arb_rational_nonneg(), b in arb_tick()) {
-            let c = wholtick();
+        fn wholtick_adjoint(a in arb_rational_nonneg(), b in arb_tick()) {
+            let c = WHOLTICK;
             let lhs = c.ceil(a) <= b;
             let rhs = a <= c.inner(b);
             prop_assert_eq!(lhs, rhs);
         }
 
         #[test]
-        fn rat_tick_closed(a in arb_rational_nonneg()) {
-            let c = wholtick();
+        fn wholtick_closed(a in arb_rational_nonneg()) {
+            let c = WHOLTICK;
             prop_assert!(a <= c.inner(c.ceil(a)));
         }
 
         #[test]
-        fn rat_tick_kernel(b in arb_tick()) {
-            let c = wholtick();
+        fn wholtick_kernel(b in arb_tick()) {
+            let c = WHOLTICK;
             prop_assert!(c.ceil(c.inner(b)) <= b);
         }
 
         #[test]
-        fn rat_tick_monotonic(
+        fn wholtick_monotonic(
             a1 in arb_rational_nonneg(), a2 in arb_rational_nonneg(),
             b1 in arb_tick(), b2 in arb_tick(),
         ) {
-            let c = wholtick();
+            let c = WHOLTICK;
             if a1 <= a2 {
                 prop_assert!(c.ceil(a1) <= c.ceil(a2));
             }
@@ -616,18 +614,18 @@ mod tests {
         }
 
         #[test]
-        fn rat_tick_idempotent(a in arb_rational_nonneg()) {
-            let c = wholtick();
+        fn wholtick_idempotent(a in arb_rational_nonneg()) {
+            let c = WHOLTICK;
             let once = c.inner(c.ceil(a));
             let twice = c.inner(c.ceil(once));
             prop_assert_eq!(once, twice);
         }
 
         #[test]
-        fn rat_tick_floor_monotone(
+        fn wholtick_floor_monotone(
             a in arb_rational_nonneg(), b in arb_rational_nonneg(),
         ) {
-            let c = wholtick();
+            let c = WHOLTICK;
             if a <= b {
                 prop_assert!(c.floor(a) <= c.floor(b));
             }
@@ -636,14 +634,15 @@ mod tests {
         // ── quantize_at ──────────────────────────────────────────
         //
         // `c.ceil(n)` returns `Time { beats: n.0.div_ceil(tc), base: g }`
-        // where `tc = g.tick_count()`. For `n` near `u32::MAX`, the
-        // *Time*'s `beats × tc` can exceed `u32::MAX` (`time_to_tick`
-        // panics on `checked_mul` overflow). The `arb_tick()`
-        // distribution includes `u32::MAX` per CLAUDE.md's full-domain
-        // rule, so any property that subsequently calls
-        // `time_to_tick(c.ceil(n))` (directly or via `.ple`) must
-        // `prop_assume!` away the overflow corner. Spot checks at the
-        // saturation boundary live in `time::swing::tests`.
+        // where `tc = g.tick_count()`. For `n` near the `arb_tick`
+        // horizon and `g` finer than `T1`, `beats` can exceed
+        // `u32::MAX` and the macro's `try_from` panics. `arb_tick`
+        // is now capped at `u32::MAX × Grid::T1.tick_count()` so the
+        // upper anchor only fits at `g == T1`; the per-property
+        // `prop_assume!(ceil_fits(n, g))` filters everything else.
+        // Composing `time_to_tick(c.ceil(n))` is then panic-free,
+        // and `<=` (which means magnitude on `Tick` and `Time` and
+        // divisibility on `Grid`) replaces the old `.ple()` calls.
 
         #[test]
         fn quantize_at_brackets_input(
@@ -716,13 +715,13 @@ mod tests {
         }
     }
 
-    // ── Lattice-connection laws for `time` and `grid` ────────────
+    // ── Lattice-connection laws for `TIMETIME` and `GRIDGRID` ────
     //
     // The adjoint structure `meet ⊣ diag ⊣ join` holds under the
     // "refine-to" order: `a ≤ b ⟺ tc(b) divides tc(a)` (i.e. "b is at
-    // least as fine as a"). Standard divisibility order (our `Ple` impl)
-    // orients the other way around and would give a non-adjoint
-    // structure here, so we use ad-hoc `refine_le` helpers.
+    // least as fine as a"). The standard divisibility `PartialOrd`
+    // for `Grid` orients the other way around and would give a non-
+    // adjoint structure here, so we use ad-hoc `refine_le` helpers.
 
     fn gridgrid_refine_le(a: Grid, b: Grid) -> bool {
         a.tick_count() % b.tick_count() == 0
@@ -745,23 +744,23 @@ mod tests {
     }
 
     proptest! {
-        // ── grid connection ──────────────────────────────────────
+        // ── gridgrid connection ──────────────────────────────────
 
         #[test]
         fn gridgrid_ceil_is_meet(a in arb_grid(), b in arb_grid()) {
-            let c = gridgrid();
+            let c = GRIDGRID;
             prop_assert_eq!(c.ceil((a, b)), a.meet(&b));
         }
 
         #[test]
         fn gridgrid_floor_is_join(a in arb_grid(), b in arb_grid()) {
-            let c = gridgrid();
+            let c = GRIDGRID;
             prop_assert_eq!(c.floor((a, b)), a.join(&b));
         }
 
         #[test]
         fn gridgrid_inner_is_diagonal(t in arb_grid()) {
-            let c = gridgrid();
+            let c = GRIDGRID;
             prop_assert_eq!(c.inner(t), (t, t));
         }
 
@@ -769,7 +768,7 @@ mod tests {
         fn gridgrid_adjoint(
             a in arb_grid(), b in arb_grid(), z in arb_grid(),
         ) {
-            let c = gridgrid();
+            let c = GRIDGRID;
             let lhs = gridgrid_refine_le(c.ceil((a, b)), z);
             let rhs = gridgrid_refine_le(a, z) && gridgrid_refine_le(b, z);
             prop_assert_eq!(lhs, rhs);
@@ -777,7 +776,7 @@ mod tests {
 
         #[test]
         fn gridgrid_closed(a in arb_grid(), b in arb_grid()) {
-            let c = gridgrid();
+            let c = GRIDGRID;
             let (x, y) = c.inner(c.ceil((a, b)));
             prop_assert!(gridgrid_refine_le(a, x));
             prop_assert!(gridgrid_refine_le(b, y));
@@ -785,7 +784,7 @@ mod tests {
 
         #[test]
         fn gridgrid_kernel(z in arb_grid()) {
-            let c = gridgrid();
+            let c = GRIDGRID;
             prop_assert!(gridgrid_refine_le(c.ceil(c.inner(z)), z));
         }
 
@@ -795,7 +794,7 @@ mod tests {
             b1 in arb_grid(), b2 in arb_grid(),
             z1 in arb_grid(), z2 in arb_grid(),
         ) {
-            let c = gridgrid();
+            let c = GRIDGRID;
             if gridgrid_refine_le(a1, a2) && gridgrid_refine_le(b1, b2) {
                 prop_assert!(gridgrid_refine_le(c.ceil((a1, b1)), c.ceil((a2, b2))));
             }
@@ -809,19 +808,19 @@ mod tests {
 
         #[test]
         fn gridgrid_idempotent(a in arb_grid(), b in arb_grid()) {
-            let c = gridgrid();
+            let c = GRIDGRID;
             let once = c.inner(c.ceil((a, b)));
             let twice = c.inner(c.ceil(once));
             prop_assert_eq!(once, twice);
         }
 
-        // ── time connection ──────────────────────────────────────
+        // ── timetime connection ──────────────────────────────────
 
         #[test]
         fn timetime_ceil_is_gcd_on_ticks(
             a in arb_small_time(), b in arb_small_time(),
         ) {
-            let c = timetime();
+            let c = TIMETIME;
             let ta = time_to_tick(a).0;
             let tb = time_to_tick(b).0;
             prop_assert_eq!(time_to_tick(c.ceil((a, b))).0, gcd_u64(ta, tb));
@@ -831,7 +830,7 @@ mod tests {
         fn timetime_floor_is_lcm_on_ticks(
             a in arb_small_time(), b in arb_small_time(),
         ) {
-            let c = timetime();
+            let c = TIMETIME;
             let ta = time_to_tick(a).0;
             let tb = time_to_tick(b).0;
             prop_assert_eq!(time_to_tick(c.floor((a, b))).0, lcm_u64(ta, tb));
@@ -839,7 +838,7 @@ mod tests {
 
         #[test]
         fn time_inner_is_diagonal(t in arb_small_time()) {
-            let c = timetime();
+            let c = TIMETIME;
             prop_assert_eq!(c.inner(t), (t, t));
         }
 
@@ -847,7 +846,7 @@ mod tests {
         fn time_adjoint(
             a in arb_small_time(), b in arb_small_time(), z in arb_small_time(),
         ) {
-            let c = timetime();
+            let c = TIMETIME;
             let lhs = timetime_refine_le(c.ceil((a, b)), z);
             let rhs = timetime_refine_le(a, z) && timetime_refine_le(b, z);
             prop_assert_eq!(lhs, rhs);
@@ -855,7 +854,7 @@ mod tests {
 
         #[test]
         fn time_closed(a in arb_small_time(), b in arb_small_time()) {
-            let c = timetime();
+            let c = TIMETIME;
             let (x, y) = c.inner(c.ceil((a, b)));
             prop_assert!(timetime_refine_le(a, x));
             prop_assert!(timetime_refine_le(b, y));
@@ -863,13 +862,13 @@ mod tests {
 
         #[test]
         fn time_kernel(z in arb_small_time()) {
-            let c = timetime();
+            let c = TIMETIME;
             prop_assert!(timetime_refine_le(c.ceil(c.inner(z)), z));
         }
 
         #[test]
         fn time_idempotent(a in arb_small_time(), b in arb_small_time()) {
-            let c = timetime();
+            let c = TIMETIME;
             let once = c.inner(c.ceil((a, b)));
             let twice = c.inner(c.ceil(once));
             prop_assert_eq!(once, twice);
@@ -881,7 +880,7 @@ mod tests {
             b1 in arb_small_time(), b2 in arb_small_time(),
             z1 in arb_small_time(), z2 in arb_small_time(),
         ) {
-            let c = timetime();
+            let c = TIMETIME;
             if timetime_refine_le(a1, a2) && timetime_refine_le(b1, b2) {
                 prop_assert!(
                     timetime_refine_le(c.ceil((a1, b1)), c.ceil((a2, b2)))

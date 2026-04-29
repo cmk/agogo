@@ -291,19 +291,19 @@ mod tests {
 
     proptest! {
         #[test]
-        fn ple_reflexive(a in arb_tbase()) {
+        fn le_reflexive(a in arb_tbase()) {
             prop_assert!(a <= a);
         }
 
         #[test]
-        fn ple_antisymmetric(a in arb_tbase(), b in arb_tbase()) {
+        fn le_antisymmetric(a in arb_tbase(), b in arb_tbase()) {
             if a <= b && b <= a {
                 prop_assert_eq!(a, b);
             }
         }
 
         #[test]
-        fn ple_transitive(a in arb_tbase(), b in arb_tbase(), c in arb_tbase()) {
+        fn le_transitive(a in arb_tbase(), b in arb_tbase(), c in arb_tbase()) {
             if a <= b && b <= c {
                 prop_assert!(a <= c);
             }
@@ -311,7 +311,7 @@ mod tests {
 
         /// Total order on the binary chain: every pair is comparable.
         #[test]
-        fn ple_total(a in arb_tbase(), b in arb_tbase()) {
+        fn le_total(a in arb_tbase(), b in arb_tbase()) {
             prop_assert!(a <= b || b <= a);
         }
 

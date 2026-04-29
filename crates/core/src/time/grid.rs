@@ -539,19 +539,19 @@ mod tests {
 
     proptest! {
         #[test]
-        fn ple_reflexive(a in arb_grid()) {
+        fn le_reflexive(a in arb_grid()) {
             prop_assert!(a <= a);
         }
 
         #[test]
-        fn ple_antisymmetric(a in arb_grid(), b in arb_grid()) {
+        fn le_antisymmetric(a in arb_grid(), b in arb_grid()) {
             if a <= b && b <= a {
                 prop_assert_eq!(a, b);
             }
         }
 
         #[test]
-        fn ple_transitive(a in arb_grid(), b in arb_grid(), c in arb_grid()) {
+        fn le_transitive(a in arb_grid(), b in arb_grid(), c in arb_grid()) {
             if a <= b && b <= c {
                 prop_assert!(a <= c);
             }
