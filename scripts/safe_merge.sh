@@ -5,9 +5,10 @@
 # `doc/workflow.md`'s state machine has no edge from `round_unpushed`
 # to `merged`. The only path is `round_unpushed → push → gh_review →
 # merged`. But `gh pr merge` is a GitHub-side operation; it doesn't
-# know about local state. Merging while a fix commit sits unpushed on
-# the local branch silently drops it on the floor — the merge takes
-# the remote head, and the local commit stays orphaned in the reflog.
+# know about local state. Merging while a round commit sits unpushed
+# on the local branch silently drops it on the floor — the merge
+# takes the remote head, and the local commit stays orphaned in the
+# reflog.
 #
 # This script is the local-side enforcement: it resolves the PR's head
 # branch (via `gh pr view`, *not* the currently-checked-out branch —

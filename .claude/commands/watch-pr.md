@@ -127,9 +127,20 @@ for each thread: scripts/reply_review.py <N> <in_reply_to_id> "<body>"
 # Mirror replies back into the review doc
 scripts/pull_reviews.py <N>
 
-# Single atomic commit: code edits (if any) + mirrored doc
+# Single atomic commit: code edits (if any) + mirrored doc.
+# Conditional on having staged changes — an all-`ask` round with no
+# doc delta produces nothing to commit.
 git add -A
-git commit -m "fix: Address review feedback on PR #<N>"   # or doc: if no code edits
+if git diff --cached --quiet; then
+    # Nothing staged — branch stays at gh_review. Step 5's
+    # "no commit" report branch fires.
+    :
+else
+    # Pick prefix based on staged content:
+    #   fix:  any code edit (most common when there are auto-fixes)
+    #   doc:  only doc/reviews/<file>.md changed (replies-only round)
+    git commit -m "fix: Address review feedback on PR #<N>"
+fi
 ```
 
 The pre-commit hook runs `cargo fmt --check`, `scripts/check-pii.sh`,
