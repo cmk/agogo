@@ -133,19 +133,41 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
         .ok_or_else(|| "at least one --ch spec is required".to_string())
         .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()))?;
 
-    let channels: Vec<Channel> = named
+    // Keep specs alongside channels so the link branch in
+    // `run_with_rate` can call `apply_snap_offsets` after constructing
+    // the `LinkSession`. Plan 2026-04-28-09 T1.
+    let (specs, channel_results): (Vec<_>, Vec<_>) = named
         .into_iter()
-        .map(|(id, spec)| spec.into_channel().map_err(|e| format!("--ch {id}: {e}")))
-        .collect::<Result<_, _>>()?;
+        .map(|(id, spec)| {
+            let channel = spec
+                .clone()
+                .into_channel()
+                .map_err(|e| format!("--ch {id}: {e}"));
+            (spec, channel)
+        })
+        .unzip();
+    let channels: Vec<Channel> = channel_results.into_iter().collect::<Result<_, _>>()?;
 
     // Static rate dispatch.
     match args.sr {
-        rate if rate == S044::HZ => run_with_rate::<S044>(args, bpm, channels, midi_port_request),
-        rate if rate == S048::HZ => run_with_rate::<S048>(args, bpm, channels, midi_port_request),
-        rate if rate == S088::HZ => run_with_rate::<S088>(args, bpm, channels, midi_port_request),
-        rate if rate == S096::HZ => run_with_rate::<S096>(args, bpm, channels, midi_port_request),
-        rate if rate == S176::HZ => run_with_rate::<S176>(args, bpm, channels, midi_port_request),
-        rate if rate == S192::HZ => run_with_rate::<S192>(args, bpm, channels, midi_port_request),
+        rate if rate == S044::HZ => {
+            run_with_rate::<S044>(args, bpm, specs, channels, midi_port_request)
+        }
+        rate if rate == S048::HZ => {
+            run_with_rate::<S048>(args, bpm, specs, channels, midi_port_request)
+        }
+        rate if rate == S088::HZ => {
+            run_with_rate::<S088>(args, bpm, specs, channels, midi_port_request)
+        }
+        rate if rate == S096::HZ => {
+            run_with_rate::<S096>(args, bpm, specs, channels, midi_port_request)
+        }
+        rate if rate == S176::HZ => {
+            run_with_rate::<S176>(args, bpm, specs, channels, midi_port_request)
+        }
+        rate if rate == S192::HZ => {
+            run_with_rate::<S192>(args, bpm, specs, channels, midi_port_request)
+        }
         other => Err(format!(
             "--sr {other} not supported (allowed: 44100, 48000, 88200, 96000, \
              176400, 192000)"
@@ -161,7 +183,8 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 fn run_with_rate<R: SampleTime + Send + 'static>(
     args: &RunArgs,
     bpm: Tempo,
-    channels: Vec<Channel>,
+    specs: Vec<agogo_core::machine::ChannelSpec>,
+    mut channels: Vec<Channel>,
     midi_port_request: String,
 ) -> Result<(), String> {
     let midi_port_name = if midi_port_request == "default" {
@@ -224,7 +247,15 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
                     default_quantum,
                     push_tempo_on_change: true,
                 };
-                let session = LinkSession::new(bpm, anchor, config);
+                let mut session = LinkSession::new(bpm, anchor, config);
+                // Plan 2026-04-28-09 T1: fold per-channel
+                // `snap-quantum-us=N` intents into each channel's
+                // offset before the session is consumed by
+                // `LinkPhaseSource::new`. The walk lives in
+                // host-link itself (helper imported via the existing
+                // `LinkSession` use line) — cli code doesn't grow a
+                // new `LinkSession::*` call site for this.
+                agogo_host_link::apply_snap_offsets(&specs, &mut session, &mut channels);
                 let (lps, handle) = LinkPhaseSource::new(session);
                 (PhaseSource::Custom(Box::new(lps)), Some(handle))
             }

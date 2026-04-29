@@ -4,6 +4,8 @@
 //! Stubbed in T0; filled out in T4 once tempo-push (T1) and the FSM
 //! (T2) + quantum snap (T3) are in place.
 
+use agogo_core::channel::Channel;
+use agogo_core::machine::ChannelSpec;
 use agogo_core::sync::phase::Phase;
 use agogo_core::time::decimal::Micro;
 use agogo_core::time::tempo::Tempo;
@@ -205,6 +207,48 @@ impl LinkSession {
     }
 }
 
+/// Apply per-channel snap deltas in bulk: for each `(spec, channel)`
+/// pair, fold the result of `session.snap_offset_for(spec.snap_intent())`
+/// into `channel.common_mut().offset`.
+///
+/// Replaces the manual loop the orchestrator would otherwise duplicate
+/// (Plan 20 shipped `snap_offset_for` as a per-call helper but left
+/// the walk for callers; production `cli/src/run.rs` skipped it
+/// entirely — Plan 2026-04-28-09 T1 consolidates the walk on the
+/// host-link side so cli code doesn't need to grow another
+/// `LinkSession` call site).
+///
+/// `specs` and `channels` must have the same length and be in the
+/// same order. Mismatch is a programming error: in `debug` builds it
+/// panics via `debug_assert_eq!`; in `release` it processes
+/// `min(specs.len(), channels.len())` entries (via `.zip`) without
+/// panicking.
+///
+/// Channels whose spec has `snap_intent() == None` are unchanged. The
+/// session is mutated as a side effect of each `snap_offset_for` call
+/// (Link's audio-session-state capture).
+pub fn apply_snap_offsets(
+    specs: &[ChannelSpec],
+    session: &mut LinkSession,
+    channels: &mut [Channel],
+) {
+    debug_assert_eq!(
+        specs.len(),
+        channels.len(),
+        "apply_snap_offsets: specs ({}) / channels ({}) arity mismatch",
+        specs.len(),
+        channels.len(),
+    );
+    for (spec, channel) in specs.iter().zip(channels.iter_mut()) {
+        let snap = spec.snap_intent().map(Quantum);
+        let delta = session.snap_offset_for(snap);
+        if delta != Micro::ZERO {
+            let common = channel.common_mut();
+            common.offset = Micro(common.offset.0.saturating_add(delta.0));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +307,131 @@ mod tests {
             drift < 1_000,
             "two consecutive snap_offset_for calls diverged by {drift} µs (>1 ms)",
         );
+    }
+
+    // ── Plan 2026-04-28-09 T1 — `apply_snap_offsets` helper. ──
+
+    /// Build `(specs, channels)` from a slice of `--ch` mini-language
+    /// strings. The two vectors are parallel — `channels[i]` was built
+    /// from `specs[i]`. Mirrors the orchestrator's pre-helper shape.
+    fn build_pair(spec_strs: &[&str]) -> (Vec<ChannelSpec>, Vec<Channel>) {
+        let owned: Vec<String> = spec_strs.iter().map(|s| (*s).to_string()).collect();
+        let named = agogo_core::machine::parse_channels(&owned).expect("parse spec");
+        let specs: Vec<ChannelSpec> = named.iter().map(|(_, s)| s.clone()).collect();
+        let channels: Vec<Channel> = specs
+            .iter()
+            .cloned()
+            .map(|s| s.into_channel().expect("into_channel"))
+            .collect();
+        (specs, channels)
+    }
+
+    /// Empty inputs are a no-op — the helper handles a zero-channel
+    /// list without panic and leaves the session quiescent. Catches a
+    /// regression where the implementation might index unconditionally.
+    #[test]
+    fn apply_snap_offsets_no_panic_on_empty() {
+        let mut s = LinkSession::new(
+            Tempo::from_bpm_integer(120),
+            anchor_48k(),
+            LinkWriteConfig::default(),
+        );
+        let specs: Vec<ChannelSpec> = Vec::new();
+        let mut channels: Vec<Channel> = Vec::new();
+        apply_snap_offsets(&specs, &mut s, &mut channels);
+        // No assertion beyond "didn't panic" — the empty case is the
+        // edge we're pinning. `channels` stays empty by definition.
+    }
+
+    /// The helper consolidates the manual loop. Pin the contract by
+    /// running the helper on one (specs, channels) pair and a manual
+    /// `snap_offset_for` loop on a parallel pair, then comparing
+    /// per-channel offsets within Link's drift tolerance (~1 ms per
+    /// `snap_offset_for_is_near_idempotent`; we use 4 ms here because
+    /// the helper does N consecutive calls so total drift accumulates).
+    #[test]
+    fn apply_snap_offsets_matches_per_channel() {
+        // Mix of snap-armed (clock + quantum=4_000_000 µbeats = 4 beats)
+        // and non-snap-armed channels.
+        let spec_strs = &[
+            "dev=midi,grid=t4,snap-quantum-us=4000000",
+            "dev=midi,grid=t8",
+            "dev=midi,grid=t16,snap-quantum-us=2000000",
+        ];
+
+        // Bulk path.
+        let (bulk_specs, mut bulk_channels) = build_pair(spec_strs);
+        let mut bulk_session = LinkSession::new(
+            Tempo::from_bpm_integer(120),
+            anchor_48k(),
+            LinkWriteConfig::default(),
+        );
+        apply_snap_offsets(&bulk_specs, &mut bulk_session, &mut bulk_channels);
+
+        // Manual reference path — same operation, hand-rolled.
+        let (manual_specs, mut manual_channels) = build_pair(spec_strs);
+        let mut manual_session = LinkSession::new(
+            Tempo::from_bpm_integer(120),
+            anchor_48k(),
+            LinkWriteConfig::default(),
+        );
+        for (spec, channel) in manual_specs.iter().zip(manual_channels.iter_mut()) {
+            let snap = spec.snap_intent().map(Quantum);
+            let delta = manual_session.snap_offset_for(snap);
+            if delta != Micro::ZERO {
+                let common = channel.common_mut();
+                common.offset = Micro(common.offset.0.saturating_add(delta.0));
+            }
+        }
+
+        for (i, (b, m)) in bulk_channels.iter().zip(manual_channels.iter()).enumerate() {
+            let bo = b.common().offset.0;
+            let mo = m.common().offset.0;
+            let drift = (bo - mo).abs();
+            assert!(
+                drift < 4_000,
+                "channel {i}: bulk vs manual offset diverged by {drift} µs (>4 ms): \
+                 bulk={bo} manual={mo}",
+            );
+        }
+    }
+
+    /// Two helper invocations against fresh-but-equivalent state
+    /// produce per-channel offsets that agree within drift tolerance.
+    /// The helper is a wrapper around N `snap_offset_for` calls, each
+    /// of which has the ~1 ms drift bound — this property pins that
+    /// the helper doesn't *amplify* that drift beyond the per-call
+    /// tolerance × channel count.
+    #[test]
+    fn apply_snap_offsets_idempotent_per_channel() {
+        let spec_strs = &[
+            "dev=midi,grid=t4,snap-quantum-us=4000000",
+            "dev=midi,grid=t8,snap-quantum-us=2000000",
+        ];
+
+        let mut session = LinkSession::new(
+            Tempo::from_bpm_integer(120),
+            anchor_48k(),
+            LinkWriteConfig::default(),
+        );
+
+        // First invocation against fresh channels.
+        let (specs1, mut channels1) = build_pair(spec_strs);
+        apply_snap_offsets(&specs1, &mut session, &mut channels1);
+        let offsets1: Vec<i64> = channels1.iter().map(|c| c.common().offset.0).collect();
+
+        // Second invocation against fresh channels (same starting state).
+        let (specs2, mut channels2) = build_pair(spec_strs);
+        apply_snap_offsets(&specs2, &mut session, &mut channels2);
+        let offsets2: Vec<i64> = channels2.iter().map(|c| c.common().offset.0).collect();
+
+        for (i, (o1, o2)) in offsets1.iter().zip(offsets2.iter()).enumerate() {
+            let drift = (o1 - o2).abs();
+            assert!(
+                drift < 4_000,
+                "channel {i}: invocation 1 vs 2 diverged by {drift} µs (>4 ms): \
+                 first={o1} second={o2}",
+            );
+        }
     }
 }
