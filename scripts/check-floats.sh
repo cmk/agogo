@@ -11,7 +11,9 @@
 #   crates/core/src/sync/source.rs                PCM audio intake (`&[f32]`) + tests
 #   crates/core/src/boundary.rs                   argv-boundary + PI-exempt helpers (split from
 #                                                 the deleted fxp.rs in Plan 2026-04-28-03 T5)
-#   crates/core/src/arb.rs                        test-fixture PCM generators
+#   crates/core/src/sync/pulse_train.rs           test-fixture PCM generator (synthetic Hann-bell
+#                                                 train; was crates/core/src/arb.rs's pulse_train
+#                                                 before Plan 2026-04-28-08 distributed arb.rs)
 #   crates/core/src/host.rs                       PCM ABI shape (AudioIo `&[f32]` slices)
 #   crates/core/src/machine.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction in tests)
 #   crates/core/src/machine/spec/parser.rs        argv-boundary (--ch delay=ms via F064FD06; split from machine/spec.rs in Plan 2026-04-28-06 T3)
@@ -58,7 +60,14 @@ ALLOWED=(
   # (`tempo_to_hz`, `bits_q48_16_to_seconds`, `tempo_to_f64_bpm`,
   # `pico_to_f64_seconds`) plus the `MAX_BPM_F64` argv-bound constant.
   "crates/core/src/boundary.rs"
-  "crates/core/src/arb.rs"
+  # Plan 2026-04-28-08 T2: `pulse_train` + `PULSE_WIDTH_PS` moved
+  # out of the deleted `crates/core/src/arb.rs` (which aggregated
+  # 9 unrelated proptest strategies plus this synthetic-signal
+  # generator). The f64 use here is fixture-PCM only — internal
+  # helpers go through lawful Conn-inverse helpers
+  # (`tempo_to_f64_bpm` / `pico_to_f64_seconds`); output is `&[f32]`
+  # PCM samples. Same exception class as the old `arb.rs` entry.
+  "crates/core/src/sync/pulse_train.rs"
   "crates/core/src/host.rs"
   "crates/core/src/machine.rs"
   "crates/core/src/machine/spec/parser.rs"

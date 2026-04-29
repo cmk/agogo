@@ -136,7 +136,7 @@ impl std::str::FromStr for TBase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arb::arb_tbase;
+    use crate::time::tbase::arb::arb_tbase;
     use proptest::prelude::*;
 
     // ── Spot checks on tick_count ──────────────────────────────────
@@ -322,3 +322,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod arb;

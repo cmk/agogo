@@ -144,8 +144,13 @@ mod tests {
         });
         let pll = Pll::<S048>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
         let mut src = PhaseSource::<S048>::External { detector, pll };
-        let (samples, _): (Vec<f32>, Vec<S048>) =
-            crate::arb::pulse_train::<S048>(Tempo::from_bpm_integer(120), 24, Pico(0), 4, 1);
+        let (samples, _): (Vec<f32>, Vec<S048>) = crate::sync::pulse_train::pulse_train::<S048>(
+            Tempo::from_bpm_integer(120),
+            24,
+            Pico(0),
+            4,
+            1,
+        );
         src.feed_samples(&samples, 0);
         let _p = src.phase_at_sample(samples.len() as u64);
         // Phase(u32) is always a valid [0, 2^32) value — no NaN / non-finite.
@@ -161,7 +166,7 @@ mod tests {
         let mut src = PhaseSource::<S048>::External { detector, pll };
         let bpm = Tempo::from_bpm_integer(120);
         let (samples, peaks): (Vec<f32>, Vec<S048>) =
-            crate::arb::pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
+            crate::sync::pulse_train::pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
         src.feed_samples(&samples, 0);
 
         let last_samples = peaks.last().unwrap().to_bits_q48_16() as f64 / 65_536.0;

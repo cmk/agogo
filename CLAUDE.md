@@ -289,9 +289,15 @@ code based on it.
     dirty worktree and re-run — if the proptest still passes, the
     generator isn't reaching the failure region and the test is
     decorative. Restore the fix from backup once verified.
-  - Strategies shared across crates live in `crates/core/src/arb.rs`.
-    Strategies local to one module stay colocated in that module's
-    `#[cfg(test)]` block.
+  - **Strategies are colocated with the type they generate.** Each
+    type module owns a `#[cfg(any(test, feature = "testkit"))] pub
+    mod arb;` declaration with strategies in a sibling
+    `<module>/arb.rs` file (e.g. `time/grid.rs` declares the mod;
+    `time/grid/arb.rs` holds `arb_grid`). Same shape upstream
+    `connections` uses (`prop/arb.rs`) and the Haskell connections
+    test layout (`Test/Data/Connection/{Float,Int,…}.hs`). No
+    aggregating root `arb.rs`. Strategies private to a single test
+    module stay inline in that module's `#[cfg(test)]` block.
   - Properties that must hold for a sprint to ship are defined **in
     the plan's Verification table** before any code is written.
   - If a property test blocks progress during implementation, you may

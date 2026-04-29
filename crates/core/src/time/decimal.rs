@@ -306,3 +306,6 @@ mod tests {
     // ── ExtendedFloat<f??> → Extended<Rung> tests live in
     // `crate::time::float::tests` (Plan 2026-04-28-03 T1).
 }
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod arb;

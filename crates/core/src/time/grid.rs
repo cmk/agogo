@@ -930,3 +930,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod arb;
