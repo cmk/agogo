@@ -36,11 +36,12 @@ stateDiagram-v2
 **Legend:**
 - `round_unpushed` is the load-bearing state — one atomic commit
   containing both the code fix and the mirrored reply doc, sitting
-  unpushed on the local branch. `/reply-reviews` produces it in a
-  single shot: post replies → mirror via `pull_reviews.py` → `git
-  add -A && git commit`. There is no `--amend` step and no prior fix
-  commit to amend onto; replies and code arrive together by
-  construction.
+  unpushed on the local branch. `/reply-reviews` produces it in one
+  flow: refresh via `scripts/pull_reviews.py` → identify unreplied
+  threads → post replies via `scripts/reply_review.py` → refresh
+  again to mirror via `scripts/pull_reviews.py` → `git add -A &&
+  git commit`. There is no `--amend` step and no prior fix commit
+  to amend onto; replies and code arrive together by construction.
 - The `gh_review → items_pulled → round_unpushed → gh_review` cycle
   runs once per review round. The transition out of `round_unpushed`
   is `git push` — that's the only way to advance to mergeability.

@@ -261,26 +261,88 @@ review rounds:
 {reviewer output}
 ```
 
+## Step 6: Triage and apply auto-fixable items
+
+For each item in the reviewer's **Must fix before push** and
+**Follow-up (future work)** sections, classify into exactly one
+bucket — same heuristic as `/watch-pr`:
+
+- **auto** — change is local (one file, under ~20 lines),
+  non-destructive (no API removal, no file deletion), and does not
+  require cross-module reasoning. Doc nits, missing imports, dead
+  arms, off-by-one in comments, narrow logic fixes, small test
+  additions. Apply now.
+- **needs-user** — larger scope, judgment calls, design decisions,
+  cross-module refactors, or anything where you'd hesitate.
+  **Do not apply.** Surface in the report.
+
+When in doubt, classify as **needs-user** (a miscategorized auto-fix
+ships wrong code; a miscategorized needs-user only delays one
+iteration until the user resolves it).
+
+### Apply the auto bucket
+
+Apply each auto-bucket item to the working tree. Stay strictly within
+the scope of the reviewer's comment — no adjacent cleanup, no "while
+I'm here" changes. If multiple items touch the same file, batch the
+edits before running tests.
+
+Then commit:
+
+```
+git add <edited files>
+git commit -m "<prefix>: Address sprint-review feedback"
+```
+
+Use the prefix that matches the nature of the fixes:
+`fix:` (bug), `debt:` (mechanical cleanup), `test:` (test additions),
+`doc:` (doc nits). Mix-and-match isn't possible in one commit — if
+the auto items split across categories, pick the predominant one.
+
+The pre-commit hook runs `cargo fmt --check`, `scripts/check-pii.sh`,
+`cargo test --workspace`, and `cargo clippy --all-targets -- -D
+warnings`. If it fails:
+
+- Read the failure. If a specific auto-fix caused the breakage,
+  revert that one edit, reclassify the corresponding item as
+  **needs-user**, and retry the commit.
+- If the commit still fails: leave the working tree dirty so the
+  user can investigate. Surface the failure in the report.
+
+**Do not loop `/sprint-review` recursively.** One pass of auto-fixes
+is the contract — the agent applies what it confidently can, then
+hands off. The user can re-run `/sprint-review` for another pass if
+they want one.
+
+## Step 7: Report and hand off
+
+Print a structured summary, ≤ 15 lines:
+
+```
+sprint-review for <branch>
+  must-fix items:        <total>
+    auto-applied:        <n>
+    needs you:           <m>   ← these need your decision
+      - path:line — one-line summary
+      - path:line — one-line summary
+  follow-ups (auto-applied): <n>
+  follow-ups (deferred):     <n>   ← tracked, not blocking
+  fix commit:            <sha> (or: "no commit — all needs-user")
+```
+
 Then:
 
-1. **Print a summary** to the conversation: how many must-fix items,
-   how many follow-ups, and the path to the review file. One paragraph
-   max.
+- **If zero `needs-user` items remain:** branch is clear to push.
+  Offer to push and open the PR (but don't do it without
+  confirmation):
+  ```
+  gh pr create --title "<title>" \
+    --body-file <(scripts/extract_pr_body.sh NNNNN)
+  ```
+  This makes the GitHub body a direct copy of the `## Summary`
+  section — the two can't drift. Tier 2 (CI + GitHub review) runs
+  automatically on the PR.
 
-2. **If zero must-fix items:**
-   Tell the user the branch is clear to push. Offer to push and open
-   the PR (but don't do it without confirmation). The PR-create
-   command is:
-
-   ```
-   gh pr create --title "<title>" \
-     --body-file <(scripts/extract_pr_body.sh NNNNN)
-   ```
-
-   This makes the GitHub body a direct copy of the `## Summary`
-   section — the two can't drift. Remind the user that Tier 2 (CI +
-   GitHub review) will run automatically on the PR.
-
-3. **If must-fix items exist:**
-   Stop. Do not push. Do not offer to fix the issues. The user reads
-   the review and decides what to do next.
+- **If `needs-user` items remain:** the user reads the review file
+  and decides which ones to fix, push back on, or defer. Don't push.
+  Don't auto-fix the needs-user items.

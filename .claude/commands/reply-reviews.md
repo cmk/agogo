@@ -166,18 +166,22 @@ to `review-NNNNN.md` via set-membership de-dup — safe to re-run.
 ## Step 6: Atomic round commit
 
 Stage everything in the working tree (code edits + mirrored doc) and
-make ONE commit:
+make ONE commit, but **only if there are staged changes** — an
+all-`ask` round with no doc delta produces nothing to commit:
 
 ```
 git add -A
-git commit -m "fix: Address review feedback on PR #<N>"
-```
-
-If only the doc changed (no-op-code round), use `doc:` instead of
-`fix:` for the prefix:
-
-```
-git commit -m "doc: Mirror review replies for PR #<N>"
+if git diff --cached --quiet; then
+    # Nothing staged — no replies posted (e.g., all `ask`) and no
+    # doc delta from Step 5. Branch stays at gh_review. Step 7's
+    # "no commit" report branch fires.
+    :
+else
+    # Pick the prefix that matches the staged content:
+    #   fix:  any code edit (most common)
+    #   doc:  only doc/reviews/<file>.md changed (replies-only round)
+    git commit -m "fix: Address review feedback on PR #<N>"
+fi
 ```
 
 The pre-commit hook runs `cargo fmt --check`, `scripts/check-pii.sh`,
@@ -190,18 +194,23 @@ warnings`. If it fails:
   un-post; just commit when ready.
 
 There is no `--amend` step. The commit either succeeds (whole round
-captured) or fails (working tree still dirty, replies on GitHub but
-no mirror committed yet — re-run `/reply-reviews` to redo Step 5+6).
+captured, state advances to `round_unpushed`) or:
+
+- The pre-commit hook fails: working tree still dirty, replies on
+  GitHub but no mirror committed yet — re-run `/reply-reviews` to
+  redo Step 5+6.
+- Nothing was staged: branch stays at `gh_review`. No state change.
 
 ## Step 7: Report and hand off to the user
 
 Print a one-paragraph summary that **names the FSM state from
 `doc/workflow.md`** so the read-out reflects what's actually true on
-the wire:
+the wire. Two terminal shapes:
+
+**If Step 6 made a commit:**
 
 - Number of threads replied to
-- Round commit SHA (if Step 6 produced one) or "no commit — Step 6
-  saw a clean working tree post-mirror, mirror staged for next round"
+- Round commit SHA
 - **State:** `round_unpushed` (mid-cycle, NOT mergeable). The merge
   transition starts from `gh_review`, which requires push.
 - **Next step for the user:** `git push` (or `git push -u origin
@@ -210,6 +219,17 @@ the wire:
   the wrapper refuses to invoke the merge while the local branch is
   ahead of origin, which is the only protection against silently
   dropping an unpushed round.
+
+**If Step 6 made no commit** (all-`ask` round or every reply was
+already a duplicate of an existing one — no code delta, no doc
+delta):
+
+- Number of threads replied to (may be zero)
+- "No commit — nothing staged after Step 5"
+- **State:** `gh_review` (no change — branch is exactly where it
+  started). Mergeable when reviewers stop posting.
+- **Next step for the user:** read the review file for any `ask`
+  threads that need their judgment.
 
 Do **not** push. The user runs the push explicitly as the last step.
 
