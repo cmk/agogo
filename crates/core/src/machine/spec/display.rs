@@ -295,18 +295,7 @@ mod tests {
             arb_bars(),
         )
             .prop_map(
-                |(
-                    grid,
-                    id,
-                    out,
-                    swing_res,
-                    swing_amt,
-                    offset_ticks,
-                    delay,
-                    snap,
-                    mode,
-                    bars,
-                )| {
+                |(grid, id, out, swing_res, swing_amt, offset_ticks, delay, snap, mode, bars)| {
                     ChannelSpec {
                         id,
                         out,

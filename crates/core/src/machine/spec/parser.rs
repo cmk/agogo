@@ -794,7 +794,6 @@ mod tests {
     // Display + round-trip tests moved to super::super::display::tests
     // (Plan 2026-04-28-06 T4).
 
-
     // ── Plan 2026-04-25-03: mode=click + bars spot checks ──────
 
     #[test]

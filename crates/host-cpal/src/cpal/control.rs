@@ -253,13 +253,13 @@ mod tests {
     use proptest::prelude::*;
 
     fn arb_msg() -> impl Strategy<Value = MidiMessage> {
-        (any::<u64>(), any::<[u8; 3]>(), 0u8..=3).prop_map(
-            |(at_sample, bytes, bytes_len)| MidiMessage {
+        (any::<u64>(), any::<[u8; 3]>(), 0u8..=3).prop_map(|(at_sample, bytes, bytes_len)| {
+            MidiMessage {
                 at_sample,
                 bytes,
                 bytes_len,
-            },
-        )
+            }
+        })
     }
 
     #[test]

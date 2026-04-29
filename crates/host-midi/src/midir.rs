@@ -26,8 +26,8 @@ impl MidirSink {
     pub fn open(port_name: &str) -> Result<Self, MidirSinkError> {
         use ::midir::MidiOutput;
 
-        let output = MidiOutput::new("agogo-host-midi")
-            .map_err(|e| MidirSinkError::Init(e.to_string()))?;
+        let output =
+            MidiOutput::new("agogo-host-midi").map_err(|e| MidirSinkError::Init(e.to_string()))?;
         let port = output
             .ports()
             .into_iter()
@@ -51,8 +51,8 @@ impl MidirSink {
     pub fn list_output_ports() -> Result<Vec<String>, MidirSinkError> {
         use ::midir::MidiOutput;
 
-        let output = MidiOutput::new("agogo-host-midi")
-            .map_err(|e| MidirSinkError::Init(e.to_string()))?;
+        let output =
+            MidiOutput::new("agogo-host-midi").map_err(|e| MidirSinkError::Init(e.to_string()))?;
         let names = output
             .ports()
             .into_iter()
@@ -132,9 +132,7 @@ mod tests {
     /// perspective).
     #[test]
     fn open_rejects_bogus_name() {
-        let result = MidirSink::open(
-            "definitely-not-a-real-midi-port-\u{00A0}\u{2603}",
-        );
+        let result = MidirSink::open("definitely-not-a-real-midi-port-\u{00A0}\u{2603}");
         match result {
             Err(MidirSinkError::PortNotFound(_))
             | Err(MidirSinkError::Init(_))

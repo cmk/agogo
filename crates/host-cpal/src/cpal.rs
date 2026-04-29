@@ -98,8 +98,7 @@ impl AudioHost for CpalHost {
             .map_err(|e| AudioHostError::Backend(Box::new(e)))?
             .collect();
         let rate_ok = |c: &::cpal::SupportedStreamConfigRange| {
-            c.min_sample_rate().0 <= cfg.sample_rate
-                && c.max_sample_rate().0 >= cfg.sample_rate
+            c.min_sample_rate().0 <= cfg.sample_rate && c.max_sample_rate().0 >= cfg.sample_rate
         };
         let any_rate = supported.iter().any(rate_ok);
         let exact_match = supported.iter().any(|c| {
@@ -139,8 +138,7 @@ impl AudioHost for CpalHost {
         // (which tears the audio down on its owning thread). The
         // Stream is never exposed through a `Send` context.
         let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
-        let (ready_tx, ready_rx) =
-            std::sync::mpsc::sync_channel::<Result<(), AudioHostError>>(1);
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<Result<(), AudioHostError>>(1);
 
         let thread = thread::Builder::new()
             .name("agogo-cpal-stream".into())
@@ -158,13 +156,8 @@ impl AudioHost for CpalHost {
                 let data_cb = move |samples: &[f32], _info: &InputCallbackInfo| {
                     // Mono enforced at run() entry, so frames == len.
                     let frames = samples.len();
-                    let mut io = AudioIo::new(
-                        samples,
-                        &mut output_stub,
-                        next_start,
-                        sample_rate,
-                        frames,
-                    );
+                    let mut io =
+                        AudioIo::new(samples, &mut output_stub, next_start, sample_rate, frames);
                     cb(&mut io);
                     next_start = next_start.saturating_add(frames as u64);
                 };
@@ -173,23 +166,20 @@ impl AudioHost for CpalHost {
                     tracing::error!(?e, "cpal stream error");
                 };
 
-                let stream = match self.device.build_input_stream(
-                    &stream_config,
-                    data_cb,
-                    err_cb,
-                    None,
-                ) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        let _ =
-                            ready_tx.send(Err(AudioHostError::Backend(Box::new(e))));
-                        return;
-                    }
-                };
+                let stream =
+                    match self
+                        .device
+                        .build_input_stream(&stream_config, data_cb, err_cb, None)
+                    {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let _ = ready_tx.send(Err(AudioHostError::Backend(Box::new(e))));
+                            return;
+                        }
+                    };
 
                 if let Err(e) = stream.play() {
-                    let _ =
-                        ready_tx.send(Err(AudioHostError::Backend(Box::new(e))));
+                    let _ = ready_tx.send(Err(AudioHostError::Backend(Box::new(e))));
                     return;
                 }
 
@@ -270,12 +260,10 @@ mod tests {
     /// because `cpal::Device` inside `CpalHost` isn't `Debug`.
     #[test]
     fn with_input_name_rejects_bogus_name() {
-        let result = CpalHost::with_input_name(
-            "definitely-not-a-real-device-name-\u{00A0}\u{2603}",
-        );
+        let result =
+            CpalHost::with_input_name("definitely-not-a-real-device-name-\u{00A0}\u{2603}");
         match result {
-            Err(AudioHostError::DeviceNotFound(_))
-            | Err(AudioHostError::Backend(_)) => {}
+            Err(AudioHostError::DeviceNotFound(_)) | Err(AudioHostError::Backend(_)) => {}
             Err(other) => {
                 panic!("expected DeviceNotFound / Backend, got {other:?}")
             }
