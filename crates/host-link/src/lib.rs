@@ -35,7 +35,7 @@ pub mod source;
 pub use link::{HostTimeAnchor, LinkClock};
 
 #[cfg(feature = "rusty-link")]
-pub use session::{LinkSession, LinkWriteConfig};
+pub use session::{LinkSession, LinkWriteConfig, apply_snap_offsets};
 
 #[cfg(feature = "rusty-link")]
 pub use source::{LinkPhaseSource, LinkSessionHandle};
