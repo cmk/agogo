@@ -384,6 +384,28 @@ mod tests {
             }
         }
 
+        // Liveness guard — both spec_strs entries 0 and 2 carry
+        // `snap-quantum-us=…`, so at least one channel MUST end up
+        // with a non-zero offset after the bulk call. Without this,
+        // the `drift < 4_000` comparison below is satisfied trivially
+        // by a no-op `apply_snap_offsets` (both sides return zero).
+        // The guard is what catches a hypothetical regression where
+        // the helper silently stops mutating channels.
+        assert!(
+            bulk_channels
+                .iter()
+                .any(|c| c.common().offset != Micro::ZERO),
+            "bulk path: expected at least one snap-armed channel to have offset != 0 \
+             (would be satisfied by a no-op apply_snap_offsets — guard exists \
+             precisely to catch that regression)",
+        );
+        assert!(
+            manual_channels
+                .iter()
+                .any(|c| c.common().offset != Micro::ZERO),
+            "manual path: expected at least one snap-armed channel to have offset != 0",
+        );
+
         for (i, (b, m)) in bulk_channels.iter().zip(manual_channels.iter()).enumerate() {
             let bo = b.common().offset.0;
             let mo = m.common().offset.0;
@@ -424,6 +446,22 @@ mod tests {
         let (specs2, mut channels2) = build_pair(spec_strs);
         apply_snap_offsets(&specs2, &mut session, &mut channels2);
         let offsets2: Vec<i64> = channels2.iter().map(|c| c.common().offset.0).collect();
+
+        // Liveness guard — both spec_strs entries are snap-armed, so
+        // BOTH invocations must produce non-zero offsets. Without
+        // this, a no-op `apply_snap_offsets` would leave offsets1 ==
+        // offsets2 == [0, 0] and the `drift < 4_000` checks below
+        // would pass trivially.
+        assert!(
+            offsets1.iter().any(|o| *o != 0),
+            "invocation 1: expected at least one snap-armed offset to be non-zero \
+             (got {offsets1:?})",
+        );
+        assert!(
+            offsets2.iter().any(|o| *o != 0),
+            "invocation 2: expected at least one snap-armed offset to be non-zero \
+             (got {offsets2:?})",
+        );
 
         for (i, (o1, o2)) in offsets1.iter().zip(offsets2.iter()).enumerate() {
             let drift = (o1 - o2).abs();
