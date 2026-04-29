@@ -199,7 +199,7 @@ impl<R: SampleTime> Pll<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arb::pulse_train;
+    use crate::sync::pulse_train::pulse_train;
     use crate::time::decimal::{FD06, FD12FD06, Pico};
     use crate::time::sample::{S048, SampleRate};
     use proptest::prelude::*;

@@ -8,7 +8,7 @@
 //! rather than in `main.rs`'s EOF test block (Plan
 //! 2026-04-28-05 T1).
 
-use agogo_core::arb::pulse_train;
+use agogo_core::sync::pulse_train::pulse_train;
 use agogo_core::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
 use agogo_core::time::decimal::Pico;
 use agogo_core::time::sample::{S048, SampleRate, SampleTime};

@@ -673,3 +673,6 @@ mod tests {
         check(FD12S192, S192::from_sample(1));
     }
 }
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod arb;

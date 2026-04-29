@@ -34,3 +34,6 @@ impl Tempo {
         self.0.abs_diff(other.0)
     }
 }
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod arb;

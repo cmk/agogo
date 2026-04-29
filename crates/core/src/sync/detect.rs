@@ -153,11 +153,12 @@ impl<R: SampleTime> PeakDetector<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arb::{arb_bpm, pulse_train};
     use crate::boundary::tempo_to_hz;
+    use crate::sync::pulse_train::pulse_train;
     use crate::time::decimal::Pico;
     use crate::time::sample::{S048, SampleRate, SampleTime};
     use crate::time::tempo::Tempo;
+    use crate::time::tempo::arb::arb_bpm;
     use proptest::prelude::*;
 
     /// Stamp a Hann-bell pulse into `buf`. Mirrors `pulse_train`'s

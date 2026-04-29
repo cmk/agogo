@@ -349,7 +349,9 @@ pub const GRIDGRID: Conn<(Grid, Grid), Grid> =
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arb::{arb_grid, arb_rational_nonneg, arb_small_time, arb_tick, arb_time};
+    use crate::time::conn::arb::arb_rational_nonneg;
+    use crate::time::grid::arb::arb_grid;
+    use crate::time::tick::arb::{arb_small_time, arb_tick, arb_time};
     use proptest::prelude::*;
 
     // ── Spot checks ──────────────────────────────────────────────
@@ -890,3 +892,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod arb;
