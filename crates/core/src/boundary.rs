@@ -21,8 +21,8 @@
 //!    Galois-law battery.
 
 use connections::extended::Extended;
+use connections::fixed::u32::I064U032;
 use connections::float::ExtendedFloat;
-use connections::int::u32::I064U032;
 
 use crate::sync::phase::Phase;
 use crate::time::decimal::{FD06, Pico};
