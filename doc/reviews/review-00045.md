@@ -106,7 +106,7 @@ All three commits carry correct prefixes (`plan:`, `debt:`, `doc:`). Landing T1+
 
 **T3** — `arb.rs` deleted, `pub mod arb;` removed from `lib.rs`, `_sample_rate_sealed` dropped. Complete.
 
-**Plan doc inconsistency — stale Critical Files section** *(confidence: 82)*. The Critical Files section still lists `crates/core/src/sync/sample_tick.rs` as getting a `pub mod arb;` declaration and `sync/sample_tick/arb.rs` as a new file. The `sample_tick/arb.rs` was never created (documented deviation in the Review section, but the Critical Files list wasn't pruned to match). One-line edit to fix.
+**Plan doc inconsistency — stale Critical Files section** *(confidence: 82)*. As-reviewed, the Critical Files section listed `crates/core/src/sync/sample_tick.rs` as getting a `pub mod arb;` declaration and `sync/sample_tick/arb.rs` as a new file; neither was implemented (`arb_integer_stc` stays inline as a documented deviation). Resolved before push: the auto-fix step pruned the Critical Files entries; a follow-up round-1 also pruned the matching tree-diagram entry at the top of the plan and the dependency graph's T1 line.
 
 ### Risks
 
@@ -125,3 +125,84 @@ All three commits carry correct prefixes (`plan:`, `debt:`, `doc:`). Landing T1+
 **Follow-up (future work):**
 - `agogo-testkit` re-export crate when external proptest consumers materialize — verbose per-type paths will be ergonomically painful then. Deferred per plan; nothing to do now.
 - `time/conn/arb.rs` doc references `super::Whole`. If `Whole` is ever renamed/removed in `conn.rs`, the intra-doc link becomes a rustdoc warning. Low priority.
+
+<!-- gh-id: 3158164982 -->
+### Copilot on [`doc/plans/plan-2026-04-28-08.md:52`](https://github.com/cmk/agogo/pull/45#discussion_r3158164982) (2026-04-29 01:43 UTC)
+
+The plan still claims `sync/sample_tick/arb.rs` will be created (both in the “cleaner shape” tree and the dependency graph), but the implementation keeps `arb_integer_stc` as a private helper inside `sync/sample_tick.rs::tests` and there is no `sample_tick/arb.rs` in the crate. Please update these sections to match the actual design so the plan doesn’t point readers at non-existent files.
+
+<!-- gh-id: 3158164994 -->
+### Copilot on [`doc/reviews/review-00045.md:110`](https://github.com/cmk/agogo/pull/45#discussion_r3158164994) (2026-04-29 01:43 UTC)
+
+This review note says the plan’s “Critical Files” section still lists `sync/sample_tick/arb.rs` as a new file, but the plan’s Critical Files list doesn’t mention `sample_tick` at all. Please either correct this to point at the actually-stale sections (the plan’s module tree / dependency graph), or remove the claim so the review record stays factually accurate.
+```suggestion
+
+```
+
+<!-- gh-id: 4193582294 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-29 01:43 UTC](https://github.com/cmk/agogo/pull/45#pullrequestreview-4193582294))
+
+## Pull request overview
+
+This PR removes the `crates/core/src/arb.rs` “kitchen-sink” module by relocating proptest strategies into per-type `arb.rs` submodules (behind `#[cfg(any(test, feature = "testkit"))]`) and moving the runtime `pulse_train` generator into the `sync` subsystem as a regular public API.
+
+**Changes:**
+- Split shared proptest strategies into per-type `time/*/arb.rs` modules and update all internal test imports accordingly.
+- Move `pulse_train` into `crates/core/src/sync/pulse_train.rs`, update callsites (core tests + CLI), and update the float-check allowlist entry.
+- Delete `crates/core/src/arb.rs`, remove `pub mod arb;` from `lib.rs`, and codify the colocation rule in `CLAUDE.md`.
+
+### Reviewed changes
+
+Copilot reviewed 30 out of 30 changed files in this pull request and generated 2 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| scripts/check-floats.sh | Updates allowlist/comments to track `pulse_train` after the move. |
+| doc/reviews/review-00045.md | Adds a review record for PR #45 (contains a factual mismatch vs the plan doc). |
+| doc/plans/plan-2026-04-28-08.md | Adds the plan document for the refactor (contains stale references to a non-existent `sample_tick/arb.rs`). |
+| crates/core/src/time/tick/arb.rs | New strategies for `Tick`/`Time` with explicit dependency on `grid::arb`. |
+| crates/core/src/time/tick.rs | Updates test imports and declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/tempo/arb.rs | New `Tempo` strategy (`arb_bpm`) + migrated proptest. |
+| crates/core/src/time/tempo.rs | Declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/tbase/arb.rs | New `TBase` strategy (`arb_tbase`). |
+| crates/core/src/time/tbase.rs | Updates test imports and declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/swing/arb.rs | New `SwingConfig` strategy (`arb_swing`) importing `arb_tbase`. |
+| crates/core/src/time/swing.rs | Updates test imports and declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/sample/arb.rs | New sample-rate strategy (`arb_sample_rate`) + migrated proptest. |
+| crates/core/src/time/sample.rs | Declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/grid/arb.rs | New `Grid` strategy (`arb_grid`). |
+| crates/core/src/time/grid.rs | Declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/decimal/arb.rs | New jitter strategy (`arb_jitter_sigma`) + migrated proptest. |
+| crates/core/src/time/decimal.rs | Declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/conn/arb.rs | New rational strategy (`arb_rational_nonneg`). |
+| crates/core/src/time/conn.rs | Updates test imports and declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/sync/source.rs | Updates `pulse_train` callsites to the new module path. |
+| crates/core/src/sync/pulse_train.rs | New home for `pulse_train` + constant + migrated unit tests. |
+| crates/core/src/sync/pll.rs | Updates test import of `pulse_train`. |
+| crates/core/src/sync/detect.rs | Updates test imports (`pulse_train`, `arb_bpm`). |
+| crates/core/src/sync.rs | Exposes `pub mod pulse_train;` and documents the submodule. |
+| crates/core/src/lib.rs | Removes `pub mod arb;` from the crate root. |
+| crates/core/src/channel/transform.rs | Updates test import of `arb_grid`. |
+| crates/core/src/channel/scheduler.rs | Updates test import of `arb_grid`. |
+| crates/core/src/arb.rs | Deletes the former kitchen-sink `arb.rs` module. |
+| crates/cli/src/sync_trace.rs | Updates runtime import to `agogo_core::sync::pulse_train::pulse_train`. |
+| CLAUDE.md | Updates proptest discipline docs to codify per-type `arb` colocation. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3158168269 -->
+#### ↳ cmk ([2026-04-29 01:44 UTC](https://github.com/cmk/agogo/pull/45#discussion_r3158168269))
+
+Fixed — pruned the `sync/sample_tick/arb.rs` references from both the cleaner-shape tree (top of plan) and the dependency graph's T1 line. Plan is now consistent with the implementation: `arb_integer_stc` stays inline in `sync/sample_tick.rs::tests`, and no `sample_tick/arb.rs` is created.
+
+<!-- gh-id: 3158168458 -->
+#### ↳ cmk ([2026-04-29 01:44 UTC](https://github.com/cmk/agogo/pull/45#discussion_r3158168458))
+
+Fixed — clarified the wording. The Critical Files entry was real at review time but pruned in the auto-fix commit before push; the follow-up round also pruned the matching tree-diagram and dependency-graph entries. The Local review note now points at all three pruned sites and marks the issue resolved.
