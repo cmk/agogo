@@ -219,10 +219,11 @@ impl LinkSession {
 /// `LinkSession` call site).
 ///
 /// `specs` and `channels` must have the same length and be in the
-/// same order. Mismatch is a programming error: in `debug` builds it
-/// panics via `debug_assert_eq!`; in `release` it processes
-/// `min(specs.len(), channels.len())` entries (via `.zip`) without
-/// panicking.
+/// same order. Mismatch is a programming error and panics in both
+/// `debug` and `release` builds via `assert_eq!` — silent
+/// `min(specs.len(), channels.len())` partial-apply would leave some
+/// channels un-snapped with no diagnostic, which is worse than a
+/// fail-loud panic at a known orchestrator boundary.
 ///
 /// Channels whose spec has `snap_intent() == None` are unchanged. The
 /// session is mutated as a side effect of each `snap_offset_for` call
@@ -232,10 +233,11 @@ pub fn apply_snap_offsets(
     session: &mut LinkSession,
     channels: &mut [Channel],
 ) {
-    debug_assert_eq!(
+    assert_eq!(
         specs.len(),
         channels.len(),
-        "apply_snap_offsets: specs ({}) / channels ({}) arity mismatch",
+        "apply_snap_offsets: specs ({}) / channels ({}) arity mismatch — \
+         caller must pass parallel slices",
         specs.len(),
         channels.len(),
     );
