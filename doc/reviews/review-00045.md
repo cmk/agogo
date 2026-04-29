@@ -62,3 +62,66 @@ external proptest consumers (none today) would now do
 - [x] `scripts/check-floats.sh` — clean (allowlist entry moved with `pulse_train`)
 - [x] `cargo build -p agogo-core` (no default features) — confirms testkit gate is correct
 - [x] `cargo build -p agogo-core --features testkit` — clean
+
+## Local review (2026-04-28)
+
+**Branch:** plan/2026-04-28-08
+**Commits:** 3 (origin/main..plan/2026-04-28-08)
+**Reviewer:** Claude (sonnet, independent)
+
+---
+
+### Commit Hygiene
+
+All three commits carry correct prefixes (`plan:`, `debt:`, `doc:`). Landing T1+T2+T3 in a single `debt:` commit is justified — the tasks are strongly interdependent (T3 cannot exist without T1+T2, and splitting them would leave a state where `crate::arb` has holes). The merge would be temporarily broken if split. Atomic landing is the right call.
+
+### Code Quality
+
+**Modern module layout** — all 9 new files follow `<type>.rs` + `<type>/arb.rs` sibling shape. No `mod.rs` files introduced. Correct.
+
+**`#[cfg(any(test, feature = "testkit"))]` gate** — every new `time/*/arb.rs` file is gated at the module declaration site in the parent `.rs` file. Correct.
+
+**`pulse_train.rs` is NOT testkit-gated** — `pub mod pulse_train;` in `sync.rs` carries no `cfg` gate. Correct; `cli/sync_trace` is a runtime consumer.
+
+**`_sample_rate_sealed` bridge** dropped cleanly — each per-type `arb.rs` imports what it needs directly and is only compiled under test/testkit.
+
+**Doc strings** — the 9 new `arb.rs` files each carry a module-level doc comment explaining the gate. Consistent, not boilerplate-padded. Intra-doc links spot-checked: `crate::time::conn::quantize_at`, `crate::time::tick::from_ticks`, `crate::time::conn::TICKTIME`, `crate::time::swing::SwingConfig` — all resolvable.
+
+**`sync/source.rs` qualified-path usage** — both `crate::arb::pulse_train::<S048>` raw-qualified-path calls (not in `use` statements) updated to `crate::sync::pulse_train::pulse_train::<S048>`. Caught by the build, fully resolved.
+
+### Test Coverage
+
+**Three `arb_*_in_range` tests** all migrated correctly:
+- `arb_bpm_in_range` → `time/tempo/arb.rs`
+- `arb_sample_rate_is_standard` → `time/sample/arb.rs`
+- `arb_jitter_in_range` → `time/decimal/arb.rs`
+
+**Three `pulse_train_*` tests** all in `sync/pulse_train.rs`. Net `#[test]` count change: 0 (6 added, 6 removed from deleted `arb.rs`).
+
+### Plan Conformance
+
+**T1** — all 8 strategy migrations completed. `arb_integer_stc` deviation documented in the Review section.
+
+**T2** — `pulse_train` + `PULSE_WIDTH_PS` moved, all import sites updated (pll, detect, source, sync_trace). Complete.
+
+**T3** — `arb.rs` deleted, `pub mod arb;` removed from `lib.rs`, `_sample_rate_sealed` dropped. Complete.
+
+**Plan doc inconsistency — stale Critical Files section** *(confidence: 82)*. The Critical Files section still lists `crates/core/src/sync/sample_tick.rs` as getting a `pub mod arb;` declaration and `sync/sample_tick/arb.rs` as a new file. The `sample_tick/arb.rs` was never created (documented deviation in the Review section, but the Critical Files list wasn't pruned to match). One-line edit to fix.
+
+### Risks
+
+**`testkit` feature external caller audit** — no `--features testkit` usage in cli/host-link/host-cpal. Only external `agogo_core::arb::*` site was `cli/src/sync_trace.rs`'s `pulse_train` use, handled in T2. Risk: none realised.
+
+**CLAUDE.md wording vs. implementation** — new rule example (`time/grid.rs` declares the mod; `time/grid/arb.rs` holds `arb_grid`) matches the diff exactly.
+
+**`check-floats.sh` allowlist** — old `crates/core/src/arb.rs` entry removed from both the ALLOWED array AND the comment header. New `crates/core/src/sync/pulse_train.rs` added to both. Symmetric.
+
+**`arb_bpm_in_range` bound** — assertion upper bound is inclusive 400_000_000 but the strategy's widest arm stops at 399_999_999 (exclusive range). Inherited from old `arb.rs` unchanged; no regression.
+
+### Recommendations
+
+**Must fix before push:** none.
+
+**Follow-up (future work):**
+- `agogo-testkit` re-export crate when external proptest consumers materialize — verbose per-type paths will be ergonomically painful then. Deferred per plan; nothing to do now.
+- `time/conn/arb.rs` doc references `super::Whole`. If `Whole` is ever renamed/removed in `conn.rs`, the intra-doc link becomes a rustdoc warning. Low priority.
