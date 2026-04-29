@@ -8,7 +8,7 @@ use time_sched::schedule_args;
 
 /// agogo workspace CLI
 #[derive(Debug, Clone, Bpaf)]
-#[bpaf(options)]
+#[bpaf(options, version)]
 struct Cli {
     #[bpaf(external(command), optional)]
     command: Option<Command>,

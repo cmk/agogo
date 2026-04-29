@@ -38,14 +38,11 @@ ctrlc = { version = "3", optional = true }
 [dev-dependencies]
 proptest = { workspace = true }
 
-# Plan 14: explicit binary entry. `agogo` is the user-facing name
-# (matches `doc/versions/version-0.1.md` acceptance literal). The
-# default `agogo-cli` binary stays available for the v0.1 release
-# so existing scripts keep working; remove in v0.2.
+# `agogo` is the user-facing binary name (matches
+# `doc/versions/version-0.1.md` acceptance literal). The Plan 14
+# `agogo-cli` legacy alias was dropped in Plan 09 T4 — external
+# scripts have migrated since v0.1, and the duplicate `[[bin]]`
+# entry was generating a "found in multiple build targets" warning.
 [[bin]]
 name = "agogo"
-path = "src/main.rs"
-
-[[bin]]
-name = "agogo-cli"
 path = "src/main.rs"
