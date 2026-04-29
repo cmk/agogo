@@ -202,13 +202,15 @@ mod tests {
 
     // ── Saturation boundary spot-checks ──────────────────────────
     //
-    // `arb_tick()` includes `Tick(u32::MAX)` per CLAUDE.md's full-
-    // domain rule, but the swing proptests bound `t` away from the
-    // upper edge so saturation arithmetic is delicate (the
-    // `clamp(0, u32::MAX)` in `effective_tick` is otherwise
-    // unexercised by sampled inputs). These #[test]s pin the
-    // saturation behavior at both ends so the bounded proptest
-    // domain has a complementary coverage point.
+    // `arb_tick()` is capped at `u32::MAX × Grid::T1.tick_count()`
+    // (the `from_ticks` horizon) — well below `u64::MAX`, where the
+    // `clamp(0, u64::MAX)` in `effective_tick` lives. The swing
+    // proptests further bound `t` away from that upper edge so
+    // saturation arithmetic is otherwise unexercised by sampled
+    // inputs. These #[test]s pin the saturation behavior at both
+    // ends (zero on the negative side, `u64::MAX` on the positive
+    // side) so the bounded proptest domain has a complementary
+    // coverage point.
 
     #[test]
     fn effective_tick_saturates_at_u64_max() {

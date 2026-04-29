@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn ple_compares_inner() {
+    fn le_compares_inner() {
         assert!(U7(10) <= U7(20));
         assert!(U7(20) <= U7(20));
         assert!(U7(20) > U7(10));

@@ -183,7 +183,8 @@ mod strategies {
     /// meaningful tick values live; the upper bound is the largest
     /// `Tick` for which [`from_ticks`](crate::time::tick::from_ticks)
     /// returns `Some(_)`, so `arb_tick` never produces a value the
-    /// `ticks` Conn cannot canonicalise.
+    /// [`TICKTIME`](crate::time::conn::TICKTIME) Conn cannot
+    /// canonicalise.
     pub fn arb_tick() -> impl Strategy<Value = Tick> {
         let horizon: u64 = u64::from(u32::MAX) * u64::from(Grid::T1.tick_count());
         prop_oneof![

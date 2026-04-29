@@ -1,4 +1,4 @@
-# PR #42 — Three-mess cleanup: widen Tick, drop Ple, rename Conns
+# PR #43 — Three-mess cleanup: widen Tick, drop Ple, rename Conns
 
 ## Summary
 
@@ -160,3 +160,193 @@ The plan verification table says `arb_time_full_u32_domain` should assert `any::
 - The `TICKTIME` / `WHOLTICK` / `TIMETIME` / `GRIDGRID` all-caps singleton constants — if the upstream `connections` convention expects them alongside the accessor functions, they should be added in the next sprint that touches `conn.rs`. Confirm against the upstream library's CLAUDE.md.
 - `BoundedTick` newtype to encode the Conn precondition at the type level (already deferred in the plan).
 - The `from_ticks(...) == None` transport-wrap semantics have no exercising code path yet — when the first caller appears, add a decision and a test at that point.
+
+<!-- gh-id: 3157909687 -->
+### Copilot on [`crates/core/src/time/swing.rs:213`](https://github.com/cmk/agogo/pull/43#discussion_r3157909687) (2026-04-29 00:00 UTC)
+
+The saturation-boundary comment above still mentions `arb_tick()` producing `Tick(u32::MAX)` and `effective_tick` clamping to `u32::MAX`, but after this PR `arb_tick()` is capped at the `from_ticks` horizon and `effective_tick` clamps to `u64::MAX`. Update that comment block so it reflects the current boundaries being exercised.
+
+<!-- gh-id: 3157909704 -->
+### Copilot on [`crates/core/src/time/tick.rs:72`](https://github.com/cmk/agogo/pull/43#discussion_r3157909704) (2026-04-29 00:00 UTC)
+
+Doc comment still refers to the `ticks` Galois connection, but the Conn accessor was renamed to `ticktime` in this PR. Update the wording here (and any adjacent docs in this module that still say `ticks`) so it matches the new API name.
+
+<!-- gh-id: 3157909717 -->
+### Copilot on [`crates/core/src/time/conn.rs:24`](https://github.com/cmk/agogo/pull/43#discussion_r3157909717) (2026-04-29 00:00 UTC)
+
+The module docs say "`Conn::new` isn't `const fn` upstream", but this repo already uses `Conn::new(...)` in `pub const` Conn definitions elsewhere (e.g. `crates/core/src/time/decimal.rs`). This comment looks stale/misleading—either update it to the current reality or explain the real reason these Conns are exposed via accessors instead of constants.
+
+
+<!-- gh-id: 3157909731 -->
+### Copilot on [`doc/plans/plan-2026-04-28-07.md:159`](https://github.com/cmk/agogo/pull/43#discussion_r3157909731) (2026-04-29 00:00 UTC)
+
+This plan’s Conn rename mapping includes `ticktime / TICKTIME`, `wholtick / WHOLTICK`, etc., but the implementation in `crates/core/src/time/conn.rs` only introduces the accessor functions (no all-caps singleton constants). Either update the plan text to reflect the implemented API surface, or add the missing constants if they’re required by the convention.
+
+
+<!-- gh-id: 3157909742 -->
+### Copilot on [`crates/core/src/time/conn.rs:658`](https://github.com/cmk/agogo/pull/43#discussion_r3157909742) (2026-04-29 00:00 UTC)
+
+The comment block above this `quantize_at_*` proptest still references the removed `.ple` method and claims `arb_tick()` includes `Tick(u32::MAX)`. After this PR, `Ple` is gone and `arb_tick()` is capped at the `from_ticks` horizon, so that rationale is stale—update the comment to match the current generator + comparison semantics.
+
+<!-- gh-id: 3157909755 -->
+### Copilot on [`crates/core/src/time/conn.rs:725`](https://github.com/cmk/agogo/pull/43#discussion_r3157909755) (2026-04-29 00:00 UTC)
+
+This section header/comment still talks about lattice-connection laws for `time`/`grid` and refers to a `Ple` impl, but the Conns are now `timetime`/`gridgrid` and `Ple` no longer exists. Update the wording to reference the new Conn names and the current `PartialOrd`/divisibility relation.
+
+<!-- gh-id: 3157909770 -->
+### Copilot on [`crates/core/src/arb.rs:186`](https://github.com/cmk/agogo/pull/43#discussion_r3157909770) (2026-04-29 00:00 UTC)
+
+The `arb_tick` docs say it avoids values the `ticks` Conn can’t canonicalise, but the Conn accessor was renamed to `ticktime` in this PR. Update the comment to the new Conn name.
+
+
+<!-- gh-id: 3157909783 -->
+### Copilot on [`crates/core/src/time/grid.rs:555`](https://github.com/cmk/agogo/pull/43#discussion_r3157909783) (2026-04-29 00:00 UTC)
+
+nit: These property tests are still named `ple_*`, but the implementation under test is now `<=` via `PartialOrd` (the `Ple` trait was removed). Consider renaming the tests to avoid referring to a removed abstraction.
+
+<!-- gh-id: 3157909801 -->
+### Copilot on [`crates/core/src/time/conn.rs:529`](https://github.com/cmk/agogo/pull/43#discussion_r3157909801) (2026-04-29 00:00 UTC)
+
+Comment heading still says `// ── ticks ──` even though the connection and tests in this block are `ticktime_*`. Rename the heading to match the new Conn name to avoid confusion while navigating this file.
+
+
+<!-- gh-id: 3157909812 -->
+### Copilot on [`crates/core/src/time/tbase.rs:306`](https://github.com/cmk/agogo/pull/43#discussion_r3157909812) (2026-04-29 00:00 UTC)
+
+nit: These proptest names still use the `ple_*` prefix even though the `Ple` trait was removed and the tests now exercise `<=`/`Ord`. Renaming them (e.g. `le_reflexive`, `order_transitive`) would better match the post-T2 terminology.
+
+<!-- gh-id: 3157909823 -->
+### Copilot on [`crates/core/src/midi.rs:174`](https://github.com/cmk/agogo/pull/43#discussion_r3157909823) (2026-04-29 00:00 UTC)
+
+nit: This test name still refers to `ple`, but `Ple` was removed and the assertions now use `<=`/`>`. Renaming the test would keep terminology consistent.
+
+
+<!-- gh-id: 4193297801 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-29 00:01 UTC](https://github.com/cmk/agogo/pull/43#pullrequestreview-4193297801))
+
+## Pull request overview
+
+This PR performs three related cleanups in `crates/core/`: widening the master `Tick` counter to `u64` to eliminate overflow risk, removing the local `Ple` preorder trait in favor of `PartialOrd`, and renaming `time::conn` Conns to match the project’s 8-character naming convention.
+
+**Changes:**
+- Widen `Tick(pub u32)` → `Tick(pub u64)`, make `from_ticks*` partial (`Option<Time>`), and update affected arithmetic/casts across time + scheduling paths.
+- Remove `Ple` + `preorder.rs`, replace call sites with `<=`, and implement divisibility-based `Ord/PartialOrd` for `TBase`.
+- Rename `time::conn` accessors (`ticks/rat_tick/time/grid` → `ticktime/wholtick/timetime/gridgrid`) and update call sites/tests.
+
+### Reviewed changes
+
+Copilot reviewed 17 out of 17 changed files in this pull request and generated 13 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00042.md | Adds a review record for PR #42 (currently contains some stale assertions vs the final diff). |
+| doc/plans/plan-2026-04-28-07.md | Adds the implementation plan + verification checklist for the sprint. |
+| crates/core/src/time/tick.rs | Widens `Tick`, removes overflow panic path, and makes `from_ticks*` return `Option<Time>`. |
+| crates/core/src/time/tbase.rs | Drops `Ple`, adds divisibility-based `Ord/PartialOrd`, and adds an all-pairs regression test. |
+| crates/core/src/time/swing.rs | Updates tick arithmetic to `u64` + `i128` widening and refreshes saturation tests. |
+| crates/core/src/time/grid.rs | Removes `Ple`, implements divisibility via `PartialOrd`, and updates lattice-law tests. |
+| crates/core/src/time/envelope.rs | Widens ramp/smoothstep helpers to `u64` and uses `u128` intermediates. |
+| crates/core/src/time/conn.rs | Renames Conns, adapts to partial `from_ticks`, and updates adjoint-law tests to use `<=`. |
+| crates/core/src/sync/sample_tick.rs | Updates Tick saturation/clamps to `u64::MAX` and extends overflow boundary testing. |
+| crates/core/src/preorder.rs | Deletes the local `Ple` trait module. |
+| crates/core/src/midi.rs | Removes `Ple` impls for `U7/U4` and switches tests to `<=`. |
+| crates/core/src/lib.rs | Removes `pub mod preorder;` export. |
+| crates/core/src/channel/transform.rs | Updates tick/divisor arithmetic to `u64` and adjusts tests accordingly. |
+| crates/core/src/channel/scheduler.rs | Widens tick window math to `i128`/`u64` to avoid overflow after Tick widening. |
+| crates/core/src/arb.rs | Updates `arb_tick`/`arb_time` strategies for widened Tick + full `u32` beats domain. |
+| crates/cli/src/time_sched.rs | Updates CLI scheduling math/tests for `Tick(u64)`. |
+| crates/cli/src/channel_trace.rs | Widens trace row tick field to `u64`. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3157909833 -->
+### Copilot on [`crates/core/src/time/conn.rs:413`](https://github.com/cmk/agogo/pull/43#discussion_r3157909833) (2026-04-29 00:01 UTC)
+
+Several spot-check tests are still named `rat_tick_*` even though the Conn accessor is now `wholtick()`. This conflicts with the PR description/plan (“test names rename in lockstep”) and makes grepping for the new Conn name harder; consider renaming these tests (and the corresponding proptests below) to `wholtick_*`.
+
+<!-- gh-id: 3157909848 -->
+### Copilot on [`doc/plans/plan-2026-04-28-07.md:190`](https://github.com/cmk/agogo/pull/43#discussion_r3157909848) (2026-04-29 00:01 UTC)
+
+Verification table uses property names that don’t match the tests added in this PR (e.g. `from_ticks_some_on_horizon` vs `from_ticks_some_at_horizon`, and `tbase_divisibility_total_order` vs `divisibility_chain_strictly_ascending`). Update the table so it points at the actual test names, otherwise it’s easy to think required properties are missing.
+
+
+<!-- gh-id: 3157954202 -->
+#### ↳ cmk ([2026-04-29 00:17 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157954202))
+
+Fixed — refreshed the saturation-spot-check comment to describe `arb_tick`'s `u32::MAX × Grid::T1.tick_count()` cap and the `u64::MAX` clamp in `effective_tick`. Both `u32::MAX` references are gone.
+
+<!-- gh-id: 3157954351 -->
+#### ↳ cmk ([2026-04-29 00:17 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157954351))
+
+Fixed — module doc now refers to the `ticktime` Galois connection.
+
+<!-- gh-id: 3157954500 -->
+#### ↳ cmk ([2026-04-29 00:17 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157954500))
+
+Good catch. Verified `Conn::new` is `const fn` upstream (`connections/src/conn.rs:227`), so the four single-type-side Conns are now `pub const` constants matching the upstream pattern (`F032F016`, `F064FD12`, etc.):
+
+```rust
+pub const TICKTIME: Conn<Tick, Time> = Conn::new(...);
+pub const WHOLTICK: Conn<Whole, Tick> = Conn::new(...);
+pub const TIMETIME: Conn<(Time, Time), Time> = Conn::new(...);
+pub const GRIDGRID: Conn<(Grid, Grid), Grid> = Conn::new(...);
+```
+
+Module doc updated. `quantize_at` stays a function — its inner/ceil/floor pointers vary per `Grid` value.
+
+<!-- gh-id: 3157954627 -->
+#### ↳ cmk ([2026-04-29 00:17 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157954627))
+
+Fixed — promoted the four single-type-side accessor functions to `pub const TICKTIME` / `WHOLTICK` / `TIMETIME` / `GRIDGRID`. Plan text and implementation now agree.
+
+<!-- gh-id: 3157955119 -->
+#### ↳ cmk ([2026-04-29 00:17 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157955119))
+
+Fixed — rewrote the comment block. It now describes `arb_tick`'s horizon cap (`u32::MAX × Grid::T1.tick_count()`), the `ceil_fits` filter that skips finer-grid overflow, and the `<=` semantics that replaced `.ple`. No more references to `.ple` or `u32::MAX`.
+
+<!-- gh-id: 3157955330 -->
+#### ↳ cmk ([2026-04-29 00:17 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157955330))
+
+Fixed — heading now reads `// ── Lattice-connection laws for \`TIMETIME\` and \`GRIDGRID\` ──`, and the body sentence cites "the standard divisibility \`PartialOrd\` for \`Grid\`" instead of the removed \`Ple\` impl.
+
+<!-- gh-id: 3157955470 -->
+#### ↳ cmk ([2026-04-29 00:18 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157955470))
+
+Fixed — `arb_tick` doc now intra-doc-links `[`TICKTIME`](crate::time::conn::TICKTIME)`.
+
+<!-- gh-id: 3157955598 -->
+#### ↳ cmk ([2026-04-29 00:18 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157955598))
+
+Fixed — renamed `ple_reflexive` / `ple_antisymmetric` / `ple_transitive` to `le_*`.
+
+<!-- gh-id: 3157955868 -->
+#### ↳ cmk ([2026-04-29 00:18 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157955868))
+
+Fixed — section heading is now `// ── ticktime ──`.
+
+<!-- gh-id: 3157956010 -->
+#### ↳ cmk ([2026-04-29 00:18 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157956010))
+
+Fixed — renamed `ple_reflexive` / `ple_antisymmetric` / `ple_transitive` / `ple_total` to `le_*` in this proptest block.
+
+<!-- gh-id: 3157956185 -->
+#### ↳ cmk ([2026-04-29 00:18 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157956185))
+
+Fixed — renamed to `le_compares_inner`.
+
+<!-- gh-id: 3157956398 -->
+#### ↳ cmk ([2026-04-29 00:18 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157956398))
+
+Fixed — renamed all `rat_tick_*` spot checks and proptests to `wholtick_*`. Plan-conformant now.
+
+<!-- gh-id: 3157956634 -->
+#### ↳ cmk ([2026-04-29 00:18 UTC](https://github.com/cmk/agogo/pull/43#discussion_r3157956634))
+
+Fixed — Verification table now lists the actual property names (`from_ticks_some_at_horizon`, `from_ticks_none_above_horizon`, `from_ticks_none_at_u64_max`, `divisibility_chain_strictly_ascending`, `tbase_le_matches_old_ple`).

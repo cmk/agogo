@@ -4,7 +4,7 @@
 //! representations of the same duration (`Time { 240, T512P }` and
 //! `Time { 1, T16 }` are both 240 ticks at 960 PPQN) compare equal.
 //!
-//! `from_ticks` is the ceiling side of the `ticks` Galois connection:
+//! `from_ticks` is the ceiling side of the `ticktime` Galois connection:
 //! it rounds the input up to the [`Grid::T512P`] grid (1 tick = the
 //! lattice bottom) then picks the nicest representation — coarsest
 //! `Grid` whose tick count divides the rounded value, giving the
