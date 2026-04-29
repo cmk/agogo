@@ -90,7 +90,9 @@ fn nicest_from_tick_count(n: u64) -> Option<Time> {
         let tc = u64::from(g.tick_count());
         if n % tc == 0 {
             let beats = n / tc;
-            return u32::try_from(beats).ok().map(|beats| Time { beats, base: g });
+            return u32::try_from(beats)
+                .ok()
+                .map(|beats| Time { beats, base: g });
         }
     }
     unreachable!("Grid::T512P (tick_count = 1) divides every u64 value");
