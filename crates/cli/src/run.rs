@@ -12,6 +12,26 @@
 //!
 //! Feature-gated on `run` (= `demo + link + ctrlc`). Compiled in by
 //! `cargo build -p agogo-cli --features run`.
+//!
+//! ## `agogo_host_link::*` scoping rule (Plan 09 T3 audit)
+//!
+//! The `agogo-cli` crate is meant to stay buildable without the
+//! `link` feature (`cargo build -p agogo-cli --no-default-features
+//! --features core,cpal,midi` is the regression-pinned invariant —
+//! see `.github/workflows/ci.yml` `cli-no-link` job). Module-scope
+//! `agogo_host_link::*` imports in this file are OK because the
+//! whole module sits behind `cfg(feature = "run")` and `run` requires
+//! `link`.
+//!
+//! In-function uses **must remain inside the `Source::Link` branch**
+//! of `run_with_rate`'s match (see `LinkSession::new(...)` site
+//! below). Constructing a Link type in the `internal` or `external`
+//! source arms would break the architectural separation: even though
+//! the import compiles fine here, it advertises a Link dependency to
+//! readers that internal/external mode emphatically does not have.
+//! Plan 09's T1 helper (`agogo_host_link::apply_snap_offsets`) lives
+//! in host-link itself for the same reason — fewer Link call sites
+//! in cli, not more.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
