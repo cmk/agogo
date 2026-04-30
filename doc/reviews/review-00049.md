@@ -20,7 +20,7 @@ rest of the scaffold and tests appear consistent with the stated plan.
 ### Findings
 
 - **[P2] Return an error instead of panicking for large BPM** —
-  `crates/stdio/src/driver.rs:170`
+  `crates/host/src/driver.rs:170`
 
   When a stdio client calls `agogo.tempo.set` with an integer BPM
   above 4294, `parse_u32_field` accepts it but
@@ -30,19 +30,19 @@ rest of the scaffold and tests appear consistent with the stated plan.
   before constructing `Tempo`.
 
 <!-- gh-id: 3167623074 -->
-### Copilot on [`crates/stdio/src/driver.rs:171`](https://github.com/cmk/agogo/pull/49#discussion_r3167623074) (2026-04-30 11:39 UTC)
+### Copilot on [`crates/host/src/driver.rs:171`](https://github.com/cmk/agogo/pull/49#discussion_r3167623074) (2026-04-30 11:39 UTC)
 
 `parse_integer_bpm` hard-codes the max integer BPM (4294). Since this limit comes from `Tempo`’s internal scaling/representation, consider centralizing it (e.g., a `Tempo::MAX_BPM_INTEGER` constant or helper) to avoid future divergence if the scaling changes.
 
 
 <!-- gh-id: 3167623094 -->
-### Copilot on [`crates/stdio/src/rt_bridge.rs:107`](https://github.com/cmk/agogo/pull/49#discussion_r3167623094) (2026-04-30 11:39 UTC)
+### Copilot on [`crates/host/src/rt_bridge.rs:107`](https://github.com/cmk/agogo/pull/49#discussion_r3167623094) (2026-04-30 11:39 UTC)
 
 `tempo_raw` is used for cross-thread handoff (async tool call -> audio callback) but uses `Ordering::Relaxed` on the store. With relaxed ordering there’s no synchronization and the audio thread is allowed to observe stale values even when the write happens-before the next buffer in wall-clock time, which undermines the "applies_by next_buffer" contract. Consider using `Release` on `set_tempo` (and matching `Acquire` on loads) to establish a proper handoff.
 
 
 <!-- gh-id: 3167623111 -->
-### Copilot on [`crates/stdio/src/rt_bridge.rs:126`](https://github.com/cmk/agogo/pull/49#discussion_r3167623111) (2026-04-30 11:39 UTC)
+### Copilot on [`crates/host/src/rt_bridge.rs:126`](https://github.com/cmk/agogo/pull/49#discussion_r3167623111) (2026-04-30 11:39 UTC)
 
 The audio-thread snapshot load of `tempo_raw` also uses `Ordering::Relaxed`. If `set_tempo` is updated to use `Release`, this should typically be `Acquire` (or stronger) so the read participates in the synchronization and avoids seeing stale tempo values longer than intended.
 
@@ -51,10 +51,10 @@ The audio-thread snapshot load of `tempo_raw` also uses `Ordering::Relaxed`. If 
 
 ## Pull request overview
 
-Introduces an `agogo-stdio` workspace crate to scaffold stdio-core integration with an RT-safe control bridge (atomics for tempo + `rtrb` SPSC for ordered commands), and updates roadmap/docs to align v0.3/v0.4 contracts with the corresponding stdio-core plans (including the BPM overflow rejection noted in the local review).
+Introduces an `agogo-host` workspace crate to scaffold stdio-core integration with an RT-safe control bridge (atomics for tempo + `rtrb` SPSC for ordered commands), and updates roadmap/docs to align v0.3/v0.4 contracts with the corresponding stdio-core plans (including the BPM overflow rejection noted in the local review).
 
 **Changes:**
-- Added `crates/stdio` (`agogo-stdio`) with an RT-safe async→audio control bridge and driver-shaped tool routing for initial agogo tools.
+- Added `crates/host` (`agogo-host`) with an RT-safe async→audio control bridge and driver-shaped tool routing for initial agogo tools.
 - Added/updated plan and review documentation for control (Plan 2026-04-30-01) and observation (Plan 2026-04-30-02), and aligned v0.3/v0.4 version docs to stdio-core contracts.
 - Wired the new crate into the workspace and dependencies (`rtrb`).
 
@@ -72,12 +72,12 @@ Copilot reviewed 10 out of 11 changed files in this pull request and generated 5
 | doc/reviews/review-00049.md | Records local review finding about BPM overflow panic and expected fix direction. |
 | doc/plans/plan-2026-04-30-02.md | Adds the v0.4 snapshot observation plan (schema, RT write, async publish, drop/seq tests). |
 | doc/plans/plan-2026-04-30-01.md | Adds the v0.3 control adapter plan (RT bridge, lifecycle/tool routing, tests, docs alignment). |
-| crates/stdio/src/rt_bridge.rs | Implements the atomics + `rtrb` SPSC RT-safe control bridge with unit tests. |
-| crates/stdio/src/lib.rs | Defines the new crate surface and re-exports driver/bridge types. |
-| crates/stdio/src/driver.rs | Implements driver-shaped tool routing, mounting gate, parsing, inverse-op scaffolding, and tests (incl. BPM cap). |
-| crates/stdio/Cargo.toml | Adds package metadata and dependencies for `agogo-stdio`. |
-| Cargo.toml | Adds `crates/stdio` as a workspace member and `rtrb` as a workspace dependency. |
-| Cargo.lock | Locks `agogo-stdio` and `rtrb` dependency resolution. |
+| crates/host/src/rt_bridge.rs | Implements the atomics + `rtrb` SPSC RT-safe control bridge with unit tests. |
+| crates/host/src/lib.rs | Defines the new crate surface and re-exports driver/bridge types. |
+| crates/host/src/driver.rs | Implements driver-shaped tool routing, mounting gate, parsing, inverse-op scaffolding, and tests (incl. BPM cap). |
+| crates/host/Cargo.toml | Adds package metadata and dependencies for `agogo-host`. |
+| Cargo.toml | Adds `crates/host` as a workspace member and `rtrb` as a workspace dependency. |
+| Cargo.lock | Locks `agogo-host` and `rtrb` dependency resolution. |
 </details>
 
 
@@ -86,12 +86,12 @@ Copilot reviewed 10 out of 11 changed files in this pull request and generated 5
 
 
 <!-- gh-id: 3167623125 -->
-### Copilot on [`crates/stdio/src/driver.rs:181`](https://github.com/cmk/agogo/pull/49#discussion_r3167623125) (2026-04-30 11:39 UTC)
+### Copilot on [`crates/host/src/driver.rs:181`](https://github.com/cmk/agogo/pull/49#discussion_r3167623125) (2026-04-30 11:39 UTC)
 
 `parse_u32_field` returns "missing integer field" both when the field is absent and when it exists but is the wrong JSON type (e.g., string/float/negative). This makes tool errors misleading for callers. Consider distinguishing "missing" vs "expected unsigned integer" (or wording like "missing or non-integer field").
 
 <!-- gh-id: 3167623143 -->
-### Copilot on [`crates/stdio/src/driver.rs:145`](https://github.com/cmk/agogo/pull/49#discussion_r3167623143) (2026-04-30 11:39 UTC)
+### Copilot on [`crates/host/src/driver.rs:145`](https://github.com/cmk/agogo/pull/49#discussion_r3167623143) (2026-04-30 11:39 UTC)
 
 `inverse_op` for `TempoSet` trusts `prior_bpm` from `args` and returns an inverse tool call even if `prior_bpm` is out of the representable `Tempo` range. That can produce an inverse that is guaranteed to fail when applied (breaking the round-trip/undo contract). Consider validating `prior_bpm` (<= 4294 and within `u32`) before returning `Some(...)`, otherwise return `None`.
 
@@ -122,7 +122,7 @@ Done in fdb6911. parse_u32_field now distinguishes a missing field from a presen
 Done in fdb6911. inverse_op now validates prior_bpm through the same representable tempo range and returns None for out-of-range values, with a regression test covering that case.
 
 <!-- gh-id: 3167690710 -->
-### Copilot on [`crates/stdio/src/driver.rs:183`](https://github.com/cmk/agogo/pull/49#discussion_r3167690710) (2026-04-30 11:52 UTC)
+### Copilot on [`crates/host/src/driver.rs:183`](https://github.com/cmk/agogo/pull/49#discussion_r3167690710) (2026-04-30 11:52 UTC)
 
 `parse_u32_field` (and therefore `parse_integer_bpm`) assumes `args` is a JSON object; if a caller passes a non-object (e.g. `null`, array, string), `Value::get` returns `None` and the error becomes “missing integer field …”, which is misleading. Consider validating the top-level `args` shape (object) up-front for tools that take arguments, and return a more accurate error when `args` isn’t an object.
 
@@ -131,10 +131,10 @@ Done in fdb6911. inverse_op now validates prior_bpm through the same representab
 
 ## Pull request overview
 
-This PR scaffolds agogo’s upcoming stdio-core integration by introducing an `agogo-stdio` workspace crate with an RT-safe control bridge (atomics + SPSC ring buffer) and aligning v0.3/v0.4 roadmap/docs with the corresponding stdio-core lifecycle/control and observation contracts.
+This PR scaffolds agogo’s upcoming stdio-core integration by introducing an `agogo-host` workspace crate with an RT-safe control bridge (atomics + SPSC ring buffer) and aligning v0.3/v0.4 roadmap/docs with the corresponding stdio-core lifecycle/control and observation contracts.
 
 **Changes:**
-- Added `crates/stdio` (`agogo-stdio`) with driver-shaped tool routing and an RT-safe async→audio control bridge (atomic tempo + `rtrb` SPSC commands), plus unit tests.
+- Added `crates/host` (`agogo-host`) with driver-shaped tool routing and an RT-safe async→audio control bridge (atomic tempo + `rtrb` SPSC commands), plus unit tests.
 - Centralized the representable integer BPM ceiling as `Tempo::MAX_BPM_INTEGER` and updated tempo parsing to reject out-of-range values instead of panicking.
 - Added/updated plan + review docs and refreshed v0.3/v0.4 version docs to match stdio-core Plan 10/11 integration contracts.
 
@@ -152,13 +152,13 @@ Copilot reviewed 11 out of 12 changed files in this pull request and generated 2
 | doc/reviews/review-00049.md | Adds a local review record for PR #49 and the BPM overflow finding. |
 | doc/plans/plan-2026-04-30-02.md | Adds Plan 11-aligned snapshot observation plan (schema, RT write, async publish, drop/seq tests). |
 | doc/plans/plan-2026-04-30-01.md | Adds Plan 10-aligned control adapter plan (bridge, lifecycle/tool routing, tests). |
-| crates/stdio/src/rt_bridge.rs | Implements the RT-safe bridge (Release/Acquire tempo atomic + `rtrb` SPSC) with tests. |
-| crates/stdio/src/lib.rs | Defines the new crate and re-exports driver/bridge types. |
-| crates/stdio/src/driver.rs | Implements driver-shaped tool routing, parsing, inverse-op scaffolding, and tests (incl. BPM cap). |
-| crates/stdio/Cargo.toml | Adds the `agogo-stdio` crate and its dependencies. |
+| crates/host/src/rt_bridge.rs | Implements the RT-safe bridge (Release/Acquire tempo atomic + `rtrb` SPSC) with tests. |
+| crates/host/src/lib.rs | Defines the new crate and re-exports driver/bridge types. |
+| crates/host/src/driver.rs | Implements driver-shaped tool routing, parsing, inverse-op scaffolding, and tests (incl. BPM cap). |
+| crates/host/Cargo.toml | Adds the `agogo-host` crate and its dependencies. |
 | crates/core/src/conn/tempo.rs | Introduces `Tempo::MAX_BPM_INTEGER` and updates panic wording for overflow. |
-| Cargo.toml | Adds `crates/stdio` to the workspace and adds `rtrb` as a workspace dependency. |
-| Cargo.lock | Locks `agogo-stdio` and `rtrb` dependency resolution. |
+| Cargo.toml | Adds `crates/host` to the workspace and adds `rtrb` as a workspace dependency. |
+| Cargo.lock | Locks `agogo-host` and `rtrb` dependency resolution. |
 </details>
 
 

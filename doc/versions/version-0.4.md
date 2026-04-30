@@ -38,10 +38,10 @@ snapshot stream.
 
 | Property | Module | Invariant |
 |----------|--------|-----------|
-| `snapshot_schema_round_trips` | `agogo_stdio::snapshot` | `AgogoSnapshot` serde → `serde_json::Value` → `AgogoSnapshot` is identity for arbitrary generated snapshots. |
-| `seq_monotonic_under_decimation` | `agogo_stdio::snapshot::push` | The `seq` field on published `ObservationParams` is strictly monotonic per-`stream_id`, even when the RT writer and the decimating reader run at different rates. |
-| `rt_push_has_no_alloc` | `agogo_stdio::snapshot::push` | Writing a snapshot from the audio thread does not allocate. The serialization and `dispatch()` call happen on the decimating task, not in the RT callback. |
-| `agogo_snapshot_drop_is_detectable` | `agogo_stdio::snapshot::push` | Forced observation backpressure produces a detectable `seq` gap, not corrupted or unparsable snapshot state. |
+| `snapshot_schema_round_trips` | `agogo_host::snapshot` | `AgogoSnapshot` serde → `serde_json::Value` → `AgogoSnapshot` is identity for arbitrary generated snapshots. |
+| `seq_monotonic_under_decimation` | `agogo_host::snapshot::push` | The `seq` field on published `ObservationParams` is strictly monotonic per-`stream_id`, even when the RT writer and the decimating reader run at different rates. |
+| `rt_push_has_no_alloc` | `agogo_host::snapshot::push` | Writing a snapshot from the audio thread does not allocate. The serialization and `dispatch()` call happen on the decimating task, not in the RT callback. |
+| `agogo_snapshot_drop_is_detectable` | `agogo_host::snapshot::push` | Forced observation backpressure produces a detectable `seq` gap, not corrupted or unparsable snapshot state. |
 | `cv_impulse_is_sample_accurate` | `out::audio::cv` | For any `(sr, ppqn, bpm)` with an integer samples-per-tick (the v0.2 sweet-spot band), the emitted CV impulse lands on the exact tick-boundary sample index with zero offset. |
 | `cv_impulse_energy_is_one_sample` | `out::audio::cv` | Each emitted CV pulse is exactly one non-zero sample (`±1.0`) followed by zero; no multi-sample ringing or DC creep. |
 

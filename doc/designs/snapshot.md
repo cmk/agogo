@@ -1,7 +1,7 @@
 # AgogoSnapshot v1
 
 `AgogoSnapshot` is the human-rate observation payload shared by the
-standalone TUI, the stdio adapter, and the future stdio-core
+standalone TUI, the host adapter, and the future stdio-core
 `agogo-state` renderer. It is telemetry only: control still flows
 through agogo's RT-safe control bridge, never through observation.
 

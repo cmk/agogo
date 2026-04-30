@@ -32,6 +32,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "agogo-host"
+version = "0.1.0"
+dependencies = [
+ "agogo-core",
+ "proptest",
+ "rtrb",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "agogo-host-cpal"
 version = "0.1.0"
 dependencies = [
@@ -59,18 +71,6 @@ dependencies = [
  "midir",
  "thiserror 2.0.18",
  "tracing",
-]
-
-[[package]]
-name = "agogo-stdio"
-version = "0.1.0"
-dependencies = [
- "agogo-core",
- "proptest",
- "rtrb",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]

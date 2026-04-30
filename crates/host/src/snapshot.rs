@@ -19,7 +19,7 @@ pub const MAX_SNAPSHOT_CHANNELS: usize = 16;
 
 const SCALE_MICRO: u32 = 1_000_000;
 
-/// Full observation state shared by the standalone TUI and stdio adapter.
+/// Full observation state shared by the standalone TUI and host adapter.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AgogoSnapshot {
     pub schema: String,

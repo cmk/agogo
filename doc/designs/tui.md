@@ -36,7 +36,7 @@ first.
   free primitive — `triple_buffer` or equivalent. The TUI thread
   polls at 30 Hz. The snapshot lives in agogo core and exists for
   the standalone TUI first. v0.4's "push to stdio-core" work then
-  reuses the same type — the stdio-core adapter serializes it to
+  reuses the same type — the host adapter serializes it to
   `ObservationParams` and ships it through `ObservationDispatcher`
   — but the standalone read path isn't downstream of that: both
   consumers read the same wait-free slot.

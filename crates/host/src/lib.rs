@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! stdio-core adapter support for agogo.
+//! host adapter support for agogo.
 //!
 //! This crate starts with agogo-owned real-time control primitives.
 //! The actual `stdio_core::driver::StudioMcpServer` impl is kept as
@@ -9,12 +9,12 @@
 //! bridge independent preserves `cargo test --workspace` on agogo's
 //! pinned toolchain while giving the adapter a tested core.
 
+pub mod bridge;
 pub mod driver;
-pub mod rt_bridge;
 pub mod snapshot;
 
-pub use driver::{AgogoDriver, AgogoDriverConfig, Tool};
-pub use rt_bridge::{
-    BridgeError, ControlCommand, ControlProducer, RtControlConsumer, RtParams, spsc,
+pub use bridge::{
+    BridgeError, ControlCommand, ControlConsumer, ControlParams, ControlProducer, spsc,
 };
+pub use driver::{AgogoDriver, AgogoDriverConfig, Tool};
 pub use snapshot::{AgogoSnapshot, SnapshotSlot};

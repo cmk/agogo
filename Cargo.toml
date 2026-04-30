@@ -2,7 +2,7 @@
 members = [
     "crates/core",
     "crates/cli",
-    "crates/stdio",
+    "crates/host",
 ]
 # `crates/host-link` is intentionally NOT a workspace member — it
 # lives as an optional path dep from `crates/cli` (activated by

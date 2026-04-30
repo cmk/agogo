@@ -7,11 +7,11 @@
 **Context**: agogo's standalone CLI + TUI needs a lock-free bridge
 between the UI/keyboard thread and the RT audio callback from v0.1
 onward — this is not invented by v0.3. What v0.3 adds is a *second*
-writer on the same bridge: the `crates/stdio/` adapter that lets a
+writer on the same bridge: the `crates/host/` adapter that lets a
 stdio-core dispatcher issue tool calls alongside (or instead of) the
 local TUI. v0.3 sprint 02 is named "Lock-free control plane" and
 calls out this file as the landing spot, but the design belongs to
-agogo core, not to the stdio-core adapter.
+agogo core, not to the host adapter.
 
 ## Adopt
 
@@ -23,7 +23,7 @@ agogo core, not to the stdio-core adapter.
   queue for events that need to arrive in order (e.g., channel
   reconfigure, preset load). The distinction is "is it safe to miss
   an intermediate value" — if yes, atomic; if no, queue. One writer
-  at a time: the TUI and the stdio-core adapter don't coexist in
+  at a time: the TUI and the host adapter don't coexist in
   the same process; embedding via stdio-core replaces the TUI's
   keyboard thread with the dispatcher, leaving SWSR intact.
 - **Read-once-per-buffer, not per-sample.** The RT callback snapshots
@@ -76,6 +76,6 @@ agogo core, not to the stdio-core adapter.
   shutdown example threads this through the whole app. In
   standalone mode agogo's CLI already has a shutdown path via the
   TUI's `q` key / SIGINT handler (see `tui.md`); in stdio-core
-  embedded mode the `crates/stdio/` adapter drops out when the
+  embedded mode the `crates/host/` adapter drops out when the
   dispatcher tears it down. Either way, lifecycle is the lifecycle
   doc's concern, not the control plane's.

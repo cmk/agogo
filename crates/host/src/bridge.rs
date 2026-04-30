@@ -1,7 +1,7 @@
 //! RT-safe async-to-audio control bridge.
 //!
 //! The async side writes through [`ControlProducer`]. The audio side
-//! owns [`RtControlConsumer`] and reads once per buffer. Last-value
+//! owns [`ControlConsumer`] and reads once per buffer. Last-value
 //! controls use atomics; ordered controls use an SPSC ring. The audio
 //! side never locks and never allocates.
 
@@ -22,16 +22,16 @@ pub enum ControlCommand {
 
 /// Per-buffer scalar snapshot read by the audio callback.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct RtParams {
+pub struct ControlParams {
     pub tempo: Tempo,
 }
 
 #[derive(Debug)]
-struct SharedParams {
+struct SharedControlParams {
     tempo_raw: AtomicU32,
 }
 
-impl SharedParams {
+impl SharedControlParams {
     fn new(tempo: Tempo) -> Self {
         Self {
             tempo_raw: AtomicU32::new(tempo.0),
@@ -41,7 +41,7 @@ impl SharedParams {
 
 /// Async/control-side bridge handle.
 pub struct ControlProducer {
-    shared: Arc<SharedParams>,
+    shared: Arc<SharedControlParams>,
     producer: Mutex<rtrb::Producer<ControlCommand>>,
 }
 
@@ -54,14 +54,14 @@ impl std::fmt::Debug for ControlProducer {
 }
 
 /// Audio-thread bridge handle.
-pub struct RtControlConsumer {
-    shared: Arc<SharedParams>,
+pub struct ControlConsumer {
+    shared: Arc<SharedControlParams>,
     consumer: rtrb::Consumer<ControlCommand>,
 }
 
-impl std::fmt::Debug for RtControlConsumer {
+impl std::fmt::Debug for ControlConsumer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RtControlConsumer")
+        f.debug_struct("ControlConsumer")
             .field("snapshot", &self.snapshot())
             .finish_non_exhaustive()
     }
@@ -82,15 +82,15 @@ impl<T> From<PoisonError<T>> for BridgeError {
 }
 
 /// Build a paired async producer / RT consumer.
-pub fn spsc(capacity: usize, initial_tempo: Tempo) -> (ControlProducer, RtControlConsumer) {
+pub fn spsc(capacity: usize, initial_tempo: Tempo) -> (ControlProducer, ControlConsumer) {
     let (producer, consumer) = rtrb::RingBuffer::new(capacity);
-    let shared = Arc::new(SharedParams::new(initial_tempo));
+    let shared = Arc::new(SharedControlParams::new(initial_tempo));
     (
         ControlProducer {
             shared: Arc::clone(&shared),
             producer: Mutex::new(producer),
         },
-        RtControlConsumer { shared, consumer },
+        ControlConsumer { shared, consumer },
     )
 }
 
@@ -117,10 +117,10 @@ impl ControlProducer {
     }
 }
 
-impl RtControlConsumer {
+impl ControlConsumer {
     /// Read last-value controls once per buffer.
-    pub fn snapshot(&self) -> RtParams {
-        RtParams {
+    pub fn snapshot(&self) -> ControlParams {
+        ControlParams {
             tempo: Tempo(self.shared.tempo_raw.load(Ordering::Acquire)),
         }
     }

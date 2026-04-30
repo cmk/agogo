@@ -1,4 +1,4 @@
-//! Driver-shaped tool routing for the stdio adapter.
+//! Driver-shaped tool routing for the host adapter.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use agogo_core::conn::tempo::Tempo;
 use serde_json::{Value, json};
 
-use crate::rt_bridge::{BridgeError, ControlCommand, ControlProducer, spsc};
+use crate::bridge::{BridgeError, ControlCommand, ControlProducer, spsc};
 
 /// Initial adapter configuration.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -24,7 +24,7 @@ impl Default for AgogoDriverConfig {
     }
 }
 
-/// Initial agogo stdio tools.
+/// Initial agogo host tools.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Tool {
     TempoSet,
@@ -58,7 +58,7 @@ impl Tool {
     }
 }
 
-/// agogo's stdio-facing driver shell.
+/// agogo's host-facing driver shell.
 ///
 /// This intentionally mirrors stdio-core's driver lifecycle without
 /// importing stdio-core yet. The trait implementation lands once the
@@ -70,7 +70,7 @@ pub struct AgogoDriver {
 }
 
 impl AgogoDriver {
-    pub fn new(config: AgogoDriverConfig) -> (Self, crate::RtControlConsumer) {
+    pub fn new(config: AgogoDriverConfig) -> (Self, crate::ControlConsumer) {
         let (producer, consumer) = spsc(config.queue_capacity, config.initial_tempo);
         (
             Self {
@@ -189,7 +189,7 @@ fn parse_u32_field(args: &Value, field: &str) -> Result<u32, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rt_bridge::ControlCommand;
+    use crate::bridge::ControlCommand;
 
     #[test]
     fn driver_advertises_initial_tool_set() {
