@@ -175,7 +175,10 @@ fn parse_integer_bpm(args: &Value) -> Result<Tempo, String> {
 }
 
 fn parse_u32_field(args: &Value, field: &str) -> Result<u32, String> {
-    let value = args
+    let object = args
+        .as_object()
+        .ok_or_else(|| "tool arguments must be a JSON object".to_owned())?;
+    let value = object
         .get(field)
         .ok_or_else(|| format!("missing integer field `{field}`"))?
         .as_u64()
@@ -254,6 +257,18 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, "field `bpm` must be an unsigned integer");
+    }
+
+    #[test]
+    fn tempo_set_rejects_non_object_args_with_precise_error() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let err = driver
+            .handle_call(Tool::TempoSet.name(), Value::Null)
+            .unwrap_err();
+
+        assert_eq!(err, "tool arguments must be a JSON object");
     }
 
     #[test]

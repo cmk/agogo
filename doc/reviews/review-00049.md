@@ -12,8 +12,9 @@ See `doc/plans/plan-2026-04-30-01.md` and
 
 ---
 
-The new stdio tool handler can panic on out-of-range user input
-rather than returning an error, which can destabilize the adapter. The
+During local review, the new stdio tool handler could panic on
+out-of-range user input rather than returning an error, which could
+destabilize the adapter. That finding has been fixed in this PR. The
 rest of the scaffold and tests appear consistent with the stated plan.
 
 ### Findings
@@ -119,3 +120,76 @@ Done in fdb6911. parse_u32_field now distinguishes a missing field from a presen
 #### ↳ cmk ([2026-04-30 11:50 UTC](https://github.com/cmk/agogo/pull/49#discussion_r3167676661))
 
 Done in fdb6911. inverse_op now validates prior_bpm through the same representable tempo range and returns None for out-of-range values, with a regression test covering that case.
+
+<!-- gh-id: 3167690710 -->
+### Copilot on [`crates/stdio/src/driver.rs:183`](https://github.com/cmk/agogo/pull/49#discussion_r3167690710) (2026-04-30 11:52 UTC)
+
+`parse_u32_field` (and therefore `parse_integer_bpm`) assumes `args` is a JSON object; if a caller passes a non-object (e.g. `null`, array, string), `Value::get` returns `None` and the error becomes “missing integer field …”, which is misleading. Consider validating the top-level `args` shape (object) up-front for tools that take arguments, and return a more accurate error when `args` isn’t an object.
+
+<!-- gh-id: 4204847057 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-04-30 11:52 UTC](https://github.com/cmk/agogo/pull/49#pullrequestreview-4204847057))
+
+## Pull request overview
+
+This PR scaffolds agogo’s upcoming stdio-core integration by introducing an `agogo-stdio` workspace crate with an RT-safe control bridge (atomics + SPSC ring buffer) and aligning v0.3/v0.4 roadmap/docs with the corresponding stdio-core lifecycle/control and observation contracts.
+
+**Changes:**
+- Added `crates/stdio` (`agogo-stdio`) with driver-shaped tool routing and an RT-safe async→audio control bridge (atomic tempo + `rtrb` SPSC commands), plus unit tests.
+- Centralized the representable integer BPM ceiling as `Tempo::MAX_BPM_INTEGER` and updated tempo parsing to reject out-of-range values instead of panicking.
+- Added/updated plan + review docs and refreshed v0.3/v0.4 version docs to match stdio-core Plan 10/11 integration contracts.
+
+### Reviewed changes
+
+Copilot reviewed 11 out of 12 changed files in this pull request and generated 2 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/versions/version-0.4.md | Updates v0.4 roadmap and acceptance properties to match the stdio-core agogo snapshot/observation contract. |
+| doc/versions/version-0.3.md | Updates v0.3 roadmap and acceptance properties to match stdio-core lifecycle/control expectations. |
+| doc/reviews/review-00049.md | Adds a local review record for PR #49 and the BPM overflow finding. |
+| doc/plans/plan-2026-04-30-02.md | Adds Plan 11-aligned snapshot observation plan (schema, RT write, async publish, drop/seq tests). |
+| doc/plans/plan-2026-04-30-01.md | Adds Plan 10-aligned control adapter plan (bridge, lifecycle/tool routing, tests). |
+| crates/stdio/src/rt_bridge.rs | Implements the RT-safe bridge (Release/Acquire tempo atomic + `rtrb` SPSC) with tests. |
+| crates/stdio/src/lib.rs | Defines the new crate and re-exports driver/bridge types. |
+| crates/stdio/src/driver.rs | Implements driver-shaped tool routing, parsing, inverse-op scaffolding, and tests (incl. BPM cap). |
+| crates/stdio/Cargo.toml | Adds the `agogo-stdio` crate and its dependencies. |
+| crates/core/src/conn/tempo.rs | Introduces `Tempo::MAX_BPM_INTEGER` and updates panic wording for overflow. |
+| Cargo.toml | Adds `crates/stdio` to the workspace and adds `rtrb` as a workspace dependency. |
+| Cargo.lock | Locks `agogo-stdio` and `rtrb` dependency resolution. |
+</details>
+
+
+
+<details>
+<summary>Comments suppressed due to low confidence (1)</summary>
+
+**crates/core/src/conn/tempo.rs:22**
+* nit: The doc comment for `Tempo::from_bpm_integer` still hard-codes the max integer BPM as `4294`, even though this PR introduces `Tempo::MAX_BPM_INTEGER`. To keep the docs aligned if the internal scaling changes, consider referencing `MAX_BPM_INTEGER` (or describing the limit in terms of the `u32`/scale math) instead of a literal.
+```
+    pub const MAX_BPM_INTEGER: u32 = u32::MAX / 1_000_000;
+
+    /// Construct from an integer BPM. Panics if `n > 4294` (`n × 10⁶`
+    /// overflows `u32`). `checked_mul` avoids the silent release-build
+    /// wrap that plain `n * 1_000_000` would produce.
+```
+</details>
+
+
+
+<!-- gh-id: 3167690750 -->
+### Copilot on [`doc/reviews/review-00049.md:17`](https://github.com/cmk/agogo/pull/49#discussion_r3167690750) (2026-04-30 11:52 UTC)
+
+The review summary says the new `agogo.tempo.set` handler *can panic* on out-of-range BPM input, but the current code in this PR rejects BPM values above `Tempo::MAX_BPM_INTEGER` and returns an error instead. Consider updating this paragraph to reflect that the panic path was the finding during local review and has since been fixed (or explicitly mark it as “fixed” in this PR) to avoid misleading readers.
+
+<!-- gh-id: 3167700929 -->
+#### ↳ cmk ([2026-04-30 11:55 UTC](https://github.com/cmk/agogo/pull/49#discussion_r3167700929))
+
+Done in this review round. parse_u32_field now validates that tool arguments are a JSON object before looking up fields, so non-object args return a precise shape error instead of a missing-field error.
+
+<!-- gh-id: 3167701972 -->
+#### ↳ cmk ([2026-04-30 11:55 UTC](https://github.com/cmk/agogo/pull/49#discussion_r3167701972))
+
+Done in this review round. The local review paragraph now states that the panic was the original local-review finding and has been fixed in this PR.
