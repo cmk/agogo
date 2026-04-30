@@ -242,7 +242,7 @@ pub fn parse_tokens(tokens: &[Token], source: &str) -> Result<Expr, DslError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::lexer::tokenize;
+    use crate::channel::dsl::lexer::tokenize;
     use crate::time::grid::Grid;
 
     fn parse(s: &str) -> Result<Expr, DslError> {

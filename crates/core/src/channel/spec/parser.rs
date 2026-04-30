@@ -10,11 +10,11 @@
 
 use core::num::{NonZeroU16, NonZeroU32};
 
+use crate::channel::dsl;
 use crate::channel::role::{MidiClickAccent, MidiClickConfig, MidiRole};
 use crate::conn::fixed::Micro;
 use crate::conn::float::F064FD06;
 use crate::conn::midi::{U4, U7};
-use crate::dsl;
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
 use crate::time::tbase::TBase;

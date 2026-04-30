@@ -18,8 +18,6 @@
 //! control thread interacts only through the [`MachineStopHandle`]'s
 //! [`AtomicBool`].
 
-pub mod spec;
-
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,8 +30,6 @@ use crate::host::AudioIo;
 use crate::out::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::sync::PhaseSource;
 use crate::time::conn::SampleTickConn;
-
-pub use spec::{ChannelSpec, ChannelSpecError, parse_channels};
 
 /// N-channel runtime state. Built on the control thread, moved into
 /// the audio callback closure, never mutated from the control thread

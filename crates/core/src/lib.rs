@@ -2,7 +2,6 @@
 
 pub mod channel;
 pub mod conn;
-pub mod dsl;
 pub mod host;
 pub mod machine;
 pub mod out;

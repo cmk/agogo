@@ -10,7 +10,7 @@
 
 use crate::channel::Channel;
 use crate::channel::role::ChannelCommon;
-use crate::channel::transform::MAX_DELAY;
+use crate::channel::time::MAX_DELAY;
 use crate::conn::fixed::Micro;
 
 use super::ChannelSpec;

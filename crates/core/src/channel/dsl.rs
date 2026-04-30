@@ -28,7 +28,7 @@ use crate::time::grid::Grid;
 /// # Examples
 ///
 /// ```
-/// use agogo_core::dsl;
+/// use agogo_core::channel::dsl;
 /// use agogo_core::time::grid::Grid;
 ///
 /// // Plain grid atom:
@@ -57,8 +57,8 @@ pub fn parse(input: &str, env: &[(String, Grid)]) -> Result<Grid, DslError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::ast::{Expr, Span};
-    use crate::dsl::eval;
+    use crate::channel::dsl::ast::{Expr, Span};
+    use crate::channel::dsl::eval;
     use crate::time::grid::Grid;
     use connections::lattice::{Coheyting, Heyting, Join, Meet};
     use proptest::prelude::*;

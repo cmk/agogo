@@ -17,7 +17,7 @@
 #                                                 before Plan 2026-04-28-08 distributed arb.rs)
 #   crates/core/src/host.rs                       PCM ABI shape (AudioIo `&[f32]` slices)
 #   crates/core/src/machine.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction in tests)
-#   crates/core/src/machine/spec/parser.rs        argv-boundary (--ch delay=ms via F064FD06; split from machine/spec.rs in Plan 2026-04-28-06 T3)
+#   crates/core/src/channel/spec/parser.rs        argv-boundary (--ch delay=ms via F064FD06; split from machine/spec.rs in Plan 2026-04-28-06 T3; moved under channel/ in Plan 2026-04-29-01 T5)
 #   crates/core/src/conn/float.rs                 vendored from connections — F064FDxx Conns
 #                                                 with f64-correction loops are intrinsic
 #                                                 (split from time/decimal.rs in Plan 2026-04-28-03 T1;
@@ -75,7 +75,7 @@ ALLOWED=(
   "crates/core/src/sync/pulse_train.rs"
   "crates/core/src/host.rs"
   "crates/core/src/machine.rs"
-  "crates/core/src/machine/spec/parser.rs"
+  "crates/core/src/channel/spec/parser.rs"
   # Vendored from connections — both modules ship with f64 inside
   # their float→fixed Conn machinery (`F064FDxx` correction loops
   # for conn/float.rs; the FD12↔Sxxx adjoint walk for conn/sample.rs).

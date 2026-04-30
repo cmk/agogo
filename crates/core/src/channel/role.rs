@@ -1,7 +1,7 @@
 //! Per-routing-target role enums + the shared `ChannelCommon`
 //! field set.
 //!
-//! `Channel` (in [`crate::channel::transform`]) is sum-typed by
+//! `Channel` (in [`crate::channel::time`]) is sum-typed by
 //! routing target (`Channel::Midi | Din | Cv`); each variant carries
 //! a [`ChannelCommon`] (the field set the scheduler / transform
 //! pipeline operates on) and a target-specific `*Role` payload that
