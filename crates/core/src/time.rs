@@ -1,3 +1,6 @@
+//! layer: time
+//! depends-on: conn
+//!
 //! Cirklon grid-and-tick algebra: pure, tempo-independent.
 //!
 //! Port of `Control.Cirklon.Type.Time` from the sibling `recologic`

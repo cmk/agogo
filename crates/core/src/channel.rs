@@ -1,3 +1,6 @@
+//! layer: channel
+//! depends-on: time, conn
+//!
 //! Per-channel configuration + the per-channel transform pipeline.
 //! Pure logic — no audio I/O, no MIDI bytes.
 //!

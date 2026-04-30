@@ -50,6 +50,13 @@ jobs:
       - name: check-floats.sh
         run: scripts/check-floats.sh
 
+  layers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-layers.sh
+        run: scripts/check-layers.sh
+
   # Excluded crates (not workspace members) — `cargo test --workspace`
   # in the `test` job above skips them by design (keeps the default
   # CI path off platform system deps). These dedicated jobs exercise

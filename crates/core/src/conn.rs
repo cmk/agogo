@@ -1,3 +1,6 @@
+//! layer: conn
+//! depends-on:
+//!
 //! Galois-connection layer — value types and the lawful conversions
 //! between numeric realms.
 //!
