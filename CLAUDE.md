@@ -293,15 +293,25 @@ code based on it.
     dirty worktree and re-run — if the proptest still passes, the
     generator isn't reaching the failure region and the test is
     decorative. Restore the fix from backup once verified.
-  - **Strategies are colocated with the type they generate.** Each
-    type module owns a `#[cfg(any(test, feature = "testkit"))] pub
-    mod arb;` declaration with strategies in a sibling
-    `<module>/arb.rs` file (e.g. `time/grid.rs` declares the mod;
-    `time/grid/arb.rs` holds `arb_grid`). Same shape upstream
-    `connections` uses (`prop/arb.rs`) and the Haskell connections
-    test layout (`Test/Data/Connection/{Float,Int,…}.hs`). No
-    aggregating root `arb.rs`. Strategies private to a single test
-    module stay inline in that module's `#[cfg(test)]` block.
+  - **One arb file per top-level module.** Each top-level module
+    that exposes proptest strategies owns a single
+    `#[cfg(any(test, feature = "testkit"))] pub mod arb;`
+    declaration on its module-root file, with all strategies for
+    types under that layer collected in `<top>/arb.rs` (e.g.
+    `time/arb.rs` holds `arb_grid`, `arb_tbase`, `arb_tick`,
+    `arb_swing`; `conn/arb.rs` holds `arb_bpm`, `arb_jitter_sigma`,
+    `arb_sample_rate`, the `fixed_*` / `extended_fd*` / `rate_*` /
+    `pico_*` battery vendored from `connections @ d1ac1ead`'s
+    `property::arb`). Same shape as the Haskell connections test
+    layout (`Test/Data/Connection/{Float,Int,…}.hs`) — strategies
+    grouped per top-level module rather than per type. Plan
+    2026-04-29-01 T4 collapsed per-type `arb.rs` files into the
+    top-level files; the prior convention (per-type colocation) was
+    relaxed because it forced sibling-import paths
+    (`crate::time::tempo::arb::arb_bpm`) that bloated importer
+    `use` lines without adding clarity. Strategies private to a
+    single test module stay inline in that module's `#[cfg(test)]`
+    block.
   - Properties that must hold for a sprint to ship are defined **in
     the plan's Verification table** before any code is written.
   - If a property test blocks progress during implementation, you may

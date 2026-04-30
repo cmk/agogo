@@ -71,12 +71,12 @@ pub fn is_aligned(t: Tick, g: Grid) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::arb::arb_grid;
+    use crate::time::arb::arb_swing;
+    use crate::time::arb::arb_tbase;
+    use crate::time::arb::arb_tick;
     use crate::time::conn::quantize_at;
-    use crate::time::grid::arb::arb_grid;
-    use crate::time::swing::arb::arb_swing;
     use crate::time::tbase::BAR;
-    use crate::time::tbase::arb::arb_tbase;
-    use crate::time::tick::arb::arb_tick;
     use proptest::prelude::*;
 
     fn cfg(resolution: TBase, amount: i8) -> SwingConfig {
@@ -487,6 +487,3 @@ mod tests {
         assert_eq!(total, 0);
     }
 }
-
-#[cfg(any(test, feature = "testkit"))]
-pub mod arb;

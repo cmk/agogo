@@ -151,7 +151,7 @@ fix_fix!(FD12FD06, FD12, FD06, 1_000_000);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::arb::{fixed_coarse, fixed_fine, fixed_safe_fine};
+    use crate::conn::arb::{fixed_coarse, fixed_fine, fixed_safe_fine};
     use proptest::prelude::*;
 
     // Sanity spot checks (hand-computed).
@@ -241,7 +241,7 @@ mod tests {
                     // Closure laws use fixed_safe_fine because the
                     // round-trip through inner multiplies by PREC and
                     // must fit i64; see fixed_safe_fine docs in
-                    // crate::property::arb.
+                    // crate::conn::arb.
                     #[test]
                     fn closure_l(x in fixed_safe_fine($prec)) {
                         prop_assert!(laws::conn_closure_l(&$conn, $Fine(x)));
@@ -306,6 +306,3 @@ mod tests {
     // ── ExtendedFloat<f??> → Extended<Rung> tests live in
     // `crate::conn::float::tests` (Plan 2026-04-28-03 T1).
 }
-
-#[cfg(any(test, feature = "testkit"))]
-pub mod arb;

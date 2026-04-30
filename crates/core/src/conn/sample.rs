@@ -330,7 +330,7 @@ impl_sample_time!(S192);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::arb::{
+    use crate::conn::arb::{
         pico_coarse, pico_fine, pico_safe, rate_coarse, rate_fine, rate_safe_fine,
     };
     use proptest::prelude::*;
@@ -424,7 +424,7 @@ mod tests {
     //     which the Galois laws already bound)
     //
     // Strategies (`rate_coarse`, `rate_fine`, `rate_safe_fine`) live
-    // in `crate::time::arb` (vendored from `connections @ d1ac1ead`'s
+    // in `crate::conn::arb` (vendored from `connections @ d1ac1ead`'s
     // `property::arb` alongside the type families they generate for).
     // ─────────────────────────────────────────────
 
@@ -673,6 +673,3 @@ mod tests {
         check(FD12S192, S192::from_sample(1));
     }
 }
-
-#[cfg(any(test, feature = "testkit"))]
-pub mod arb;

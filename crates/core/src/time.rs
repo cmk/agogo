@@ -33,5 +33,5 @@ pub mod swing;
 pub mod tbase;
 pub mod tick;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testkit"))]
 pub mod arb;

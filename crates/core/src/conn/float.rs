@@ -186,7 +186,7 @@ float_conn!(F064FD12, f64, FD12, 1_000_000_000_000);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::arb::{
+    use crate::conn::arb::{
         extended_fd00, extended_fd01, extended_fd02, extended_fd03, extended_fd06, extended_fd09,
         extended_fd12,
     };
@@ -196,7 +196,7 @@ mod tests {
     // ── ExtendedFloat<f??> → Extended<Rung> connections ─────────────────
     //
     // Strategies (`extended_float_f64`, `extended_fd06`,
-    // `extended_fd12`) live in `crate::time::arb`; see the doc
+    // `extended_fd12`) live in `crate::conn::arb`; see the doc
     // there for the `arb_f64_bounded` rationale on why a bounded
     // range beats `any::<f64>()` for these saturation-prone inputs.
 

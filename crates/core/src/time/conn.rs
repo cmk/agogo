@@ -439,9 +439,9 @@ impl SampleTickConn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::conn::arb::arb_rational_nonneg;
-    use crate::time::grid::arb::arb_grid;
-    use crate::time::tick::arb::{arb_small_time, arb_tick, arb_time};
+    use crate::conn::arb::arb_rational_nonneg;
+    use crate::time::arb::arb_grid;
+    use crate::time::arb::{arb_small_time, arb_tick, arb_time};
     use proptest::prelude::*;
 
     // ── Spot checks ──────────────────────────────────────────────
@@ -1360,6 +1360,3 @@ mod sample_tick_tests {
         }
     }
 }
-
-#[cfg(any(test, feature = "testkit"))]
-pub mod arb;

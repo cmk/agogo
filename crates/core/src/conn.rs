@@ -29,3 +29,6 @@ pub mod midi;
 pub mod phase;
 pub mod sample;
 pub mod tempo;
+
+#[cfg(any(test, feature = "testkit"))]
+pub mod arb;
