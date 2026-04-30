@@ -94,3 +94,28 @@ Copilot reviewed 10 out of 11 changed files in this pull request and generated 5
 
 `inverse_op` for `TempoSet` trusts `prior_bpm` from `args` and returns an inverse tool call even if `prior_bpm` is out of the representable `Tempo` range. That can produce an inverse that is guaranteed to fail when applied (breaking the round-trip/undo contract). Consider validating `prior_bpm` (<= 4294 and within `u32`) before returning `Some(...)`, otherwise return `None`.
 
+
+<!-- gh-id: 3167672776 -->
+#### ↳ cmk ([2026-04-30 11:49 UTC](https://github.com/cmk/agogo/pull/49#discussion_r3167672776))
+
+Done in fdb6911. The max integer BPM is now centralized as Tempo::MAX_BPM_INTEGER and the stdio parser uses that constant instead of a local literal.
+
+<!-- gh-id: 3167673657 -->
+#### ↳ cmk ([2026-04-30 11:49 UTC](https://github.com/cmk/agogo/pull/49#discussion_r3167673657))
+
+Done in fdb6911. set_tempo now stores tempo_raw with Release ordering so the async-to-audio handoff participates in synchronization.
+
+<!-- gh-id: 3167674405 -->
+#### ↳ cmk ([2026-04-30 11:49 UTC](https://github.com/cmk/agogo/pull/49#discussion_r3167674405))
+
+Done in fdb6911. The audio-side tempo loads in tempo() and snapshot() now use Acquire ordering to match the Release store.
+
+<!-- gh-id: 3167675718 -->
+#### ↳ cmk ([2026-04-30 11:50 UTC](https://github.com/cmk/agogo/pull/49#discussion_r3167675718))
+
+Done in fdb6911. parse_u32_field now distinguishes a missing field from a present field with the wrong JSON type, and there is a regression test for the non-integer bpm error.
+
+<!-- gh-id: 3167676661 -->
+#### ↳ cmk ([2026-04-30 11:50 UTC](https://github.com/cmk/agogo/pull/49#discussion_r3167676661))
+
+Done in fdb6911. inverse_op now validates prior_bpm through the same representable tempo range and returns None for out-of-range values, with a regression test covering that case.
