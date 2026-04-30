@@ -36,6 +36,21 @@
 #      fail with `crates/core/src/conn/fixed.rs:N — conn imports
 #      control which is not in conn's depends-on list`.
 #   2. Revert. Run again. It must pass.
+#
+# Known blind spots (column-0 import patterns the gate misses):
+#
+#   - `pub use crate::<layer>::...` — line starts with `pub`, not
+#     `use`, so the grep below skips it. None exist in core today,
+#     but a layer-violating re-export added later would slip past
+#     this script. Code review is the backstop.
+#   - `use crate::{conn::..., control::...};` (grouped imports
+#     starting with `{`). The grep requires `[a-z]` after
+#     `crate::`, so the `{` form is invisible. Not present today.
+#
+# Both gaps are inert today (verified: `grep -rn "^pub use crate::"
+# crates/core/src/` returns nothing; no grouped column-0 `use
+# crate::{` either). If either pattern grows in production code,
+# extend the grep — see review-00048 for context.
 
 set -euo pipefail
 

@@ -1,6 +1,6 @@
 # agogo-host-midi
 
-midir back-end for `agogo_core::out::midi::MidiSink`. Cross-platform
+midir back-end for `agogo_core::sink::midi::MidiSink`. Cross-platform
 MIDI output for v0.1 (~1 ms USB-bus dispatch jitter per
 `doc/agogo.md` §4); platform-native sinks (CoreMIDI, JACK,
 ALSA-MIDI, WinMM) that tighten the precision side land post-v0.5

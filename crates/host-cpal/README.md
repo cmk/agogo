@@ -1,8 +1,11 @@
 # agogo-host-cpal
 
-cpal back-end for `agogo_core::host::AudioHost`. Plan 13's first
-platform-audio integration; v0.1 wires the audio-in path (CV output
-lands in v0.4 via `out/audio`).
+cpal back-end for `agogo_core::sink::audio::AudioHost`. Plan 13's
+first platform-audio integration; v0.1 wires the audio-in path (CV
+output lands in v0.4 via the `sink/` parent — the renderer's
+file name will be picked when that plan ships, since
+`sink/audio.rs` is now occupied by the audio-host abstraction
+formerly at `host.rs`).
 
 Not a workspace member by design — `cargo test --workspace` skips it
 so the default CI path doesn't pull cpal + its platform system
