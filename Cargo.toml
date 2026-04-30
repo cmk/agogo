@@ -2,6 +2,7 @@
 members = [
     "crates/core",
     "crates/cli",
+    "crates/stdio",
 ]
 # `crates/host-link` is intentionally NOT a workspace member — it
 # lives as an optional path dep from `crates/cli` (activated by
@@ -50,6 +51,7 @@ rand_distr = "0.5"
 rand_pcg = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rtrb = "0.3"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
