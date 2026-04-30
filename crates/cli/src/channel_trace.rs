@@ -10,7 +10,7 @@
 use agogo_core::channel::{ChannelCommon, tick_stream};
 use agogo_core::conn::fixed::Micro;
 use agogo_core::conn::tempo::Tempo;
-use agogo_core::sync::sample_tick::SampleTickConn;
+use agogo_core::time::conn::SampleTickConn;
 use agogo_core::time::grid::Grid;
 use agogo_core::time::swing::SwingConfig;
 use agogo_core::time::tbase::TBase;

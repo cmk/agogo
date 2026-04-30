@@ -31,7 +31,7 @@ use crate::conn::tempo::Tempo;
 use crate::host::AudioIo;
 use crate::out::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::sync::PhaseSource;
-use crate::sync::sample_tick::SampleTickConn;
+use crate::time::conn::SampleTickConn;
 
 pub use spec::{ChannelSpec, ChannelSpecError, parse_channels};
 

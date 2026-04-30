@@ -14,7 +14,7 @@
 use crate::channel::role::ChannelCommon;
 use crate::channel::transform::{MAX_DELAY, ScheduledEvent, micro_to_samples};
 use crate::conn::fixed::Micro;
-use crate::sync::sample_tick::SampleTickConn;
+use crate::time::conn::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
 

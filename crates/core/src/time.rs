@@ -18,9 +18,13 @@
 //!   helpers.
 //! - Linear and Hermite-smoothstep envelopes.
 //!
-//! No I/O, no audio, no tempo coupling. `Tick ↔ Samples` is
-//! `crate::sync::sample_tick::SampleTickConn` (it reads `Tempo`, so
-//! it lives under `sync`, not `time`).
+//! No I/O, no audio. `Tick ↔ Samples` is
+//! [`crate::time::conn::SampleTickConn`] — a Conn-shaped struct that
+//! captures runtime `(sr, bpm, ppqn)`. Plan 2026-04-29-01 T3 merged
+//! it in from the deleted `sync/sample_tick.rs`; the "no tempo
+//! coupling" prose convention was relaxed when `Tempo` itself moved
+//! to `conn::tempo` and the layering rule began enforcing the
+//! partial order more strictly.
 
 pub mod conn;
 pub mod envelope;

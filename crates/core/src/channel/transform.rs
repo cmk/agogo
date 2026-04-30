@@ -19,7 +19,7 @@
 use crate::channel::role::{ChannelCommon, CvRole, DinRole, MidiRole};
 use crate::conn::boundary::pico_to_samples;
 use crate::conn::fixed::{FD12FD06, Micro};
-use crate::sync::sample_tick::SampleTickConn;
+use crate::time::conn::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
 
