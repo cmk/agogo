@@ -153,11 +153,11 @@ impl<R: SampleTime> PeakDetector<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conn::arb::arb_bpm;
     use crate::conn::boundary::tempo_to_hz;
     use crate::conn::fixed::Pico;
     use crate::conn::sample::{S048, SampleRate, SampleTime};
     use crate::conn::tempo::Tempo;
-    use crate::conn::tempo::arb::arb_bpm;
     use crate::sync::pulse_train::pulse_train;
     use proptest::prelude::*;
 

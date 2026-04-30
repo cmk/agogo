@@ -129,8 +129,8 @@ impl Hash for Time {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::grid::arb::arb_grid;
-    use crate::time::tick::arb::{arb_tick, arb_time};
+    use crate::time::arb::arb_grid;
+    use crate::time::arb::{arb_tick, arb_time};
     use proptest::prelude::*;
 
     // ── Spot checks ───────────────────────────────────────────────
@@ -384,6 +384,3 @@ mod tests {
         }
     }
 }
-
-#[cfg(any(test, feature = "testkit"))]
-pub mod arb;

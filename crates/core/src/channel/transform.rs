@@ -146,8 +146,8 @@ pub fn transform(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::arb::arb_grid;
     use crate::time::grid::Grid;
-    use crate::time::grid::arb::arb_grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
     use proptest::prelude::*;
