@@ -30,8 +30,8 @@ snapshot stream.
 
 | # | Slug | Status | Scope |
 |---|------|--------|-------|
-| 01 | `plan-2026-04-30-02` | next | `AgogoSnapshot` type, JSON schema, and stdio-core publisher: serde shape covering BPM, transport state, PLL lock indicator, audio load, and per-channel phase/active state. Decimation cadence targets ~30 Hz. Stable observation identifiers are `Other("agogo-state")`, `agogo.main`, and full-snapshot `Patch` v1. Schema doc lands in `doc/designs/snapshot.md`. |
-| 02 | `plan-2026-04-2N-02` (TBD) | next-next | Push path hardening from RT: audio thread writes a compact snapshot via `triple_buffer` or wait-free atomics; background task reads at the decimation rate and calls `ObservationDispatcher::dispatch`. Monotonic `seq` lets consumers detect gaps; stdio-core newest-drop policy is acceptable for telemetry only. |
+| 01 | `plan-2026-04-30-02` | in progress | `AgogoSnapshot` type, JSON schema, fixed-capacity RT snapshot slot, and stdio-shaped publisher: serde shape covering BPM, transport state, PLL lock indicator, audio load, and per-channel phase/active state. Decimation cadence targets ~30 Hz. Stable observation identifiers are `Other("agogo-state")`, `agogo.main`, and full-snapshot `Patch` v1. Schema doc lands in `doc/designs/snapshot.md`. |
+| 02 | `plan-2026-04-2N-02` (TBD) | next-next | Direct stdio-core `ObservationDispatcher` integration once the sibling dependency can be consumed without moving agogo's MSRV. Monotonic `seq` lets consumers detect gaps; stdio-core newest-drop policy is acceptable for telemetry only. |
 | 03 | `plan-2026-04-2N-03` (TBD) | last | CV pulse output: `out/audio` module + cpal output host; single-sample impulse per tick; 4-channel interleaving; bipolar ±1.0 option to avoid DC offset on AC-coupled interfaces. Covers the v0.1 deferred "§4 precision crown jewel." |
 
 ## Properties (must pass)
@@ -78,6 +78,7 @@ snapshot stream.
   and audio-rate event boundary.
 - `../stdio-core/doc/plans/plan-2026-04-30-02.md` — stdio-core Plan
   11 agogo snapshot observation contract.
+- `doc/designs/snapshot.md` — agogo-owned v1 schema and RT boundary.
 - `doc/agogo.md` §4 — precision budget; CV out is the "crown jewel"
   path whose acceptance is sample-accurate impulse alignment.
 - `doc/versions/version-0.1.md` — CV pulse output entry in the

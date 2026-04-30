@@ -11,8 +11,10 @@
 
 pub mod driver;
 pub mod rt_bridge;
+pub mod snapshot;
 
 pub use driver::{AgogoDriver, AgogoDriverConfig, Tool};
 pub use rt_bridge::{
     BridgeError, ControlCommand, ControlProducer, RtControlConsumer, RtParams, spsc,
 };
+pub use snapshot::{AgogoSnapshot, SnapshotSlot};
