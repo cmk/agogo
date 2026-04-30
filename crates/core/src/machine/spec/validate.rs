@@ -11,7 +11,7 @@
 use crate::channel::Channel;
 use crate::channel::role::ChannelCommon;
 use crate::channel::transform::MAX_DELAY;
-use crate::time::decimal::Micro;
+use crate::conn::fixed::Micro;
 
 use super::ChannelSpec;
 use super::error::ChannelSpecError;
@@ -59,7 +59,7 @@ impl ChannelSpec {
 mod tests {
     use super::*;
     use crate::channel::role::MidiRole;
-    use crate::midi::U4;
+    use crate::conn::midi::U4;
     use core::num::NonZeroU16;
     use proptest::prelude::*;
 

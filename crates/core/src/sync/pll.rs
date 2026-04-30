@@ -20,13 +20,15 @@
 //! { phase, freq_hz, integrator }` stay `f64` — they are the analog
 //! control-law quantities the user explicitly exempted from the
 //! no-float rule. The only f64→fxp casts live in
-//! [`crate::boundary::f64_bpm_to_tempo`] / [`crate::boundary::f64_phase_to_phase`]
+//! [`crate::conn::boundary::f64_bpm_to_tempo`] / [`crate::conn::boundary::f64_phase_to_phase`]
 //! at the `PllOutput` boundary.
 
-use crate::boundary::{bits_q48_16_to_seconds, f64_bpm_to_tempo, f64_phase_to_phase, tempo_to_hz};
-use crate::sync::phase::Phase;
-use crate::time::sample::SampleTime;
-use crate::time::tempo::Tempo;
+use crate::conn::boundary::{
+    bits_q48_16_to_seconds, f64_bpm_to_tempo, f64_phase_to_phase, tempo_to_hz,
+};
+use crate::conn::phase::Phase;
+use crate::conn::sample::SampleTime;
+use crate::conn::tempo::Tempo;
 
 /// Loop-filter tuning.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -199,9 +201,9 @@ impl<R: SampleTime> Pll<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conn::fixed::{FD06, FD12FD06, Pico};
+    use crate::conn::sample::{S048, SampleRate};
     use crate::sync::pulse_train::pulse_train;
-    use crate::time::decimal::{FD06, FD12FD06, Pico};
-    use crate::time::sample::{S048, SampleRate};
     use proptest::prelude::*;
 
     /// PLL initialised at the true BPM under jitter — tracks the rate

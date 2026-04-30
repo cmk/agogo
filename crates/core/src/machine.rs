@@ -26,12 +26,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::channel::scheduler::tick_stream_into;
 use crate::channel::{Channel, ScheduledEvent};
+use crate::conn::sample::SampleTime;
+use crate::conn::tempo::Tempo;
 use crate::host::AudioIo;
 use crate::out::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::sync::PhaseSource;
 use crate::sync::sample_tick::SampleTickConn;
-use crate::time::sample::SampleTime;
-use crate::time::tempo::Tempo;
 
 pub use spec::{ChannelSpec, ChannelSpecError, parse_channels};
 
@@ -384,10 +384,10 @@ impl<R: SampleTime> Machine<R> {
 mod tests {
     use super::*;
     use crate::channel::{ChannelCommon, MidiRole};
+    use crate::conn::fixed::Micro;
+    use crate::conn::sample::S048;
     use crate::out::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
-    use crate::time::decimal::Micro;
     use crate::time::grid::Grid;
-    use crate::time::sample::S048;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
     use crate::time::tick::PPQN;
@@ -717,7 +717,7 @@ mod tests {
     // ── Plan 2026-04-25-03: bar_multiplier + click counter tests ──
 
     use crate::channel::role::{MidiClickAccent, MidiClickConfig};
-    use crate::midi::{U4, U7};
+    use crate::conn::midi::{U4, U7};
     use crate::out::midi::{MIDI_NOTE_OFF, MIDI_NOTE_ON};
     use core::num::{NonZeroU16, NonZeroU32};
 

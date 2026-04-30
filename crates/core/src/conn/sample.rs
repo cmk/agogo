@@ -47,7 +47,7 @@
 //! ```
 //!
 //! Plus one `Conn<FD12, Sxx>` per rate connecting the sample tier to
-//! the decimal SI-time tier from [`crate::time::decimal`].
+//! the decimal SI-time tier from [`crate::conn::fixed`].
 //!
 //! # Galois semantics for lossy `inner`
 //!
@@ -63,7 +63,7 @@
 //! but it is the correct upper adjoint of a lossy `inner`. For integer
 //! ratios (`DEN = 1`) it collapses to the familiar `floor_div(x, NUM)`.
 
-use crate::time::decimal::FD12;
+use crate::conn::fixed::FD12;
 use connections::conn::Conn;
 use fixed::FixedI64;
 use fixed::types::extra::U16;
@@ -275,7 +275,7 @@ pico_conn!(FD12S192, S192, 1_953_125, 24_576);
 // ────────────────────────────────────────────────────────────────────
 
 /// Common Q48.16-bits interface over the `Sxxx` rate types from
-/// [`crate::time::sample`]. Lets generic DSP code accept an arbitrary
+/// [`crate::conn::sample`]. Lets generic DSP code accept an arbitrary
 /// `R: SampleTime` rather than committing to a single rate.
 pub trait SampleTime: SampleRate + Copy + Default + Ord + core::fmt::Debug {
     /// Construct from raw Q48.16 bits.

@@ -9,10 +9,10 @@
 //! proptest strategy. It lives in `sync/` because every consumer
 //! sits in the sync subsystem.
 
-use crate::boundary::{pico_to_f64_seconds, tempo_to_f64_bpm};
-use crate::time::decimal::Pico;
-use crate::time::sample::SampleTime;
-use crate::time::tempo::Tempo;
+use crate::conn::boundary::{pico_to_f64_seconds, tempo_to_f64_bpm};
+use crate::conn::fixed::Pico;
+use crate::conn::sample::SampleTime;
+use crate::conn::tempo::Tempo;
 use rand::SeedableRng;
 use rand_distr::{Distribution, Normal};
 
@@ -113,7 +113,7 @@ pub fn pulse_train<R: SampleTime>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::sample::S048;
+    use crate::conn::sample::S048;
 
     #[test]
     fn pulse_train_shape_basic() {

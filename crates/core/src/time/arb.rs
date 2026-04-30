@@ -18,7 +18,7 @@
 use connections::extended::Extended;
 use proptest::prelude::*;
 
-use crate::time::decimal::{FD00, FD01, FD02, FD03, FD06, FD09, FD12, HasResolution};
+use crate::conn::fixed::{FD00, FD01, FD02, FD03, FD06, FD09, FD12, HasResolution};
 
 // ── Fixed-point ladder (FD12..FD00) strategies ───────────────────
 //

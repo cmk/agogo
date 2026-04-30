@@ -9,19 +9,22 @@
 #   crates/core/src/sync/pll.rs                   PI controller state + control law
 #   crates/core/src/sync/detect.rs                parabolic-fit ABI-local locals
 #   crates/core/src/sync/source.rs                PCM audio intake (`&[f32]`) + tests
-#   crates/core/src/boundary.rs                   argv-boundary + PI-exempt helpers (split from
-#                                                 the deleted fxp.rs in Plan 2026-04-28-03 T5)
+#   crates/core/src/conn/boundary.rs              argv-boundary + PI-exempt helpers (split from
+#                                                 the deleted fxp.rs in Plan 2026-04-28-03 T5;
+#                                                 moved under conn/ in Plan 2026-04-29-01 T2)
 #   crates/core/src/sync/pulse_train.rs           test-fixture PCM generator (synthetic Hann-bell
 #                                                 train; was crates/core/src/arb.rs's pulse_train
 #                                                 before Plan 2026-04-28-08 distributed arb.rs)
 #   crates/core/src/host.rs                       PCM ABI shape (AudioIo `&[f32]` slices)
 #   crates/core/src/machine.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction in tests)
 #   crates/core/src/machine/spec/parser.rs        argv-boundary (--ch delay=ms via F064FD06; split from machine/spec.rs in Plan 2026-04-28-06 T3)
-#   crates/core/src/time/float.rs                 vendored from connections — F064FDxx Conns
+#   crates/core/src/conn/float.rs                 vendored from connections — F064FDxx Conns
 #                                                 with f64-correction loops are intrinsic
-#                                                 (split from time/decimal.rs in Plan 2026-04-28-03 T1)
-#   crates/core/src/time/sample.rs                vendored from connections — FD12↔Sxxx Conn
+#                                                 (split from time/decimal.rs in Plan 2026-04-28-03 T1;
+#                                                 moved under conn/ in Plan 2026-04-29-01 T2)
+#   crates/core/src/conn/sample.rs                vendored from connections — FD12↔Sxxx Conn
 #                                                 walk needs f64 internally
+#                                                 (moved under conn/ in Plan 2026-04-29-01 T2)
 #   crates/host-link/src/link.rs                  Link FFI (AblLink C++ ABI)
 #   crates/host-link/src/source.rs                PCM ABI (PhaseSourceImpl::feed_samples slice param)
 #   crates/host-link/src/quantum.rs               Link FFI parity helper (f64_beats_to_quantum
@@ -59,7 +62,9 @@ ALLOWED=(
   # `f64_phase_to_phase`) and PI-exempt control-law helpers
   # (`tempo_to_hz`, `bits_q48_16_to_seconds`, `tempo_to_f64_bpm`,
   # `pico_to_f64_seconds`) plus the `MAX_BPM_F64` argv-bound constant.
-  "crates/core/src/boundary.rs"
+  # Moved under conn/ in Plan 2026-04-29-01 T2 (the conn-shaped
+  # value-type seam, alongside Phase, Tempo, fixed, float, sample).
+  "crates/core/src/conn/boundary.rs"
   # Plan 2026-04-28-08 T2: `pulse_train` + `PULSE_WIDTH_PS` moved
   # out of the deleted `crates/core/src/arb.rs` (which aggregated
   # 9 unrelated proptest strategies plus this synthetic-signal
@@ -73,14 +78,15 @@ ALLOWED=(
   "crates/core/src/machine/spec/parser.rs"
   # Vendored from connections — both modules ship with f64 inside
   # their float→fixed Conn machinery (`F064FDxx` correction loops
-  # for time/float.rs; the FD12↔Sxxx adjoint walk for time/sample.rs).
+  # for conn/float.rs; the FD12↔Sxxx adjoint walk for conn/sample.rs).
   # The f64 surface is intrinsic to the abstraction and was upstream-
   # allowlisted for the same reason; the file move downstream brings
   # the allowlist entry with it. (Plan 2026-04-28-03 T1 split float
-  # out of decimal — decimal.rs is no longer allowlisted because it
-  # contains no live f64 after the split.)
-  "crates/core/src/time/float.rs"
-  "crates/core/src/time/sample.rs"
+  # out of decimal — fixed.rs (was decimal.rs) is no longer
+  # allowlisted because it contains no live f64 after the split. Plan
+  # 2026-04-29-01 T2 moved both files under conn/.)
+  "crates/core/src/conn/float.rs"
+  "crates/core/src/conn/sample.rs"
   "crates/host-link/src/link.rs"
   "crates/host-link/src/source.rs"
   # Plan 2026-04-28-03 T4: `Quantum` + `f64_beats_to_quantum` +

@@ -8,12 +8,12 @@
 //! Plan 2026-04-28-05 T2: extracted from `cli/main.rs`.
 
 use agogo_core::channel::{ChannelCommon, tick_stream};
+use agogo_core::conn::fixed::Micro;
+use agogo_core::conn::tempo::Tempo;
 use agogo_core::sync::sample_tick::SampleTickConn;
-use agogo_core::time::decimal::Micro;
 use agogo_core::time::grid::Grid;
 use agogo_core::time::swing::SwingConfig;
 use agogo_core::time::tbase::TBase;
-use agogo_core::time::tempo::Tempo;
 use agogo_core::time::tick::PPQN;
 
 #[derive(Debug, Clone)]
@@ -41,7 +41,7 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
         .parse()
         .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
     // Channel pipeline requires one of the six audio sample rates
-    // supported by `agogo_core::boundary::pico_to_samples` (the
+    // supported by `agogo_core::conn::boundary::pico_to_samples` (the
     // downstream Pico → Sample dispatch). Validate here rather than
     // letting `micro_to_samples` panic deep inside the transform.
     match args.sr {

@@ -5,8 +5,8 @@
 //!
 //! Plan 2026-04-28-05 T4: extracted from `cli/main.rs`.
 
-use agogo_core::boundary::tempo_to_f64_bpm;
-use agogo_core::time::tempo::Tempo;
+use agogo_core::conn::boundary::tempo_to_f64_bpm;
+use agogo_core::conn::tempo::Tempo;
 use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum};
 use std::num::NonZeroU32;
 use std::thread::sleep;

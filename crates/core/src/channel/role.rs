@@ -14,8 +14,8 @@
 
 use core::num::{NonZeroU16, NonZeroU32};
 
-use crate::midi::{U4, U7};
-use crate::time::decimal::Micro;
+use crate::conn::fixed::Micro;
+use crate::conn::midi::{U4, U7};
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
 

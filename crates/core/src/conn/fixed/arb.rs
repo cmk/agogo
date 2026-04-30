@@ -7,7 +7,7 @@
 
 use proptest::prelude::*;
 
-use crate::time::decimal::Pico;
+use crate::conn::fixed::Pico;
 
 /// Jitter σ as [`Pico`]. Heavy bias toward small values so the PLL
 /// convergence properties usually fire on inputs they can lock to.

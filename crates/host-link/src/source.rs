@@ -15,9 +15,9 @@
 
 use std::sync::{Arc, Mutex};
 
+use agogo_core::conn::phase::Phase;
+use agogo_core::conn::tempo::Tempo;
 use agogo_core::sync::PhaseSourceImpl;
-use agogo_core::sync::phase::Phase;
-use agogo_core::time::tempo::Tempo;
 
 use crate::session::LinkSession;
 

@@ -2,9 +2,13 @@
 //! conversions to/from agogo's fxp tier.
 //!
 //! Moved here from `crate::fxp` (Plan 2026-04-28-03 T5) — these are the
-//! `f64 ↔ fxp` conversion seam, separate from the type definitions
-//! that live in `crate::sync::phase`, `crate::time::tempo`, and
-//! `crate::time::{decimal, float, sample}`.
+//! `f64 ↔ fxp` conversion seam, alongside the conn-shaped value types
+//! [`Phase`](crate::conn::phase::Phase),
+//! [`Tempo`](crate::conn::tempo::Tempo), and the
+//! [`fixed`](crate::conn::fixed) / [`float`](crate::conn::float) /
+//! [`sample`](crate::conn::sample) ladders. (Plan 2026-04-29-01 T2
+//! collapsed these into one parent so the layering rule can mark
+//! `conn` as a leaf.)
 //!
 //! The `f64_*` functions here divide into three categories per
 //! CLAUDE.md's "five documented exceptions":
@@ -24,11 +28,11 @@ use connections::extended::Extended;
 use connections::fixed::u32::I064U032;
 use connections::float::ExtendedFloat;
 
-use crate::sync::phase::Phase;
-use crate::time::decimal::{FD06, Pico};
-use crate::time::float::{F064FD06, F064FD12};
-use crate::time::sample::{FD12S044, FD12S048, FD12S088, FD12S096, FD12S176, FD12S192};
-use crate::time::tempo::Tempo;
+use crate::conn::fixed::{FD06, Pico};
+use crate::conn::float::{F064FD06, F064FD12};
+use crate::conn::phase::Phase;
+use crate::conn::sample::{FD12S044, FD12S048, FD12S088, FD12S096, FD12S176, FD12S192};
+use crate::conn::tempo::Tempo;
 
 /// Maximum representable BPM as `f64`: `u32::MAX as f64 / 10⁶`
 /// ≈ 4294.967295. Used as the upper bound for argv parsers
@@ -43,7 +47,7 @@ use crate::time::tempo::Tempo;
 /// workaround.
 ///
 /// Lives here in `boundary` (rather than as `Tempo::MAX_BPM_F64`)
-/// so `crate::time::tempo` stays f64-free per the workspace's
+/// so `crate::conn::tempo` stays f64-free per the workspace's
 /// `scripts/check-floats.sh` allowlist (Plan 2026-04-28-03 review
 /// round 1).
 pub const MAX_BPM_F64: f64 = (u32::MAX as f64) / 1_000_000.0;
@@ -109,7 +113,7 @@ pub fn f64_bpm_to_tempo(b: f64) -> Tempo {
 
 /// `Tempo` (u32 microBPM) → f64 BPM via the lawful `F064FD06`
 /// Conn-inverse. The `× 10⁻⁶` unit shift lives inside `F064FD06`'s
-/// definition (`crate::time::float`); the `u32 → i64` widening
+/// definition (`crate::conn::float`); the `u32 → i64` widening
 /// is `I064U032.inner` (lossless).
 pub fn tempo_to_f64_bpm(t: Tempo) -> f64 {
     // PI-exempt.
@@ -119,7 +123,7 @@ pub fn tempo_to_f64_bpm(t: Tempo) -> f64 {
 
 /// `Pico` (i64 picoseconds) → f64 seconds via the lawful `F064FD12`
 /// Conn-inverse. The `× 10⁻¹²` unit shift lives inside `F064FD12`'s
-/// definition (`crate::time::float`).
+/// definition (`crate::conn::float`).
 pub fn pico_to_f64_seconds(p: Pico) -> f64 {
     // PI-exempt.
     finite_or_unreachable(F064FD12.inner(Extended::Finite(p)))
@@ -157,7 +161,7 @@ pub fn bits_q48_16_to_seconds(bits: i64, sr: u32) -> f64 {
 /// Pico → whole sample count at a runtime sample rate.
 ///
 /// Dispatches on `sr` to the lawful `FD12Sxxx` Conn for that rate
-/// (defined in `crate::time::sample`), calls its `ceil` (Pico →
+/// (defined in `crate::conn::sample`), calls its `ceil` (Pico →
 /// Q48.16), then rounds to the nearest integer sample. Returns
 /// `None` for non-audio rates — the supported set is the six
 /// standard rates `{S044, S048, S088, S096, S176, S192}`.
@@ -316,7 +320,7 @@ mod tests {
     }
 
     // `pico_to_samples` is a hand-written `match` dispatching on `sr`
-    // to the lawful `FD12Sxxx` conns from `crate::time::sample`.
+    // to the lawful `FD12Sxxx` conns from `crate::conn::sample`.
     // Each conn's own per-rate Galois-law battery
     // (`time::sample::tests::p_fd12s0??`) catches arithmetic bugs
     // inside the conn itself, but nothing there catches a local

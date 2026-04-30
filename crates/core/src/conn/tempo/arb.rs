@@ -6,7 +6,7 @@
 
 use proptest::prelude::*;
 
-use crate::time::tempo::Tempo;
+use crate::conn::tempo::Tempo;
 
 /// BPM strategy as `Tempo` (BPM × 10⁶). Biased toward common
 /// musical tempos with some boundary spice.

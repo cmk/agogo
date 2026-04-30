@@ -37,13 +37,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use agogo_core::boundary::tempo_to_f64_bpm;
 use agogo_core::channel::Channel;
+use agogo_core::conn::boundary::tempo_to_f64_bpm;
+use agogo_core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
+use agogo_core::conn::tempo::Tempo;
 use agogo_core::host::{AudioHost, AudioIo, Config};
 use agogo_core::machine::{Machine, MachineStopHandle, TransportPolicy};
 use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-use agogo_core::time::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
-use agogo_core::time::tempo::Tempo;
 use agogo_core::time::tick::PPQN;
 use agogo_host_cpal::CpalHost;
 use agogo_host_cpal::cpal::callback::CallbackState;
@@ -477,7 +477,7 @@ mod tests {
         fn parse_bpm_to_tempo_ok_iff_in_range(f in prop::num::f64::ANY) {
             let s = format!("{f}");
             let parsed: f64 = s.parse().unwrap_or(f64::NAN);
-            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= agogo_core::boundary::MAX_BPM_F64;
+            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= agogo_core::conn::boundary::MAX_BPM_F64;
             prop_assert_eq!(parse_bpm_to_tempo(s).is_ok(), in_range);
         }
 
