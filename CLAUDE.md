@@ -118,6 +118,33 @@ code based on it.
   (addressing reviewer feedback from an earlier push) remain standalone
   so the audit trail survives.
 - **No unsafe code**: every crate root must declare `#![forbid(unsafe_code)]`.
+- **Inter-module imports respect a partial order.** Plan
+  2026-04-29-01 T7 introduced a layering rule for
+  `crates/core/src/`:
+
+      control  → sink, channel, time, conn
+      sink     → channel, time, conn
+      channel  → time, conn
+      time     → conn
+      conn     → (leaf)
+      test     → (leaf)
+
+  Each top-level module-root file declares its allowed deps in a
+  sentinel header comment:
+
+      //! layer: time
+      //! depends-on: conn
+
+  `scripts/check-layers.sh` parses these headers and fails on any
+  `use crate::<top>` or `use agogo_core::<top>` in production code
+  (column-0 imports) that names a module the current layer's
+  `depends-on:` list does not authorise. Test-block imports
+  (indented inside `#[cfg(test)] mod tests { … }`) are allowed to
+  cross layers — integration tests legitimately need to wire
+  pieces together. Adding a new edge requires updating both the
+  sentinel comment AND this rule's prose so the gate and the
+  convention stay in sync.
+
 - **No stored `f32`/`f64` outside the five documented exceptions.**
 
   **Glossary.**

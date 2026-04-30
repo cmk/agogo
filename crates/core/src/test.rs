@@ -1,3 +1,6 @@
+//! layer: test
+//! depends-on:
+//!
 //! Test utilities shared across the workspace.
 //!
 //! Available to all crates via `agogo_core::test`. Not gated behind

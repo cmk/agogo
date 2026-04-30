@@ -46,8 +46,13 @@ scripts/check-pii.sh
 #    failure. Specific to this workspace.
 scripts/check-floats.sh
 
-# 4. Test suite — blocking.
+# 4. Layering gate — blocking. Per CLAUDE.md, inter-module imports
+#    must respect the partial order declared in each module-root's
+#    `//! depends-on:` sentinel. Plan 2026-04-29-01 T7.
+scripts/check-layers.sh
+
+# 5. Test suite — blocking.
 cargo test --workspace --quiet
 
-# 5. Lints — blocking; matches CI.
+# 6. Lints — blocking; matches CI.
 cargo clippy --all-targets --quiet -- -D warnings

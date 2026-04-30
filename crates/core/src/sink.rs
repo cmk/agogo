@@ -1,3 +1,6 @@
+//! layer: sink
+//! depends-on: channel, time, conn
+//!
 //! Output sinks — where the per-channel `ScheduledEvent` stream
 //! becomes bytes on a wire.
 //!

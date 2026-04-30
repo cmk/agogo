@@ -1,3 +1,6 @@
+//! layer: control
+//! depends-on: sink, channel, time, conn
+//!
 //! N-channel orchestrator. Owned by host-side runners (host-cpal's
 //! callback, the integration tests). Stateless w.r.t. the host —
 //! holds only musical + transport state.
