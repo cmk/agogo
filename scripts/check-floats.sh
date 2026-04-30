@@ -6,17 +6,20 @@
 # fall into one of the five enumerated exception categories
 # (CLAUDE.md §Repository conventions):
 #
-#   crates/core/src/sync/pll.rs                   PI controller state + control law
-#   crates/core/src/sync/detect.rs                parabolic-fit ABI-local locals
-#   crates/core/src/sync/source.rs                PCM audio intake (`&[f32]`) + tests
+#   crates/core/src/control/sync/pll.rs           PI controller state + control law
+#   crates/core/src/control/sync/detect.rs        parabolic-fit ABI-local locals
+#   crates/core/src/control/sync/source.rs        PCM audio intake (`&[f32]`) + tests
 #   crates/core/src/conn/boundary.rs              argv-boundary + PI-exempt helpers (split from
 #                                                 the deleted fxp.rs in Plan 2026-04-28-03 T5;
 #                                                 moved under conn/ in Plan 2026-04-29-01 T2)
-#   crates/core/src/sync/pulse_train.rs           test-fixture PCM generator (synthetic Hann-bell
+#   crates/core/src/control/sync/pulse.rs         test-fixture PCM generator (synthetic Hann-bell
 #                                                 train; was crates/core/src/arb.rs's pulse_train
-#                                                 before Plan 2026-04-28-08 distributed arb.rs)
-#   crates/core/src/host.rs                       PCM ABI shape (AudioIo `&[f32]` slices)
-#   crates/core/src/machine.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction in tests)
+#                                                 before Plan 2026-04-28-08 distributed arb.rs;
+#                                                 renamed pulse_train → pulse in Plan 2026-04-29-01 T6)
+#   crates/core/src/sink/audio.rs                 PCM ABI shape (AudioIo `&[f32]` slices; was
+#                                                 host.rs before Plan 2026-04-29-01 T6)
+#   crates/core/src/control.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction
+#                                                 in tests; was machine.rs before Plan 2026-04-29-01 T6)
 #   crates/core/src/channel/spec/parser.rs        argv-boundary (--ch delay=ms via F064FD06; split from machine/spec.rs in Plan 2026-04-28-06 T3; moved under channel/ in Plan 2026-04-29-01 T5)
 #   crates/core/src/conn/float.rs                 vendored from connections — F064FDxx Conns
 #                                                 with f64-correction loops are intrinsic
@@ -54,9 +57,9 @@
 set -euo pipefail
 
 ALLOWED=(
-  "crates/core/src/sync/pll.rs"
-  "crates/core/src/sync/detect.rs"
-  "crates/core/src/sync/source.rs"
+  "crates/core/src/control/sync/pll.rs"
+  "crates/core/src/control/sync/detect.rs"
+  "crates/core/src/control/sync/source.rs"
   # Replaces the deleted `crates/core/src/fxp.rs` entry from before
   # Plan 2026-04-28-03 T5: argv-boundary helpers (`f64_bpm_to_tempo`,
   # `f64_phase_to_phase`) and PI-exempt control-law helpers
@@ -72,9 +75,9 @@ ALLOWED=(
   # helpers go through lawful Conn-inverse helpers
   # (`tempo_to_f64_bpm` / `pico_to_f64_seconds`); output is `&[f32]`
   # PCM samples. Same exception class as the old `arb.rs` entry.
-  "crates/core/src/sync/pulse_train.rs"
-  "crates/core/src/host.rs"
-  "crates/core/src/machine.rs"
+  "crates/core/src/control/sync/pulse.rs"
+  "crates/core/src/sink/audio.rs"
+  "crates/core/src/control.rs"
   "crates/core/src/channel/spec/parser.rs"
   # Vendored from connections — both modules ship with f64 inside
   # their float→fixed Conn machinery (`F064FDxx` correction loops

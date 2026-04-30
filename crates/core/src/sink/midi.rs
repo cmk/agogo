@@ -425,9 +425,10 @@ mod tests {
 
     // ── render_midi_channel ───────────────────────────────────────
 
-    use crate::channel::{Channel, scheduler::tick_stream};
+    use crate::channel::Channel;
     use crate::conn::fixed::Micro;
     use crate::conn::tempo::Tempo;
+    use crate::control::event::tick_stream;
     use crate::time::conn::SampleTickConn;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;

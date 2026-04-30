@@ -11,7 +11,7 @@
 //! See `doc/designs/output.md` ("Two-phase dispatch") for the
 //! upstream design rationale.
 
-use agogo_core::out::midi::MidiSink;
+use agogo_core::sink::midi::MidiSink;
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -249,7 +249,7 @@ impl Drop for DrainHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo_core::out::midi::TestSink;
+    use agogo_core::sink::midi::TestSink;
     use proptest::prelude::*;
 
     fn arb_msg() -> impl Strategy<Value = MidiMessage> {

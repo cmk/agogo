@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! midir back-end for `agogo_core::out::midi::MidiSink`.
+//! midir back-end for `agogo_core::sink::midi::MidiSink`.
 //!
 //! Plan 13 T2 ships `MidirSink`: opens a midir output connection by
 //! port name and forwards every `send_at` call to the underlying

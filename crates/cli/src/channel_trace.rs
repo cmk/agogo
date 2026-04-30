@@ -7,9 +7,10 @@
 //!
 //! Plan 2026-04-28-05 T2: extracted from `cli/main.rs`.
 
-use agogo_core::channel::{ChannelCommon, tick_stream};
+use agogo_core::channel::ChannelCommon;
 use agogo_core::conn::fixed::Micro;
 use agogo_core::conn::tempo::Tempo;
+use agogo_core::control::tick_stream;
 use agogo_core::time::conn::SampleTickConn;
 use agogo_core::time::grid::Grid;
 use agogo_core::time::swing::SwingConfig;

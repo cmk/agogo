@@ -2,9 +2,7 @@
 
 pub mod channel;
 pub mod conn;
-pub mod host;
-pub mod machine;
-pub mod out;
-pub mod sync;
+pub mod control;
+pub mod sink;
 pub mod test;
 pub mod time;

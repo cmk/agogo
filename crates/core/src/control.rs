@@ -17,18 +17,32 @@
 //! The audio thread is the only thread that drives `on_buffer`; the
 //! control thread interacts only through the [`MachineStopHandle`]'s
 //! [`AtomicBool`].
+//!
+//! Submodules (Plan 2026-04-29-01 T6 reorganised the control-plane):
+//! - [`event`] — block-level `tick_stream` event emission (was
+//!   `channel/scheduler.rs`).
+//! - [`sync`]  — PLL / detector / phase source (was top-level
+//!   `sync/` with `pulse_train.rs` renamed to `pulse.rs`).
+
+pub mod event;
+pub mod sync;
+
+pub use event::tick_stream;
+pub use sync::{
+    DetectorConfig, Peak, PeakDetector, PhaseSource, PhaseSourceImpl, Pll, PllOutput, PllSettings,
+    PllState,
+};
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::channel::scheduler::tick_stream_into;
 use crate::channel::{Channel, ScheduledEvent};
 use crate::conn::sample::SampleTime;
 use crate::conn::tempo::Tempo;
-use crate::host::AudioIo;
-use crate::out::midi::{MidiRtByte, MidiSink, render_midi_channel};
-use crate::sync::PhaseSource;
+use crate::control::event::tick_stream_into;
+use crate::sink::audio::AudioIo;
+use crate::sink::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::time::conn::SampleTickConn;
 
 /// N-channel runtime state. Built on the control thread, moved into
@@ -245,7 +259,7 @@ impl<R: SampleTime> Machine<R> {
         transport: TransportPolicy,
         buffer_frames: usize,
     ) -> Self {
-        let cap = crate::channel::scheduler::max_events_for_buffer(buffer_frames);
+        let cap = crate::control::event::max_events_for_buffer(buffer_frames);
         let n = channels.len();
         Self {
             channels,
@@ -382,7 +396,7 @@ mod tests {
     use crate::channel::{ChannelCommon, MidiRole};
     use crate::conn::fixed::Micro;
     use crate::conn::sample::S048;
-    use crate::out::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
+    use crate::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
@@ -714,7 +728,7 @@ mod tests {
 
     use crate::channel::role::{MidiClickAccent, MidiClickConfig};
     use crate::conn::midi::{U4, U7};
-    use crate::out::midi::{MIDI_NOTE_OFF, MIDI_NOTE_ON};
+    use crate::sink::midi::{MIDI_NOTE_OFF, MIDI_NOTE_ON};
     use core::num::{NonZeroU16, NonZeroU32};
 
     fn click_channel(

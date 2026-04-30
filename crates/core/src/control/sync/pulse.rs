@@ -1,8 +1,8 @@
 //! Synthetic Hann-bell pulse-train signal generator.
 //!
 //! Used by `cli/sync_trace` to feed the sync detector with
-//! deterministic test signals, and by [`crate::sync::pll`] /
-//! [`crate::sync::detect`] tests to drive the PLL and peak detector
+//! deterministic test signals, and by [`crate::control::sync::pll`] /
+//! [`crate::control::sync::detect`] tests to drive the PLL and peak detector
 //! against ground-truth pulse positions.
 //!
 //! Not testkit-gated — `pulse_train` is a runtime API, not a

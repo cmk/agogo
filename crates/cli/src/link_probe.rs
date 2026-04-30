@@ -3,7 +3,7 @@
 //!
 //! Plan 2026-04-28-05 T5: extracted from `cli/main.rs`.
 
-use agogo_core::sync::PhaseSourceImpl;
+use agogo_core::control::sync::PhaseSourceImpl;
 use agogo_host_link::{HostTimeAnchor, LinkClock};
 use std::num::NonZeroU32;
 use std::thread::sleep;

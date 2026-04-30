@@ -1,11 +1,11 @@
 #![forbid(unsafe_code)]
 
-//! cpal back-end for `agogo_core::host::AudioHost`.
+//! cpal back-end for `agogo_core::sink::audio::AudioHost`.
 //!
 //! Plan 13 T1 ships the `CpalHost` type: opens a cpal input stream
 //! (f32 samples), surfaces cpal's device enumeration through a
 //! stable API, and adapts cpal's per-buffer callback to
-//! [`agogo_core::host::AudioIo`]. The `output: &mut []` slice is a
+//! [`agogo_core::sink::audio::AudioIo`]. The `output: &mut []` slice is a
 //! stub — CV output lands in v0.4's `out/audio` module.
 //!
 //! # Precision note

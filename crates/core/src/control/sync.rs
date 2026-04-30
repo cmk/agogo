@@ -7,14 +7,15 @@
 //! Submodules:
 //! - [`detect`] — peak detector with parabolic sub-sample interpolation.
 //! - [`pll`]    — Type-II (PI) second-order phase-locked loop.
-//! - [`pulse_train`] — synthetic Hann-bell signal generator for tests
-//!                and `cli/sync_trace`.
+//! - [`pulse`]  — synthetic Hann-bell signal generator for tests
+//!                and `cli/sync_trace` (was `pulse_train.rs` before
+//!                Plan 2026-04-29-01 T6).
 //! - [`source`] — `PhaseSource` enum unifying internal-clock vs.
 //!                external-PLL phase queries.
 
 pub mod detect;
 pub mod pll;
-pub mod pulse_train;
+pub mod pulse;
 pub mod source;
 
 pub use detect::{DetectorConfig, Peak, PeakDetector};

@@ -3,8 +3,8 @@
 use crate::conn::phase::Phase;
 use crate::conn::sample::SampleTime;
 use crate::conn::tempo::Tempo;
-use crate::sync::detect::PeakDetector;
-use crate::sync::pll::Pll;
+use crate::control::sync::detect::PeakDetector;
+use crate::control::sync::pll::Pll;
 
 /// Extension trait for user-provided phase sources.
 ///
@@ -118,8 +118,8 @@ mod tests {
     use crate::conn::fixed::Pico;
     use crate::conn::sample::{S048, SampleRate};
     use crate::conn::tempo::Tempo;
-    use crate::sync::detect::DetectorConfig;
-    use crate::sync::pll::PllSettings;
+    use crate::control::sync::detect::DetectorConfig;
+    use crate::control::sync::pll::PllSettings;
     use proptest::prelude::*;
 
     #[test]
@@ -144,7 +144,7 @@ mod tests {
         });
         let pll = Pll::<S048>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
         let mut src = PhaseSource::<S048>::External { detector, pll };
-        let (samples, _): (Vec<f32>, Vec<S048>) = crate::sync::pulse_train::pulse_train::<S048>(
+        let (samples, _): (Vec<f32>, Vec<S048>) = crate::control::sync::pulse::pulse_train::<S048>(
             Tempo::from_bpm_integer(120),
             24,
             Pico(0),
@@ -166,7 +166,7 @@ mod tests {
         let mut src = PhaseSource::<S048>::External { detector, pll };
         let bpm = Tempo::from_bpm_integer(120);
         let (samples, peaks): (Vec<f32>, Vec<S048>) =
-            crate::sync::pulse_train::pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
+            crate::control::sync::pulse::pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
         src.feed_samples(&samples, 0);
 
         let last_samples = peaks.last().unwrap().to_bits_q48_16() as f64 / 65_536.0;
