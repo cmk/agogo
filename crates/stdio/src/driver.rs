@@ -167,6 +167,9 @@ fn accepted_next_buffer() -> Value {
 
 fn parse_integer_bpm(args: &Value) -> Result<Tempo, String> {
     let bpm = parse_u32_field(args, "bpm")?;
+    if bpm > 4_294 {
+        return Err("field `bpm` must be <= 4294".to_owned());
+    }
     Ok(Tempo::from_bpm_integer(bpm))
 }
 
@@ -219,6 +222,18 @@ mod tests {
 
         assert_eq!(out, accepted_next_buffer());
         assert_eq!(consumer.snapshot().tempo, Tempo::from_bpm_integer(140));
+    }
+
+    #[test]
+    fn tempo_set_rejects_bpm_above_tempo_range() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let err = driver
+            .handle_call(Tool::TempoSet.name(), json!({ "bpm": 4_295 }))
+            .unwrap_err();
+
+        assert_eq!(err, "field `bpm` must be <= 4294");
     }
 
     #[test]
