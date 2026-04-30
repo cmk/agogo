@@ -124,11 +124,11 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     // Parse all --ch specs eagerly (in order, so variable refs
     // resolve) before any device opens.
-    let named = match agogo_core::machine::parse_channels(&args.ch) {
+    let named = match agogo_core::channel::spec::parse_channels(&args.ch) {
         Ok(named) => named,
         Err(e) => {
             let failing_entry = (0..args.ch.len()).find_map(|idx| {
-                agogo_core::machine::parse_channels(&args.ch[..=idx])
+                agogo_core::channel::spec::parse_channels(&args.ch[..=idx])
                     .err()
                     .map(|_| (idx, args.ch[idx].as_str()))
             });
@@ -203,7 +203,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 fn run_with_rate<R: SampleTime + Send + 'static>(
     args: &RunArgs,
     bpm: Tempo,
-    specs: Vec<agogo_core::machine::ChannelSpec>,
+    specs: Vec<agogo_core::channel::spec::ChannelSpec>,
     mut channels: Vec<Channel>,
     midi_port_request: String,
 ) -> Result<(), String> {

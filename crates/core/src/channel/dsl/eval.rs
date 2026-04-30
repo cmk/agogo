@@ -37,8 +37,8 @@ pub fn eval_expr(expr: &Expr, env: &[(String, Grid)], source: &str) -> Result<Gr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsl::lexer::tokenize;
-    use crate::dsl::parser::parse_tokens;
+    use crate::channel::dsl::lexer::tokenize;
+    use crate::channel::dsl::parser::parse_tokens;
     use connections::lattice::{Coheyting, Heyting, Join, Meet};
 
     fn eval(s: &str, env: &[(String, Grid)]) -> Result<Grid, DslError> {

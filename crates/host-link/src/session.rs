@@ -5,10 +5,10 @@
 //! (T2) + quantum snap (T3) are in place.
 
 use agogo_core::channel::Channel;
+use agogo_core::channel::spec::ChannelSpec;
 use agogo_core::conn::fixed::Micro;
 use agogo_core::conn::phase::Phase;
 use agogo_core::conn::tempo::Tempo;
-use agogo_core::machine::ChannelSpec;
 // Required for `LinkClock::phase_at_sample` (trait-provided method
 // called by the `phase_at_sample` shim below). Copilot flagged this
 // as unused on PR #16 round 1 — false positive: removing it breaks
@@ -325,7 +325,7 @@ mod tests {
     /// from `specs[i]`. Mirrors the orchestrator's pre-helper shape.
     fn build_pair(spec_strs: &[&str]) -> (Vec<ChannelSpec>, Vec<Channel>) {
         let owned: Vec<String> = spec_strs.iter().map(|s| (*s).to_string()).collect();
-        let named = agogo_core::machine::parse_channels(&owned).expect("parse spec");
+        let named = agogo_core::channel::spec::parse_channels(&owned).expect("parse spec");
         let specs: Vec<ChannelSpec> = named.iter().map(|(_, s)| s.clone()).collect();
         let channels: Vec<Channel> = specs
             .iter()

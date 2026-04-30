@@ -12,7 +12,7 @@
 //! sprint's Review section.
 
 use crate::channel::role::ChannelCommon;
-use crate::channel::transform::{MAX_DELAY, ScheduledEvent, micro_to_samples};
+use crate::channel::time::{MAX_DELAY, ScheduledEvent, micro_to_samples};
 use crate::conn::fixed::Micro;
 use crate::time::conn::SampleTickConn;
 use crate::time::swing;
@@ -296,7 +296,7 @@ mod tests {
             buffer_start in 0u64..=1_000_000,
             frames in 1usize..=8_192,
         ) {
-            use crate::channel::transform::transform;
+            use crate::channel::time::transform;
 
             let common = ChannelCommon {
                 divider,
