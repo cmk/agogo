@@ -211,37 +211,37 @@ impl RtSnapshotWriter {
         fence(Ordering::SeqCst);
 
         let seq = self.inner.seq.load(Ordering::Relaxed).saturating_add(1);
-        self.inner.bpm_raw.store(frame.bpm.0, Ordering::Release);
+        self.inner.bpm_raw.store(frame.bpm.0, Ordering::Relaxed);
         self.inner
             .transport_state
-            .store(frame.transport.state.to_u8(), Ordering::Release);
+            .store(frame.transport.state.to_u8(), Ordering::Relaxed);
         self.inner
             .transport_bar
-            .store(frame.transport.bar, Ordering::Release);
+            .store(frame.transport.bar, Ordering::Relaxed);
         self.inner
             .transport_beat
-            .store(frame.transport.beat, Ordering::Release);
+            .store(frame.transport.beat, Ordering::Relaxed);
         self.inner
             .transport_tick
-            .store(frame.transport.tick, Ordering::Release);
+            .store(frame.transport.tick, Ordering::Relaxed);
         self.inner
             .sync_source
-            .store(frame.sync.source.to_u8(), Ordering::Release);
+            .store(frame.sync.source.to_u8(), Ordering::Relaxed);
         self.inner
             .pll_locked
-            .store(frame.sync.pll_locked, Ordering::Release);
+            .store(frame.sync.pll_locked, Ordering::Relaxed);
         self.inner
             .error_ticks_raw
-            .store(frame.sync.error_ticks_raw, Ordering::Release);
+            .store(frame.sync.error_ticks_raw, Ordering::Relaxed);
         self.inner
             .sample_rate
-            .store(frame.audio.sample_rate, Ordering::Release);
+            .store(frame.audio.sample_rate, Ordering::Relaxed);
         self.inner
             .buffer_size
-            .store(frame.audio.buffer_size, Ordering::Release);
+            .store(frame.audio.buffer_size, Ordering::Relaxed);
         self.inner
             .audio_load_raw
-            .store(frame.audio.load_raw, Ordering::Release);
+            .store(frame.audio.load_raw, Ordering::Relaxed);
 
         let count = frame.channels.len().min(MAX_SNAPSHOT_CHANNELS);
         for (slot, channel) in self
@@ -250,17 +250,17 @@ impl RtSnapshotWriter {
             .iter()
             .zip(frame.channels.iter().take(count))
         {
-            slot.index.store(channel.index, Ordering::Release);
-            slot.enabled.store(channel.enabled, Ordering::Release);
-            slot.grid.store(channel.grid.to_u8(), Ordering::Release);
-            slot.phase_raw.store(channel.phase_raw, Ordering::Release);
-            slot.output.store(channel.output.to_u8(), Ordering::Release);
+            slot.index.store(channel.index, Ordering::Relaxed);
+            slot.enabled.store(channel.enabled, Ordering::Relaxed);
+            slot.grid.store(channel.grid.to_u8(), Ordering::Relaxed);
+            slot.phase_raw.store(channel.phase_raw, Ordering::Relaxed);
+            slot.output.store(channel.output.to_u8(), Ordering::Relaxed);
         }
         self.inner
             .channel_count
-            .store(count as u32, Ordering::Release);
+            .store(count as u32, Ordering::Relaxed);
         fence(Ordering::SeqCst);
-        self.inner.seq.store(seq, Ordering::Release);
+        self.inner.seq.store(seq, Ordering::Relaxed);
         self.inner
             .write_epoch
             .store(begin_epoch + 1, Ordering::SeqCst);
@@ -298,42 +298,42 @@ impl SnapshotReader {
         let count = self
             .inner
             .channel_count
-            .load(Ordering::Acquire)
+            .load(Ordering::Relaxed)
             .min(MAX_SNAPSHOT_CHANNELS as u32) as usize;
         let mut channels = Vec::with_capacity(count);
         for slot in self.inner.channels.iter().take(count) {
             channels.push(ChannelSnapshot {
-                index: slot.index.load(Ordering::Acquire),
-                enabled: slot.enabled.load(Ordering::Acquire),
-                grid: grid_from_u8(slot.grid.load(Ordering::Acquire)).to_owned(),
-                phase: DecimalU32(slot.phase_raw.load(Ordering::Acquire)),
-                output: ChannelOutputCode::from_u8(slot.output.load(Ordering::Acquire)).into(),
+                index: slot.index.load(Ordering::Relaxed),
+                enabled: slot.enabled.load(Ordering::Relaxed),
+                grid: grid_from_u8(slot.grid.load(Ordering::Relaxed)).to_owned(),
+                phase: DecimalU32(slot.phase_raw.load(Ordering::Relaxed)),
+                output: ChannelOutputCode::from_u8(slot.output.load(Ordering::Relaxed)).into(),
             });
         }
 
         AgogoSnapshot {
             schema: SNAPSHOT_SCHEMA.to_owned(),
-            seq: self.inner.seq.load(Ordering::Acquire),
-            bpm: DecimalU32(self.inner.bpm_raw.load(Ordering::Acquire)),
+            seq: self.inner.seq.load(Ordering::Relaxed),
+            bpm: DecimalU32(self.inner.bpm_raw.load(Ordering::Relaxed)),
             transport: TransportSnapshot {
                 state: TransportStateCode::from_u8(
-                    self.inner.transport_state.load(Ordering::Acquire),
+                    self.inner.transport_state.load(Ordering::Relaxed),
                 )
                 .into(),
-                bar: self.inner.transport_bar.load(Ordering::Acquire),
-                beat: self.inner.transport_beat.load(Ordering::Acquire),
-                tick: self.inner.transport_tick.load(Ordering::Acquire),
+                bar: self.inner.transport_bar.load(Ordering::Relaxed),
+                beat: self.inner.transport_beat.load(Ordering::Relaxed),
+                tick: self.inner.transport_tick.load(Ordering::Relaxed),
             },
             sync: SyncSnapshot {
-                source: SyncSourceCode::from_u8(self.inner.sync_source.load(Ordering::Acquire))
+                source: SyncSourceCode::from_u8(self.inner.sync_source.load(Ordering::Relaxed))
                     .into(),
-                pll_locked: self.inner.pll_locked.load(Ordering::Acquire),
-                error_ticks: DecimalI32(self.inner.error_ticks_raw.load(Ordering::Acquire)),
+                pll_locked: self.inner.pll_locked.load(Ordering::Relaxed),
+                error_ticks: DecimalI32(self.inner.error_ticks_raw.load(Ordering::Relaxed)),
             },
             audio: AudioSnapshot {
-                sample_rate: self.inner.sample_rate.load(Ordering::Acquire),
-                buffer_size: self.inner.buffer_size.load(Ordering::Acquire),
-                load: DecimalU32(self.inner.audio_load_raw.load(Ordering::Acquire)),
+                sample_rate: self.inner.sample_rate.load(Ordering::Relaxed),
+                buffer_size: self.inner.buffer_size.load(Ordering::Relaxed),
+                load: DecimalU32(self.inner.audio_load_raw.load(Ordering::Relaxed)),
             },
             channels,
         }
@@ -681,13 +681,20 @@ pub mod push {
         }
 
         pub fn publish_destroy<S: ObservationSink>(&mut self, sink: &mut S) {
+            if !self.created {
+                return;
+            }
+
+            let seq = self.last_seq.saturating_add(1);
             sink.dispatch(ObservationParams {
                 stream_id: self.stream_id.clone(),
-                seq: self.last_seq.saturating_add(1),
+                seq,
                 op: ObservationOp::Destroy {
                     form_id: self.form_id.clone(),
                 },
             });
+            self.last_seq = seq;
+            self.created = false;
         }
     }
 }
@@ -747,6 +754,9 @@ fn parse_scaled_decimal(value: &Value, scale: u32) -> Result<i64, String> {
         return Err("expected JSON number".to_owned());
     };
     let text = number.to_string();
+    if text.contains(['e', 'E']) {
+        return Err("decimal scientific notation is not supported".to_owned());
+    }
     let (negative, body) = text
         .strip_prefix('-')
         .map_or((false, text.as_str()), |rest| (true, rest));
@@ -1073,11 +1083,39 @@ mod tests {
     }
 
     #[test]
-    fn unmount_publishes_destroy() {
+    fn unmount_without_create_is_noop() {
         let slot = SnapshotSlot::new(Tempo::from_bpm_integer(120));
         let mut publisher = push::SnapshotPublisher::new(slot.reader());
         let mut sink = RecordingSink::default();
         publisher.publish_destroy(&mut sink);
-        assert!(matches!(sink.items[0].op, ObservationOp::Destroy { .. }));
+        assert!(sink.items.is_empty());
+    }
+
+    #[test]
+    fn unmount_publishes_single_destroy_after_create() {
+        let slot = SnapshotSlot::new(Tempo::from_bpm_integer(120));
+        slot.writer().write(&RtSnapshotFrame {
+            bpm: Tempo::from_bpm_integer(120),
+            transport: RtTransportFrame::default(),
+            sync: RtSyncFrame::default(),
+            audio: RtAudioFrame::default(),
+            channels: &[],
+        });
+        let mut publisher = push::SnapshotPublisher::new(slot.reader());
+        let mut sink = RecordingSink::default();
+
+        publisher.publish_next(&mut sink).expect("create");
+        publisher.publish_destroy(&mut sink);
+        publisher.publish_destroy(&mut sink);
+
+        assert_eq!(sink.items.len(), 2);
+        assert_eq!(sink.items[1].seq, sink.items[0].seq + 1);
+        assert!(matches!(sink.items[1].op, ObservationOp::Destroy { .. }));
+    }
+
+    #[test]
+    fn decimal_parser_rejects_scientific_notation() {
+        let err = parse_scaled_decimal(&json!(1.0e20), SCALE_MICRO).unwrap_err();
+        assert_eq!(err, "decimal scientific notation is not supported");
     }
 }
