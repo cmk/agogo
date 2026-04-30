@@ -98,13 +98,13 @@ impl ControlProducer {
     /// Store the latest tempo. The RT side observes it on its next
     /// per-buffer snapshot.
     pub fn set_tempo(&self, tempo: Tempo) {
-        self.shared.tempo_raw.store(tempo.0, Ordering::Relaxed);
+        self.shared.tempo_raw.store(tempo.0, Ordering::Release);
     }
 
     /// Read the latest tempo from the async side. Mainly for
     /// inverse-op capture and tests.
     pub fn tempo(&self) -> Tempo {
-        Tempo(self.shared.tempo_raw.load(Ordering::Relaxed))
+        Tempo(self.shared.tempo_raw.load(Ordering::Acquire))
     }
 
     /// Push one ordered command without blocking. A full queue is a
@@ -121,7 +121,7 @@ impl RtControlConsumer {
     /// Read last-value controls once per buffer.
     pub fn snapshot(&self) -> RtParams {
         RtParams {
-            tempo: Tempo(self.shared.tempo_raw.load(Ordering::Relaxed)),
+            tempo: Tempo(self.shared.tempo_raw.load(Ordering::Acquire)),
         }
     }
 
