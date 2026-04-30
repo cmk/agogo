@@ -1,6 +1,6 @@
 //! Test utilities shared across the workspace.
 //!
-//! Available to all crates via `project_core::testing`. Not gated behind
+//! Available to all crates via `agogo_core::test`. Not gated behind
 //! `#[cfg(test)]` so integration tests and downstream dev-dependencies
 //! can use it.
 
@@ -45,7 +45,7 @@ pub fn fixture_or_skip(manifest_dir: &str, name: &str) -> Option<PathBuf> {
 #[macro_export]
 macro_rules! fixture_or_skip {
     ($name:expr) => {
-        match $crate::testing::fixture_or_skip(env!("CARGO_MANIFEST_DIR"), $name) {
+        match $crate::test::fixture_or_skip(env!("CARGO_MANIFEST_DIR"), $name) {
             Some(path) => path,
             None => return,
         }

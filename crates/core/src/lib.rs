@@ -8,5 +8,5 @@ pub mod machine;
 pub mod midi;
 pub mod out;
 pub mod sync;
-pub mod testing;
+pub mod test;
 pub mod time;

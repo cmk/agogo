@@ -16,7 +16,7 @@
 
 #![cfg(feature = "rusty-link")]
 
-use agogo_core::testing::fixture_or_skip;
+use agogo_core::test::fixture_or_skip;
 use agogo_core::time::tempo::Tempo;
 use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum, TransportState};
 use rusty_link::{AblLink, SessionState};
