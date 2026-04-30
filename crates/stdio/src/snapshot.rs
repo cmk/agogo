@@ -6,7 +6,7 @@
 
 use std::array;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering, fence};
 
 use agogo_core::conn::tempo::Tempo;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -202,9 +202,13 @@ pub struct RtSnapshotWriter {
 
 impl RtSnapshotWriter {
     pub fn write(&self, frame: &RtSnapshotFrame<'_>) -> u64 {
-        let epoch = self.inner.write_epoch.load(Ordering::Relaxed);
+        let epoch = self.inner.write_epoch.load(Ordering::SeqCst);
         let begin_epoch = if epoch % 2 == 0 { epoch + 1 } else { epoch + 2 };
-        self.inner.write_epoch.store(begin_epoch, Ordering::Release);
+        self.inner.write_epoch.store(begin_epoch, Ordering::SeqCst);
+        // Single-writer seqlock: the odd epoch must become visible
+        // before any payload store can be observed, and the final even
+        // epoch must not publish until every payload store is visible.
+        fence(Ordering::SeqCst);
 
         let seq = self.inner.seq.load(Ordering::Relaxed).saturating_add(1);
         self.inner.bpm_raw.store(frame.bpm.0, Ordering::Release);
@@ -255,10 +259,11 @@ impl RtSnapshotWriter {
         self.inner
             .channel_count
             .store(count as u32, Ordering::Release);
+        fence(Ordering::SeqCst);
         self.inner.seq.store(seq, Ordering::Release);
         self.inner
             .write_epoch
-            .store(begin_epoch + 1, Ordering::Release);
+            .store(begin_epoch + 1, Ordering::SeqCst);
         seq
     }
 }
@@ -271,13 +276,17 @@ pub struct SnapshotReader {
 impl SnapshotReader {
     pub fn snapshot(&self) -> AgogoSnapshot {
         loop {
-            let begin_epoch = self.inner.write_epoch.load(Ordering::Acquire);
+            let begin_epoch = self.inner.write_epoch.load(Ordering::SeqCst);
             if begin_epoch % 2 != 0 {
                 std::hint::spin_loop();
                 continue;
             }
+            // Pair with the writer fences so `begin_epoch == end_epoch`
+            // means this reader saw one coherent payload generation.
+            fence(Ordering::SeqCst);
             let snapshot = self.snapshot_once();
-            let end_epoch = self.inner.write_epoch.load(Ordering::Acquire);
+            fence(Ordering::SeqCst);
+            let end_epoch = self.inner.write_epoch.load(Ordering::SeqCst);
             if begin_epoch == end_epoch {
                 return snapshot;
             }
