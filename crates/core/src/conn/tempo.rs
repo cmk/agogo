@@ -17,9 +17,10 @@ impl Tempo {
     pub const ZERO: Self = Self(0);
     pub const MAX_BPM_INTEGER: u32 = u32::MAX / 1_000_000;
 
-    /// Construct from an integer BPM. Panics if `n > 4294` (`n × 10⁶`
-    /// overflows `u32`). `checked_mul` avoids the silent release-build
-    /// wrap that plain `n * 1_000_000` would produce.
+    /// Construct from an integer BPM. Panics if
+    /// `n > Self::MAX_BPM_INTEGER` (`n × 10⁶` overflows `u32`).
+    /// `checked_mul` avoids the silent release-build wrap that plain
+    /// `n * 1_000_000` would produce.
     pub const fn from_bpm_integer(n: u32) -> Self {
         match n.checked_mul(1_000_000) {
             Some(v) => Self(v),
