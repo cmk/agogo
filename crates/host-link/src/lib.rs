@@ -3,7 +3,7 @@
 //! Ableton Link host-side integration for `agogo`.
 //!
 //! Wraps [`rusty_link`] (thin FFI over Ableton's C wrapper) and exposes
-//! a `LinkClock` that implements `agogo_core::sync::PhaseSourceImpl`.
+//! a `LinkClock` that implements `agogo_core::control::sync::PhaseSourceImpl`.
 //! Ships the lifecycle surface (enable / tempo / num_peers) plus the
 //! host-time bridge (`phase_at_sample` via `HostTimeAnchor`) as of
 //! Plan 08; bidirectional (tempo push, transport, quantum snap) is

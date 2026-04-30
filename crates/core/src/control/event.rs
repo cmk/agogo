@@ -26,7 +26,7 @@ use crate::time::tick::Tick;
 /// `+16` slack absorbs swing-boundary overrun where the scheduler
 /// expands its tick window by `swing_d` ticks.
 ///
-/// Used by Plan 14's [`Machine`](crate::machine::Machine) and
+/// Used by Plan 14's [`Machine`](crate::control::Machine) and
 /// Plan 13's `host-cpal` callback to size their pre-allocated
 /// `Vec<ScheduledEvent>` so [`tick_stream_into`] never reallocates
 /// inside the audio callback.

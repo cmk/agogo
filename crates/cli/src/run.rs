@@ -41,9 +41,9 @@ use agogo_core::channel::Channel;
 use agogo_core::conn::boundary::tempo_to_f64_bpm;
 use agogo_core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
 use agogo_core::conn::tempo::Tempo;
-use agogo_core::host::{AudioHost, AudioIo, Config};
-use agogo_core::machine::{Machine, MachineStopHandle, TransportPolicy};
-use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo_core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo_core::control::{Machine, MachineStopHandle, TransportPolicy};
+use agogo_core::sink::audio::{AudioHost, AudioIo, Config};
 use agogo_core::time::tick::PPQN;
 use agogo_host_cpal::CpalHost;
 use agogo_host_cpal::cpal::callback::CallbackState;
@@ -228,7 +228,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     // SPSC + drain thread.
     let (producer, consumer) = spsc(1024);
     let dropped_handle = producer.dropped_handle();
-    let drain_sink: Arc<dyn agogo_core::out::midi::MidiSink + Send + Sync> = sink;
+    let drain_sink: Arc<dyn agogo_core::sink::midi::MidiSink + Send + Sync> = sink;
     let drain = consumer.spawn_drain(drain_sink);
 
     // Build PhaseSource per --source. Link case mints a

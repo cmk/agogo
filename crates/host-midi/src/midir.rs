@@ -1,6 +1,6 @@
 //! `MidirSink` — midir-backed [`MidiSink`] implementation.
 
-use agogo_core::out::midi::MidiSink;
+use agogo_core::sink::midi::MidiSink;
 use thiserror::Error;
 
 /// midir-backed [`MidiSink`]. Opens a single output port at

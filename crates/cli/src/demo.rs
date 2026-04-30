@@ -13,9 +13,9 @@ use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
 use agogo_core::conn::fixed::Micro;
 use agogo_core::conn::sample::{S048, SampleRate};
 use agogo_core::conn::tempo::Tempo;
-use agogo_core::host::{AudioHost, Config};
-use agogo_core::machine::{Machine, TransportPolicy};
-use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo_core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo_core::control::{Machine, TransportPolicy};
+use agogo_core::sink::audio::{AudioHost, Config};
 use agogo_core::time::grid::Grid;
 use agogo_core::time::swing::SwingConfig;
 use agogo_core::time::tbase::TBase;
@@ -121,7 +121,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     // SPSC + drain.
     let (producer, consumer) = spsc(1024);
     let dropped_handle = producer.dropped_handle();
-    let drain_sink: Arc<dyn agogo_core::out::midi::MidiSink + Send + Sync> = sink;
+    let drain_sink: Arc<dyn agogo_core::sink::midi::MidiSink + Send + Sync> = sink;
     let drain = consumer.spawn_drain(drain_sink);
 
     // Machine + CallbackState. Plan 14 generalises Plan 13's
@@ -173,7 +173,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     };
 
     // Move state into the data callback.
-    let cb = Box::new(move |io: &mut agogo_core::host::AudioIo| {
+    let cb = Box::new(move |io: &mut agogo_core::sink::audio::AudioIo| {
         state.on_buffer(io);
     });
 

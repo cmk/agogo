@@ -122,7 +122,7 @@ code based on it.
 
   **Glossary.**
   > **PI controller** — the proportional-integral control loop in
-  > `crates/core/src/sync/pll.rs`. It reads the phase error (observed
+  > `crates/core/src/control/sync/pll.rs`. It reads the phase error (observed
   > vs. expected pulse spacing), scales it by a proportional gain
   > `kp` and an accumulated integrator term `ki × ∑error`, and steers
   > the NCO's frequency toward the true tempo. "PI-exempt" means a
@@ -152,14 +152,14 @@ code based on it.
 
   The five allowed uses:
 
-  1. PI controller state and gains in `sync::pll` (`PllSettings`,
-     `PllState`, and the control-law body). Mark intermediate
-     locals `// PI-exempt`.
+  1. PI controller state and gains in `control::sync::pll`
+     (`PllSettings`, `PllState`, and the control-law body). Mark
+     intermediate locals `// PI-exempt`.
   2. PCM audio sample slices (`&[f32]`) at the cpal ABI boundary.
      Mark `// PCM ABI`.
-  3. Parabolic-fit f64 locals inside `sync::detect` (contained to
-     a handful of lines, converted to Q48.16 before escape). Mark
-     `// ABI-local`.
+  3. Parabolic-fit f64 locals inside `control::sync::detect`
+     (contained to a handful of lines, converted to Q48.16 before
+     escape). Mark `// ABI-local`.
   4. CLI argv parsers — `f64` accepts a human-typed decimal, then
      dies at the handler's first line via `f64_bpm_to_tempo` /
      `F64F06` / `F64F12`. Mark `// argv boundary`.

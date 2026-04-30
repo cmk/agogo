@@ -13,7 +13,7 @@ use agogo_core::conn::tempo::Tempo;
 // called by the `phase_at_sample` shim below). Copilot flagged this
 // as unused on PR #16 round 1 — false positive: removing it breaks
 // `cargo build --features rusty-link`.
-use agogo_core::sync::PhaseSourceImpl;
+use agogo_core::control::sync::PhaseSourceImpl;
 
 use crate::link::{HostTimeAnchor, LinkClock};
 use crate::quantum::Quantum;
