@@ -34,25 +34,37 @@ set -euo pipefail
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
+step() {
+  printf 'pre-commit: %s\n' "$*"
+}
+
 # 1. cargo fmt — blocking. Drift aborts the commit. Run
 #    `cargo fmt --all` to fix.
+step "cargo fmt --all -- --check"
 cargo fmt --all -- --check
 
 # 2. PII / secret scan — blocking.
+step "scripts/check-pii.sh"
 scripts/check-pii.sh
 
 # 3. Float-discipline gate — blocking. Per CLAUDE.md, naked
 #    f32/f64 outside the documented exception modules is a build
 #    failure. Specific to this workspace.
+step "scripts/check-floats.sh"
 scripts/check-floats.sh
 
 # 4. Layering gate — blocking. Per CLAUDE.md, inter-module imports
 #    must respect the partial order declared in each module-root's
 #    `//! depends-on:` sentinel. Plan 2026-04-29-01 T7.
+step "scripts/check-layers.sh"
 scripts/check-layers.sh
 
 # 5. Test suite — blocking.
+step "cargo test --workspace --quiet"
 cargo test --workspace --quiet
 
 # 6. Lints — blocking; matches CI.
+step "cargo clippy --all-targets --quiet -- -D warnings"
 cargo clippy --all-targets --quiet -- -D warnings
+
+step "OK"

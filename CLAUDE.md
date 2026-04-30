@@ -9,13 +9,13 @@ A Rust workspace with multiple crates.
 ## Parallel work
 
 At the start of each conversation, ask the user:
-"Are any other Claude instances working in this repo right now?"
+"Are any other agent instances working in this repo right now?"
 
 If yes, a worktree is **mandatory** — see the TDD workflow's Step 1
 for the naming convention (`../<repo>.plan-YYYY-MM-DD-NN` + branch
 `plan/YYYY-MM-DD-NN`).
 
-Never run two Claude instances in the same worktree. Cargo takes a
+Never run two coding-agent instances in the same worktree. Cargo takes a
 file lock on `target/` during each build, so concurrent builds stall
 behind each other ("Blocking waiting for file lock"). Separate
 worktrees each get their own `target/` and sidestep the lock —
@@ -430,7 +430,7 @@ is clean, push and open the PR with `--body-file` as above.
 
 Once pushed, CI runs `cargo test --workspace` and
 `cargo clippy --all-targets -- -D warnings` (see
-`.github/workflows/ci.yml`). Claude Code Action and/or GitHub Copilot
+`.github/workflows/ci.yml`). Automated code review agents and/or GitHub Copilot
 perform a second-round review on the PR automatically.
 
 After GitHub review activity, run `/pull-reviews <N>` to fetch the PR's
@@ -521,7 +521,7 @@ One slug, three places.
    find the next unused `NN` for today's date (zero-padded, starts at
    `01`). No writes yet — main stays clean.
 2. **Ask the user: worktree or branch?** Worktree is mandatory if
-   another Claude instance is active in this repo; otherwise it's the
+   another coding-agent instance is active in this repo; otherwise it's the
    user's call. Then:
    - worktree: `git worktree add ../<repo>.plan-YYYY-MM-DD-NN -b plan/YYYY-MM-DD-NN`, `cd` into it.
    - branch: `git switch -c plan/YYYY-MM-DD-NN`.
@@ -567,8 +567,8 @@ One slug, three places.
 
 Two complementary layers guard every commit:
 
-**Layer 1 — Claude Code `PreToolUse`** (`.claude/settings.json`):
-fires on agent-invoked Bash calls matching `git commit*`. Catches
+**Layer 1 — Agent `PreToolUse`** (`.claude/settings.json`):
+fires on agent-invoked shell calls matching `git commit*`. Catches
 issues during agent iteration without invoking git for real.
 Limitation: `PreToolUse` runs *before* the matched Bash call's body
 executes, so a chained command like `git add file && git commit -m

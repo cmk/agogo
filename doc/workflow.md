@@ -1,7 +1,7 @@
 # Workflow State Diagrams
 
 Visual reference for the review-round and `/watch-pr` workflows defined
-in `../CLAUDE.md`. The prose specs there are authoritative; these
+in the root workflow doc (`../CLAUDE.md`). The prose specs there are authoritative; these
 diagrams exist to make the state transitions easier to eyeball when
 debugging an unexpected situation — a stuck fix commit, a loop that
 won't quit, an ordering question about when to run which command.
@@ -148,7 +148,7 @@ stateDiagram-v2
   loop (`/loop 5m /watch-pr <N>`) has no backoff and no quit — it
   runs until the user kills it.
 
-## When a diagram disagrees with CLAUDE.md
+## When a diagram disagrees with the root workflow doc
 
-CLAUDE.md wins. These are derived views; re-draw them when the
+The root workflow doc wins. These are derived views; re-draw them when the
 workflow prose changes. A lagging diagram is worse than no diagram.
