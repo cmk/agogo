@@ -184,10 +184,10 @@ Copilot reviewed 10 out of 10 changed files in this pull request and generated 5
 | doc/reviews/review-00031.md | Adds PR review record describing changes, exceptions, and verification. |
 | doc/plans/plan-2026-04-27-03.md | Adds Q2 sweep plan doc and post-implementation deviation notes. |
 | crates/core/src/fxp.rs | Introduces new helpers + updates conversion logic/tests to use Conn composition where lawful. |
-| crates/core/src/machine/spec.rs | Documents argv-boundary user-unit→seconds shift for ms→Micro conversion. |
+| crates/core/src/channel/spec.rs | Documents argv-boundary user-unit→seconds shift for ms→Micro conversion. |
 | crates/core/src/arb.rs | Refactors fixture math to use new Conn-inverse helpers for Tempo/Pico → f64. |
-| crates/core/src/sync/detect.rs | Updates tests to use `samples_f64()` and `tempo_to_hz()` instead of open-coded scaling. |
-| crates/core/src/sync/pll.rs | Updates tests to use `Tempo::abs_diff` and `FD12FD06.inner(FD06(..))` for jitter. |
+| crates/core/src/control/sync/detect.rs | Updates tests to use `samples_f64()` and `tempo_to_hz()` instead of open-coded scaling. |
+| crates/core/src/control/sync/pll.rs | Updates tests to use `Tempo::abs_diff` and `FD12FD06.inner(FD06(..))` for jitter. |
 | crates/host-link/src/link.rs | Uses `tempo_to_f64_bpm` for the Tempo→f64 BPM Link FFI boundary conversions. |
 | crates/cli/src/main.rs | Adds `parse_cli_bpm` helper and replaces repeated BPM scaling blocks + display conversions. |
 | crates/core/proptest-regressions/fxp.txt | Adds a saved regression seed for Link rounding parity. |

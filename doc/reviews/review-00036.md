@@ -186,8 +186,8 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 2 c
 | ---- | ----------- |
 | doc/reviews/review-00036.md | Adds the review record for PR #36 and documents the rationale/verification. |
 | doc/plans/plan-2026-04-28-04.md | Adds the plan describing the saturation fix + rename, with verification notes. |
-| crates/core/src/sync/sample_tick.rs | Implements u128→u64 saturation in `inner` and adds a new overflow-focused proptest. |
-| crates/core/src/machine/spec.rs | Renames `micro_from_ms` to `micro_from_user_ms` and updates call sites/comments. |
+| crates/core/src/time/conn.rs | Implements u128→u64 saturation in `inner` and adds a new overflow-focused proptest. |
+| crates/core/src/channel/spec.rs | Renames `micro_from_ms` to `micro_from_user_ms` and updates call sites/comments. |
 | crates/core/proptest-regressions/sync/sample_tick.txt | Checks in the proptest regression seed for the overflow case. |
 </details>
 
@@ -207,7 +207,7 @@ overflow.
 ```
 
 <!-- gh-id: 3157044455 -->
-### Copilot on [`crates/core/src/sync/sample_tick.rs:187`](https://github.com/cmk/agogo/pull/36#discussion_r3157044455) (2026-04-28 20:40 UTC)
+### Copilot on [`crates/core/src/time/conn.rs:187`](https://github.com/cmk/agogo/pull/36#discussion_r3157044455) (2026-04-28 20:40 UTC)
 
 The proptest doc comment says the generator domain “spans the full `u32`/`u32` / `192_000` regions”, but the strategy is intentionally bounded (`tick` in `u32::MAX/2..=u32::MAX`, `bpm_u` in `1..=100`, `ppqn` in `1..=8`). Please reword to reflect that it *targets* the overflow region rather than covering the full domain.
 ```suggestion

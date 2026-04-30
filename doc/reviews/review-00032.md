@@ -33,7 +33,7 @@ none cross the parser → into_channel boundary.
    in the link arm — collapses to
    `args.link_quantum.unwrap_or(Quantum::from_bars(4))`.
 
-2. **`crates/core/src/machine/spec.rs`** —
+2. **`crates/core/src/channel/spec.rs`** —
    `delay_ms: f64 → delay: Micro`. Parser tries an i64-ms exact
    path first (no f64 round-trip drift), falls back to f64 +
    `micro_from_ms` only for fractional inputs. `into_channel`
@@ -159,7 +159,7 @@ Fix: added `Tempo::MAX_BPM_F64: f64 = (u32::MAX as f64) / 1_000_000.0` const in 
 The new `parse_bpm_to_tempo_ok_iff_in_range` proptest catches this — without it, the bug would have shipped silently.
 
 <!-- gh-id: 3151526222 -->
-### Copilot on [`crates/core/src/machine/spec.rs:76`](https://github.com/cmk/agogo/pull/32#discussion_r3151526222) (2026-04-28 04:17 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:76`](https://github.com/cmk/agogo/pull/32#discussion_r3151526222) (2026-04-28 04:17 UTC)
 
 The field/doc comment says "Positive delay compensation", but the parser accepts negative values (i64 path) and `micro_from_ms` can produce negative `Micro` (and `Display` has explicit negative handling). Either reject negative delays at parse time (and simplify Display) or update the docs to state that negative inputs are accepted but clamped to 0 in `into_channel`.
 
@@ -186,7 +186,7 @@ Copilot reviewed 8 out of 9 changed files in this pull request and generated 3 c
 | ---- | ----------- |
 | doc/reviews/review-00032.md | Adds review record summarizing Q3 sweep, verification, and follow-ups. |
 | doc/plans/plan-2026-04-27-04.md | Adds Q3 plan/notes for float surface-area sweep tasks K/L/M. |
-| crates/core/src/machine/spec.rs | Migrates `delay_ms: f64` to `delay: Micro`, updates parse/Display/tests accordingly. |
+| crates/core/src/channel/spec.rs | Migrates `delay_ms: f64` to `delay: Micro`, updates parse/Display/tests accordingly. |
 | crates/core/src/fxp.rs | Adds `Tempo::MAX_BPM_F64`; switches Bot/Top fallbacks to `unreachable!()`. |
 | crates/core/proptest-regressions/machine/spec.txt | Adds regression seed for the integer-ms exact-parse contract. |
 | crates/cli/src/run.rs | Introduces bpaf parsers for `Tempo`/`Quantum`, updates run path, and adds parser tests. |

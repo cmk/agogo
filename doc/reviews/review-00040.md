@@ -82,7 +82,7 @@ The four Copilot inline comments on PR #39 are folded in:
   pinned as a `Just(_)` arm).
 
 <!-- gh-id: 3157666910 -->
-### Copilot on [`crates/core/src/machine/spec/parser.rs:426`](https://github.com/cmk/agogo/pull/39#discussion_r3157666910) (2026-04-28 22:47 UTC)
+### Copilot on [`crates/core/src/channel/spec/parser.rs:426`](https://github.com/cmk/agogo/pull/39#discussion_r3157666910) (2026-04-28 22:47 UTC)
 
 The doc comment describing the Display format has an unintended line break: it currently reads `delay={ms_int}. {frac:03}` but `Display for ChannelSpec` emits `delay={ms_int}.{frac:03}` (no space/newline). This makes the comment inaccurate for readers trying to match the canonical form.
 ```suggestion
@@ -117,8 +117,8 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 4 c
 | ---- | ----------- |
 | doc/reviews/review-00039.md | Review record describing the drift bug, fix, and verification results. |
 | doc/plans/plan-2026-04-28-07.md | New plan doc for a separate “three-mess cleanup” effort in `crates/core/`. |
-| crates/core/src/machine/spec/parser.rs | Introduces exact decimal-ms parsing path and adds parser-focused tests. |
-| crates/core/src/machine/spec/display.rs | Adds fractional-µs round-trip regression test and widens proptest delay generation. |
+| crates/core/src/channel/spec/parser.rs | Introduces exact decimal-ms parsing path and adds parser-focused tests. |
+| crates/core/src/channel/spec/display.rs | Adds fractional-µs round-trip regression test and widens proptest delay generation. |
 | crates/core/proptest-regressions/machine/spec/display.txt | Adds regression seed capturing the original failing case. |
 </details>
 
@@ -128,7 +128,7 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 4 c
 
 
 <!-- gh-id: 3157666944 -->
-### Copilot on [`crates/core/src/machine/spec/parser.rs:433`](https://github.com/cmk/agogo/pull/39#discussion_r3157666944) (2026-04-28 22:47 UTC)
+### Copilot on [`crates/core/src/channel/spec/parser.rs:433`](https://github.com/cmk/agogo/pull/39#discussion_r3157666944) (2026-04-28 22:47 UTC)
 
 `parse_decimal_ms` comment says the f64 fallback handles inputs like `1_000`, but Rust’s `f64::from_str` / `i64::from_str` don’t accept `_` separators in strings. Either drop the `_` example from the comment or add explicit underscore-stripping support before parsing so the comment matches behavior.
 ```suggestion
@@ -136,7 +136,7 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 4 c
 ```
 
 <!-- gh-id: 3157666956 -->
-### Copilot on [`crates/core/src/machine/spec/parser.rs:444`](https://github.com/cmk/agogo/pull/39#discussion_r3157666956) (2026-04-28 22:47 UTC)
+### Copilot on [`crates/core/src/channel/spec/parser.rs:444`](https://github.com/cmk/agogo/pull/39#discussion_r3157666956) (2026-04-28 22:47 UTC)
 
 `frac_str` is checked for emptiness just above (`if ... frac_str.is_empty() { return None; }`), so the `match frac_str.len()` arm for `0 => 0` is unreachable. Removing the dead arm would simplify the logic and avoid suggesting that empty fractions are supported (they currently return `None`).
 ```suggestion
@@ -144,6 +144,6 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 4 c
 ```
 
 <!-- gh-id: 3157666970 -->
-### Copilot on [`crates/core/src/machine/spec/display.rs:283`](https://github.com/cmk/agogo/pull/39#discussion_r3157666970) (2026-04-28 22:47 UTC)
+### Copilot on [`crates/core/src/channel/spec/display.rs:283`](https://github.com/cmk/agogo/pull/39#discussion_r3157666970) (2026-04-28 22:47 UTC)
 
 `arb_delay`’s `MAX_US` is computed as `i64::MAX / 1_000`, but it’s used as a `Micro` (µs) upper bound. That’s 1000× smaller than the actual max representable `Micro` and doesn’t correspond to the parser’s `ms_int.checked_mul(1_000)` limit (which is in ms). Consider either (a) making the bound `i64::MAX` for µs, or (b) renaming to `MAX_MS` and mapping via `Micro(ms * 1_000)` when you want to target the integer-ms overflow boundary. The current name/comment and the generated domain don’t match.

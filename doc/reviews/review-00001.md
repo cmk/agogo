@@ -120,7 +120,7 @@ All nine green, none `#[ignore]`d, confirming the plan's claim.
 
 **One issue found in test coverage — confidence 85:**
 
-`pll_phase_converges` at `crates/core/src/sync/pll.rs` measures phase
+`pll_phase_converges` at `crates/core/src/control/sync/pll.rs` measures phase
 error as the difference between the PLL's estimated inter-pulse
 spacing (derived from `out.bpm`) and the true inter-pulse spacing.
 This is an *indirect* measure of timing error derived from a smoothed
@@ -153,7 +153,7 @@ Intentional deferral, documented correctly. Flagging for visibility.
 
 ### Plan Conformance
 
-**T0:** Scaffold at `crates/core/src/sync.rs` + three submodule files.
+**T0:** Scaffold at `crates/core/src/control/sync.rs` + three submodule files.
 `lib.rs` re-export of `pub mod sync` present. Conforms.
 
 **T1:** `Peak`, `DetectorConfig`, `PeakDetector`, `process(&mut self,
@@ -227,7 +227,7 @@ conventions are violated.
 
 **Follow-up (future work):**
 
-1. `crates/core/src/sync/pll.rs` `pll_phase_converges` measures
+1. `crates/core/src/control/sync/pll.rs` `pll_phase_converges` measures
    BPM-derived spacing error as a proxy for phase timing error. In
    Sprint 3, replace with direct residual accumulation:
    `|predicted_arrival[i] - observed_arrival[i]|` in samples,
@@ -240,7 +240,7 @@ conventions are violated.
    contract). The `≤ 1.0` at SNR > 20 dB half is deferred correctly.
    Track in Sprint 3 as `noise_db: Option<f32>` on `pulse_train`.
 
-3. `crates/core/src/sync/source.rs` — `feed_samples` for `External`
+3. `crates/core/src/control/sync/source.rs` — `feed_samples` for `External`
    calls `pll.step(None)` when the block has no detected peaks.
    Reasonable for a free-run heartbeat, but if the caller feeds many
    short silent blocks (e.g. pre-roll before signal), each block
@@ -265,12 +265,12 @@ These CLI args are passed straight into `pulse_train()`, which `assert!`s and wi
 ```
 
 <!-- gh-id: 3127794259 -->
-### Copilot on [`crates/core/src/sync/pll.rs:274`](https://github.com/cmk/agogo/pull/1#discussion_r3127794259) (2026-04-23 01:23 UTC)
+### Copilot on [`crates/core/src/control/sync/pll.rs:274`](https://github.com/cmk/agogo/pull/1#discussion_r3127794259) (2026-04-23 01:23 UTC)
 
 The `pll_phase_converges` property claims to measure phase RMS error, but the calculation uses `out.bpm` (the integrator-only smoothed tempo) to derive `est_spacing_secs`. That’s effectively another tempo-convergence check, not a phase/NCO error metric (and it ignores `state.freq_hz` / `out.phase` entirely). If the intent is true phase error, consider computing predicted arrival times from the NCO (`state.freq_hz` + `state.phase` and elapsed samples) or directly comparing `PllState::phase` against the ground-truth pulse phase at each sample.
 
 <!-- gh-id: 3127794265 -->
-### Copilot on [`crates/core/src/sync/source.rs:53`](https://github.com/cmk/agogo/pull/1#discussion_r3127794265) (2026-04-23 01:23 UTC)
+### Copilot on [`crates/core/src/control/sync/source.rs:53`](https://github.com/cmk/agogo/pull/1#discussion_r3127794265) (2026-04-23 01:23 UTC)
 
 `PhaseSource::feed_samples` advances the PLL by calling `pll.step(None)` only once when no peaks are detected, but `Pll::step(None)` advances by exactly one sample (`freq_hz / sr`). For block-based calls this leaves phase effectively frozen. Consider advancing by `samples.len()` (loop `step(None)` or add a `step_samples(count)` API on `Pll`).
 ```suggestion
@@ -288,12 +288,12 @@ The `pll_phase_converges` property claims to measure phase RMS error, but the ca
 ```
 
 <!-- gh-id: 3127794273 -->
-### Copilot on [`crates/core/src/sync/source.rs:40`](https://github.com/cmk/agogo/pull/1#discussion_r3127794273) (2026-04-23 01:23 UTC)
+### Copilot on [`crates/core/src/control/sync/source.rs:40`](https://github.com/cmk/agogo/pull/1#discussion_r3127794273) (2026-04-23 01:23 UTC)
 
 `phase_at_sample(&mut self, n)` suggests the returned value corresponds to the provided absolute sample index, but the `External` branch ignores `n` entirely and just returns the current `pll.state().phase`. Either compute/advance phase to `n` (track last-synced sample index) or adjust the API/docs so `External` doesn’t claim to be “at sample n”.
 
 <!-- gh-id: 3127794277 -->
-### Copilot on [`crates/core/src/sync/detect.rs:118`](https://github.com/cmk/agogo/pull/1#discussion_r3127794277) (2026-04-23 01:23 UTC)
+### Copilot on [`crates/core/src/control/sync/detect.rs:118`](https://github.com/cmk/agogo/pull/1#discussion_r3127794277) (2026-04-23 01:23 UTC)
 
 The current hold-window implementation can emit a second peak exactly `hold_samples` samples after the previous one (because `hold_remaining` is decremented before the check and is set to `hold_samples` on emission). That conflicts with the doc comment (“blocks emission at n+1 .. n+hold” inclusive). Consider decrementing after the peak check or setting `hold_remaining = hold_samples + 1` so the documented gap is enforced.
 ```suggestion
@@ -302,7 +302,7 @@ The current hold-window implementation can emit a second peak exactly `hold_samp
 ```
 
 <!-- gh-id: 3127794284 -->
-### Copilot on [`crates/core/src/sync/detect.rs:107`](https://github.com/cmk/agogo/pull/1#discussion_r3127794284) (2026-04-23 01:23 UTC)
+### Copilot on [`crates/core/src/control/sync/detect.rs:107`](https://github.com/cmk/agogo/pull/1#discussion_r3127794284) (2026-04-23 01:23 UTC)
 
 `centre_global` casts `start_index` (a `u64`) to `i64` with `as`, which will wrap for large stream indices (and can produce negative `sample_index` values). If stream-global indices can exceed `i64::MAX`, this becomes incorrect. Consider doing the arithmetic in `u64`/`i128` and only converting to `f64` at the end, or returning an error when `start_index` is out of range.
 ```suggestion
@@ -332,10 +332,10 @@ Copilot reviewed 12 out of 13 changed files in this pull request and generated 8
 | ---- | ----------- |
 | doc/reviews/review-00001.md | Review record summarizing what landed and key deviations. |
 | doc/plans/plan-2026-04-22-02.md | Implementation plan + verification matrix + deviation notes. |
-| crates/core/src/sync/source.rs | `PhaseSource` API over Internal clock vs External detector+PLL. |
-| crates/core/src/sync/pll.rs | Type‑II PLL implementation + properties/regression tests. |
-| crates/core/src/sync/detect.rs | Streaming 3-sample peak detector with parabolic interpolation. |
-| crates/core/src/sync.rs | `sync` module wiring + re-exports. |
+| crates/core/src/control/sync/source.rs | `PhaseSource` API over Internal clock vs External detector+PLL. |
+| crates/core/src/control/sync/pll.rs | Type‑II PLL implementation + properties/regression tests. |
+| crates/core/src/control/sync/detect.rs | Streaming 3-sample peak detector with parabolic interpolation. |
+| crates/core/src/control/sync.rs | `sync` module wiring + re-exports. |
 | crates/core/src/lib.rs | Exposes `sync` module from core crate. |
 | crates/core/src/arb.rs | Adds `pulse_train` + `testkit`-gated strategies. |
 | crates/core/Cargo.toml | Adds `testkit` feature and optional `proptest` dep. |
@@ -351,7 +351,7 @@ Copilot reviewed 12 out of 13 changed files in this pull request and generated 8
 
 
 <!-- gh-id: 3127794290 -->
-### Copilot on [`crates/core/src/sync/pll.rs:156`](https://github.com/cmk/agogo/pull/1#discussion_r3127794290) (2026-04-23 01:23 UTC)
+### Copilot on [`crates/core/src/control/sync/pll.rs:156`](https://github.com/cmk/agogo/pull/1#discussion_r3127794290) (2026-04-23 01:23 UTC)
 
 `clamp_frac = clamp_hz / nominal_freq_hz` can exceed 1.0 (defaults at 120 BPM / 24 PPQ give 50/48 ≈ 1.04), allowing `integrator <= -1.0`. That makes `smoothed_bpm()` negative (`nominal_freq_hz * (1 + integrator)`) and can also drive `freq_hz` negative before it’s reset. Consider clamping integrator so `1.0 + integrator` stays positive, or apply the clamp in absolute-Hz space rather than as a fraction.
 ```suggestion

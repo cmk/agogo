@@ -226,7 +226,7 @@ Copilot reviewed 7 out of 8 changed files in this pull request and generated 8 c
 | doc/reviews/review-00009.md | Adds a local review record for this MR. |
 | doc/plans/plan-2026-04-23-07.md | Adds Plan 10 writeup covering MR #1 and MR #2 scope. |
 | crates/core/src/time/conn.rs | Introduces `PicoSampleConn` and its test suite. |
-| crates/core/src/sync/pll.rs | Replaces duplicated Tempo/seconds formulas with shared helpers. |
+| crates/core/src/control/sync/pll.rs | Replaces duplicated Tempo/seconds formulas with shared helpers. |
 | crates/core/src/fxp.rs | Re-exports upstream float wrappers/Conn constants; adds PI-exempt helpers + tests; removes unused f32 boundary helpers. |
 | crates/cli/src/main.rs | Updates `sync_trace` argv-boundary conversions to use `f64_bpm_to_tempo`, `F64F12`, and `tempo_to_hz`. |
 | Cargo.toml | Updates `connections` git rev. |

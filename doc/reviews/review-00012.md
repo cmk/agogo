@@ -286,12 +286,12 @@ held on `config` is the authoritative session-level default.
 ```
 
 <!-- gh-id: 3136721780 -->
-### Copilot on [`crates/core/src/channel/transform.rs:85`](https://github.com/cmk/agogo/pull/12#discussion_r3136721780) (2026-04-24 09:23 UTC)
+### Copilot on [`crates/core/src/channel/time.rs:85`](https://github.com/cmk/agogo/pull/12#discussion_r3136721780) (2026-04-24 09:23 UTC)
 
 `transform()` constructs a new `PicoSampleConn` on every call. Since this is per-buffer/per-channel scheduling logic, repeatedly running `gcd` + i128 setup here could show up on the audio thread. Consider caching `PicoSampleConn` (e.g. store it alongside `SampleTickConn`, or pass a prebuilt `PicoSampleConn` into `transform`/`tick_stream`) so steady-state scheduling avoids per-call setup work.
 
 <!-- gh-id: 3136721805 -->
-### Copilot on [`crates/core/src/channel/scheduler.rs:45`](https://github.com/cmk/agogo/pull/12#discussion_r3136721805) (2026-04-24 09:23 UTC)
+### Copilot on [`crates/core/src/control/event.rs:45`](https://github.com/cmk/agogo/pull/12#discussion_r3136721805) (2026-04-24 09:23 UTC)
 
 `tick_stream()` constructs `PicoSampleConn::new(stc.sr())` on every call. Given this is per-audio-buffer scheduling, consider hoisting/caching `PicoSampleConn` so the audio path doesn’t pay the setup cost every buffer (even if small), and so both `tick_stream` and `transform` can share the same precomputed conn.
 
@@ -348,8 +348,8 @@ Copilot reviewed 13 out of 14 changed files in this pull request and generated 7
 | crates/host-link/src/lib.rs | Exposes new host-link modules and re-exports session/transport types. |
 | crates/host-link/Cargo.toml | Adds optional `rust-fsm` dependency under the `rusty-link` feature. |
 | crates/core/src/fxp.rs | Adds `Quantum` newtype and f64→Quantum conversion with tests. |
-| crates/core/src/channel/transform.rs | Migrates shift/offset to `Micro`, adds `snap_to_quantum`, and introduces `micro_to_samples`. |
-| crates/core/src/channel/scheduler.rs | Updates scheduler math to Micro-based shift/offset conversion via `micro_to_samples`. |
+| crates/core/src/channel/time.rs | Migrates shift/offset to `Micro`, adds `snap_to_quantum`, and introduces `micro_to_samples`. |
+| crates/core/src/control/event.rs | Updates scheduler math to Micro-based shift/offset conversion via `micro_to_samples`. |
 | crates/core/src/channel.rs | Updates re-exports for renamed MAX_SHIFT constant. |
 | crates/cli/src/main.rs | Adds `agogo link push-tempo`, `transport`, `diag` commands and updates Link probe and channel trace conversions. |
 | Cargo.lock | Locks new `rust-fsm` dependencies. |

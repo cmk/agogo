@@ -51,7 +51,7 @@ tests from Q1a pass identically.
      names + the two KEEPs; dropped references to the upstream
      `connections::conn::{fixed, sample}` paths (those modules no
      longer exist post-Q1a).
-   - `crates/core/src/time/decimal.rs` — stripped the
+   - `crates/core/src/conn/fixed.rs` — stripped the
      `(Uni, 1 s)` style alias annotations from each FD rung,
      kept the `(1 s)` time-unit annotation.
 
@@ -164,15 +164,15 @@ Copilot reviewed 16 out of 16 changed files in this pull request and generated 7
 | doc/plans/plan-2026-04-27-02.md | Adds execution plan/audit notes for Q1b rename + alias cleanup. |
 | crates/host-link/src/link.rs | Updates imports/usages to `F064FD06` and associated commentary. |
 | crates/host-cpal/src/cpal/callback.rs | Renames `S48` → `S048` in docs/tests and generic instantiations. |
-| crates/core/src/time/decimal.rs | Cleans module doc ladder annotations to match canonical FD names. |
-| crates/core/src/sync/source.rs | Renames `S48` → `S048` across tests. |
-| crates/core/src/sync/pll.rs | Renames `S48` → `S048` across tests and helper math. |
-| crates/core/src/sync/detect.rs | Renames `S48` → `S048` across tests and proptests. |
-| crates/core/src/machine/spec.rs | Updates float-bridge conn name `F64F06` → `F064FD06` in docs and code. |
-| crates/core/src/machine.rs | Renames `S48` → `S048` across machine tests. |
+| crates/core/src/conn/fixed.rs | Cleans module doc ladder annotations to match canonical FD names. |
+| crates/core/src/control/sync/source.rs | Renames `S48` → `S048` across tests. |
+| crates/core/src/control/sync/pll.rs | Renames `S48` → `S048` across tests and helper math. |
+| crates/core/src/control/sync/detect.rs | Renames `S48` → `S048` across tests and proptests. |
+| crates/core/src/channel/spec.rs | Updates float-bridge conn name `F64F06` → `F064FD06` in docs and code. |
+| crates/core/src/control.rs | Renames `S48` → `S048` across machine tests. |
 | crates/core/src/fxp.rs | Removes transitional alias surface; keeps `Micro`/`Pico`; updates `pico_to_samples` dispatch to canonical `FD12Sxxx`. |
-| crates/core/src/channel/transform.rs | Updates conn name `F12F06` → `FD12FD06` in docs and conversion path. |
-| crates/core/src/channel/scheduler.rs | Updates transform/scheduler composition comment to `FD12FD06`. |
+| crates/core/src/channel/time.rs | Updates conn name `F12F06` → `FD12FD06` in docs and conversion path. |
+| crates/core/src/control/event.rs | Updates transform/scheduler composition comment to `FD12FD06`. |
 | crates/core/src/arb.rs | Renames `S48` → `S048` in tests and sample-rate sealed helper. |
 | crates/cli/src/run.rs | Renames static sample-rate dispatch types to `S044/S048/S088/S096`. |
 | crates/cli/src/main.rs | Renames trace/demo paths to `S048` and `F064FD06/F064FD12`; updates related comments. |
@@ -186,7 +186,7 @@ Copilot reviewed 16 out of 16 changed files in this pull request and generated 7
 <!-- gh-id: 3151128932 -->
 ### Copilot on [`doc/plans/plan-2026-04-27-02.md:52`](https://github.com/cmk/agogo/pull/30#discussion_r3151128932) (2026-04-28 01:55 UTC)
 
-The "Affected files (12)" list looks incomplete relative to this PR: e.g. it doesn’t include `crates/host-link/src/link.rs` or `crates/core/src/machine/spec.rs`, both of which are updated for the rename sweep. Also, the hardcoded line range in `crates/core/src/fxp.rs:55-83` (line 28) will be stale once the rename lands; consider referencing the alias block by symbol/snippet instead of line numbers.
+The "Affected files (12)" list looks incomplete relative to this PR: e.g. it doesn’t include `crates/host-link/src/link.rs` or `crates/core/src/channel/spec.rs`, both of which are updated for the rename sweep. Also, the hardcoded line range in `crates/core/src/fxp.rs:55-83` (line 28) will be stale once the rename lands; consider referencing the alias block by symbol/snippet instead of line numbers.
 
 <!-- gh-id: 3151128940 -->
 ### Copilot on [`crates/core/src/fxp.rs:586`](https://github.com/cmk/agogo/pull/30#discussion_r3151128940) (2026-04-28 01:55 UTC)
@@ -196,7 +196,7 @@ The test comment still says `pico_to_samples` dispatches to upstream `F12Sxx` co
 <!-- gh-id: 3151128957 -->
 ### Copilot on [`crates/host-link/src/link.rs:206`](https://github.com/cmk/agogo/pull/30#discussion_r3151128957) (2026-04-28 01:55 UTC)
 
-The comment claims the 10^6 unit shift lives inside `F064FD06`'s definition in the `connections` crate, but `F064FD06` is defined in agogo's vendored `crate::time::decimal` module (and re-exported via `agogo_core::fxp`). Please update the wording to avoid pointing readers at the wrong crate/module.
+The comment claims the 10^6 unit shift lives inside `F064FD06`'s definition in the `connections` crate, but `F064FD06` is defined in agogo's vendored `crate::conn::fixed` module (and re-exported via `agogo_core::fxp`). Please update the wording to avoid pointing readers at the wrong crate/module.
 
 <!-- gh-id: 3151128965 -->
 ### Copilot on [`crates/cli/src/main.rs:879`](https://github.com/cmk/agogo/pull/30#discussion_r3151128965) (2026-04-28 01:55 UTC)
@@ -206,7 +206,7 @@ These comments describe `F064FD12` as an "upstream" conn; after Q1a/Q1b it’s d
 <!-- gh-id: 3151144458 -->
 #### ↳ cmk ([2026-04-28 02:00 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151144458))
 
-Fixed in ab1e2f2 — comment now reads "the lawful F064FD06 conn from agogo_core::time::decimal (re-exported via agogo_core::fxp)" instead of pointing at upstream.
+Fixed in ab1e2f2 — comment now reads "the lawful F064FD06 conn from agogo_core::conn::fixed (re-exported via agogo_core::fxp)" instead of pointing at upstream.
 
 <!-- gh-id: 3151144818 -->
 #### ↳ cmk ([2026-04-28 02:00 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151144818))
@@ -216,7 +216,7 @@ Fixed in ab1e2f2 — renamed S48_HZ → S048_HZ at both the def site and the use
 <!-- gh-id: 3151145281 -->
 #### ↳ cmk ([2026-04-28 02:01 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151145281))
 
-Fixed in ab1e2f2 — pico_to_samples docstring now describes the dispatch as "the lawful FD12Sxxx Conn for that rate (defined in crate::time::sample, re-exported above)" and references the per-rate Galois-law battery at crate::time::sample::tests instead of pointing at upstream.
+Fixed in ab1e2f2 — pico_to_samples docstring now describes the dispatch as "the lawful FD12Sxxx Conn for that rate (defined in crate::conn::sample, re-exported above)" and references the per-rate Galois-law battery at crate::conn::sample::tests instead of pointing at upstream.
 
 <!-- gh-id: 3151145620 -->
 #### ↳ cmk ([2026-04-28 02:01 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151145620))
@@ -226,14 +226,14 @@ Fixed in ab1e2f2 — corrected "Affected files (12)" to (14) and added the two m
 <!-- gh-id: 3151145926 -->
 #### ↳ cmk ([2026-04-28 02:01 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151145926))
 
-Fixed in ab1e2f2 — pico_to_samples test rationale now reads "the lawful FD12Sxxx conns from crate::time::sample" with a pointer at the per-rate Galois battery at time::sample::tests::p_fd12s0??, instead of attributing the proptests to upstream.
+Fixed in ab1e2f2 — pico_to_samples test rationale now reads "the lawful FD12Sxxx conns from crate::conn::sample" with a pointer at the per-rate Galois battery at time::sample::tests::p_fd12s0??, instead of attributing the proptests to upstream.
 
 <!-- gh-id: 3151146494 -->
 #### ↳ cmk ([2026-04-28 02:01 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151146494))
 
-Fixed in ab1e2f2 — snap_offset_micro comment now points at "F064FD06's definition (agogo_core::time::decimal, re-exported via crate::fxp)" so readers don't go looking for the conn in upstream.
+Fixed in ab1e2f2 — snap_offset_micro comment now points at "F064FD06's definition (agogo_core::conn::fixed, re-exported via crate::fxp)" so readers don't go looking for the conn in upstream.
 
 <!-- gh-id: 3151146790 -->
 #### ↳ cmk ([2026-04-28 02:01 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151146790))
 
-Fixed in ab1e2f2 — channel_trace jitter comment now reads "the lawful F064FD12 conn from agogo_core::time::decimal (re-exported via agogo_core::fxp)" instead of upstream.
+Fixed in ab1e2f2 — channel_trace jitter comment now reads "the lawful F064FD12 conn from agogo_core::conn::fixed (re-exported via agogo_core::fxp)" instead of upstream.

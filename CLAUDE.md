@@ -197,7 +197,7 @@ code based on it.
   `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
   lives outside the file-level allowlist. Plan 2026-04-28-03 T5
   reshuffled the entries when `crates/core/src/fxp.rs` was deleted:
-  its argv + PI-exempt content moved to `crates/core/src/boundary.rs`
+  its argv + PI-exempt content moved to `crates/core/src/conn/boundary.rs`
   (replaces the `fxp.rs` entry); `time/decimal.rs` came off the list
   because the `float_conn!` macro split into `time/float.rs` (which
   is now allowlisted in its place — vendored-from-connections, same

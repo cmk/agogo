@@ -166,7 +166,7 @@ No TODOs or stubs in vendored code. No unsafe. No stored f32/f64 outside allowli
 
 **Must fix before push:**
 
-1. **CLAUDE.md float-exception count is wrong.** Update "fourteen exception modules" → "sixteen" and list the two new files (`crates/core/src/time/decimal.rs`, `crates/core/src/time/sample.rs`).
+1. **CLAUDE.md float-exception count is wrong.** Update "fourteen exception modules" → "sixteen" and list the two new files (`crates/core/src/conn/fixed.rs`, `crates/core/src/conn/sample.rs`).
 
 2. **`impl_sample_time!` should use canonical names.** Change lines 134-137 of `crates/core/src/fxp.rs` from `S44/S48/S88/S96` to `S044/S048/S088/S096`. Same file, same place — but Q1b's grep sweep won't catch alias-shape uses inside the alias definition file.
 
@@ -177,7 +177,7 @@ No TODOs or stubs in vendored code. No unsafe. No stored f32/f64 outside allowli
 3. Confirm `time` crate (0.3.45) passes `cargo deny check`.
 
 <!-- gh-id: 3151014104 -->
-### Copilot on [`crates/core/src/time/decimal.rs:93`](https://github.com/cmk/agogo/pull/29#discussion_r3151014104) (2026-04-28 01:13 UTC)
+### Copilot on [`crates/core/src/conn/fixed.rs:93`](https://github.com/cmk/agogo/pull/29#discussion_r3151014104) (2026-04-28 01:13 UTC)
 
 `inner` multiplies `x.0 * PREC` in `i64`, which will overflow and wrap for large coarse values (e.g., `FD12FD00.inner(FD00(i64::MAX))`), contradicting the doc claim that `inner` is an “exact embedding” and potentially breaking Conn laws. Consider using a wider intermediate (e.g. i128) with explicit clamping/saturation, or switching to an `Extended<...>` target/source for out-of-range values.
 ```suggestion
@@ -187,12 +187,12 @@ No TODOs or stubs in vendored code. No unsafe. No stored f32/f64 outside allowli
 ```
 
 <!-- gh-id: 3151014125 -->
-### Copilot on [`crates/core/src/time/sample.rs:170`](https://github.com/cmk/agogo/pull/29#discussion_r3151014125) (2026-04-28 01:13 UTC)
+### Copilot on [`crates/core/src/conn/sample.rs:170`](https://github.com/cmk/agogo/pull/29#discussion_r3151014125) (2026-04-28 01:13 UTC)
 
 `rate_conn!` computes intermediate values in `i128` but then casts `bits as i64` when constructing `Q48_16`. For large inputs this can exceed `i64::MAX`/`MIN` (e.g. converting near-max Coarse bits with NUM/DEN > 1), causing wrapping truncation and breaking monotonicity/Galois laws. Please clamp/saturate the computed bits into the `i64` range (or return an extended/saturating type) before calling `from_bits`.
 
 <!-- gh-id: 3151014134 -->
-### Copilot on [`crates/core/src/time/sample.rs:260`](https://github.com/cmk/agogo/pull/29#discussion_r3151014134) (2026-04-28 01:13 UTC)
+### Copilot on [`crates/core/src/conn/sample.rs:260`](https://github.com/cmk/agogo/pull/29#discussion_r3151014134) (2026-04-28 01:13 UTC)
 
 `pico_conn!` has the same `i128` → `i64` unchecked casts (`bits as i64` / `... as i64`) as `rate_conn!`. Large FD12 or sample values can produce out-of-range `bits`, which will wrap and violate the Conn’s stated rounding/adjoint semantics. Please clamp/saturate prior to constructing `FD12`/`Q48_16` so overflow can’t silently wrap in release builds.
 ```suggestion
@@ -248,7 +248,7 @@ None outstanding at merge time.
 ```
 
 <!-- gh-id: 3151014169 -->
-### Copilot on [`crates/core/src/time/sample.rs:15`](https://github.com/cmk/agogo/pull/29#discussion_r3151014169) (2026-04-28 01:13 UTC)
+### Copilot on [`crates/core/src/conn/sample.rs:15`](https://github.com/cmk/agogo/pull/29#discussion_r3151014169) (2026-04-28 01:13 UTC)
 
 The “Integer range” estimate looks off by ~1000×: ±2^47 samples at 48 kHz is about ±93 years (≈2.9e9 s), not ±93,000 years. Please correct the unit conversion so readers don’t overestimate the safe range.
 ```suggestion
@@ -290,19 +290,19 @@ Copilot reviewed 24 out of 25 changed files in this pull request and generated 1
 | crates/host-link/src/link.rs | Update `ExtendedFloat` variant name after rev bump. |
 | crates/core/src/time/tick.rs | Switch `Ple` import to local vendored trait. |
 | crates/core/src/time/tbase.rs | Switch `Ple` import to local vendored trait. |
-| crates/core/src/time/sample.rs | New vendored sample-rate typed time module + Conns + tests. |
+| crates/core/src/conn/sample.rs | New vendored sample-rate typed time module + Conns + tests. |
 | crates/core/src/time/grid.rs | Remove upstream `Ple` import; use local trait. |
-| crates/core/src/time/decimal.rs | New vendored decimal SI ladder + Conns + float bridges + tests. |
+| crates/core/src/conn/fixed.rs | New vendored decimal SI ladder + Conns + float bridges + tests. |
 | crates/core/src/time/conn.rs | Reroute `Ple` and fixed-type imports after upstream removals. |
 | crates/core/src/time/arb.rs | New vendored time-tier proptest strategies for law batteries. |
 | crates/core/src/time.rs | Declare new `decimal`, `sample`, and test-only `arb` modules. |
 | crates/core/src/preorder.rs | New local `Ple` trait to preserve divisibility preorder semantics. |
-| crates/core/src/midi.rs | Switch `Ple` import to local vendored trait. |
-| crates/core/src/machine/spec.rs | Update `ExtendedFloat` variant name after rev bump. |
+| crates/core/src/conn/midi.rs | Switch `Ple` import to local vendored trait. |
+| crates/core/src/channel/spec.rs | Update `ExtendedFloat` variant name after rev bump. |
 | crates/core/src/lib.rs | Export new `preorder` module from crate root. |
 | crates/core/src/fxp.rs | Drop upstream fixed/sample re-exports; re-export vendored modules + transitional aliases. |
-| crates/core/src/channel/transform.rs | Reroute fixed-type imports through `crate::fxp`. |
-| crates/core/src/channel/scheduler.rs | Reroute fixed-type imports through `crate::fxp`. |
+| crates/core/src/channel/time.rs | Reroute fixed-type imports through `crate::fxp`. |
+| crates/core/src/control/event.rs | Reroute fixed-type imports through `crate::fxp`. |
 | crates/core/src/channel/role.rs | Reroute fixed-type imports through `crate::fxp`. |
 | crates/core/Cargo.toml | Enable `connections/testing` for property-law modules in dev-deps. |
 | crates/cli/src/main.rs | Update `ExtendedFloat` variant name after rev bump. |
@@ -327,7 +327,7 @@ crate-agnostic generators (i64 ranges with ULP guards), not
 ```
 
 <!-- gh-id: 3151014189 -->
-### Copilot on [`crates/core/src/time/sample.rs:241`](https://github.com/cmk/agogo/pull/29#discussion_r3151014189) (2026-04-28 01:13 UTC)
+### Copilot on [`crates/core/src/conn/sample.rs:241`](https://github.com/cmk/agogo/pull/29#discussion_r3151014189) (2026-04-28 01:13 UTC)
 
 The FD12↔rate section comments are internally contradictory about relative “bits/sec” and which side is Fine/Coarse (lines 206–208 vs 221–223). Please correct the explanation to match the actual `Conn<FD12, Sxxx>` definition in this file so readers don’t invert the directionality when using the constants.
 ```suggestion
@@ -347,7 +347,7 @@ macro_rules! pico_conn {
 ```
 
 <!-- gh-id: 3151014195 -->
-### Copilot on [`crates/core/src/time/sample.rs:372`](https://github.com/cmk/agogo/pull/29#discussion_r3151014195) (2026-04-28 01:13 UTC)
+### Copilot on [`crates/core/src/conn/sample.rs:372`](https://github.com/cmk/agogo/pull/29#discussion_r3151014195) (2026-04-28 01:13 UTC)
 
 The test-module comment says the rate strategies live in `crate::property::arb`, but the code imports them from `crate::time::arb`. Please update the comment to the correct module path to avoid confusion when moving/renaming test utilities.
 ```suggestion

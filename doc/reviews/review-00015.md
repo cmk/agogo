@@ -12,7 +12,7 @@ drain → midir MIDI out, exposed via `agogo demo run`.
 
 **`agogo-core` additions** (T0a + T0b, two commits):
 
-- **`agogo_core::host`** — `AudioHost` trait + `AudioIo` (per
+- **`agogo_core::sink::audio`** — `AudioHost` trait + `AudioIo` (per
   `doc/agogo.md` §5) + `Config` + `Handle` + `AudioHostError`. The
   trait surface that any audio back-end implements; mirrors how
   Plan 12 split `MidiSink` (in core) and `MidirSink` (in
@@ -20,7 +20,7 @@ drain → midir MIDI out, exposed via `agogo demo run`.
   with v0.5's Link `timestamp().playback` field
   (`doc/designs/link.md:23-29`); a public `AudioIo::new`
   constructor lets back-ends instantiate it through the gate.
-- **`agogo_core::channel::scheduler::tick_stream_into(buf, ..)`** —
+- **`agogo_core::control::event::tick_stream_into(buf, ..)`** —
   alloc-free sibling of `tick_stream` that pushes events into a
   caller-owned `Vec`. The RT callback's allocation-free contract
   rests on this; `tick_stream` becomes a thin wrapper that
@@ -127,7 +127,7 @@ Build gates clean:
 - `cargo clippy -p agogo-host-cpal --all-targets -- -D warnings` — clean.
 - `cargo clippy -p agogo-host-midi --all-targets -- -D warnings` — clean.
 - `scripts/check-floats.sh` — clean. Allowlist gains
-  `crates/core/src/host.rs`, `crates/host-cpal/src/cpal.rs`, and
+  `crates/core/src/sink/audio.rs`, `crates/host-cpal/src/cpal.rs`, and
   `crates/host-cpal/src/cpal/callback.rs` (three PCM-ABI sites
   carrying `&[f32]` slices to/from cpal); CLAUDE.md's exception
   count updates from nine to ten.
@@ -165,7 +165,7 @@ midir → peer chain works end-to-end.
   `RefCell::borrow_mut()` is sound here because rtrb is SPSC by
   design — `RtProducer` is `Send` but `!Sync`, exactly the
   audio-thread ownership contract.
-- The `Handle` payload in `agogo_core::host` uses `Box<dyn Any +
+- The `Handle` payload in `agogo_core::sink::audio` uses `Box<dyn Any +
   Send>` so back-ends can stash any platform-specific stream type
   (cpal::Stream, future JACK client, ...) without leaking the
   type through `agogo-core`. Dropping the `Handle` runs the
@@ -359,7 +359,7 @@ This README’s suggested commands (`cargo build/test -p agogo-host-cpal`) won�
 Same as `host-cpal`: `cargo build/test -p agogo-host-midi` won’t work from the repo root because this crate is not a workspace member. Use `--manifest-path crates/host-midi/Cargo.toml` (or run cargo from `crates/host-midi/`). Additionally, the README describes a `midir_loopback_roundtrip` hardware test, but there’s no such test in the crate yet (Plan 13 T6 is noted as deferred), so this section should be updated.
 
 <!-- gh-id: 3140987484 -->
-### Copilot on [`crates/core/src/host.rs:57`](https://github.com/cmk/agogo/pull/15#discussion_r3140987484) (2026-04-25 00:55 UTC)
+### Copilot on [`crates/core/src/sink/audio.rs:57`](https://github.com/cmk/agogo/pull/15#discussion_r3140987484) (2026-04-25 00:55 UTC)
 
 `AudioIo` exposes `frames` (“samples per channel”) but does not expose `input_channels` / `output_channels` (or otherwise define whether `input`/`output` are mono vs interleaved). Since `Config` *does* carry channel counts (and `host-cpal` can deliver interleaved buffers), downstream callbacks can’t reliably interpret `input` without inferring layout from `len/frames`, and multi-channel support is effectively underspecified. Consider either (a) adding explicit channel-count fields (and documenting interleaving), or (b) documenting/enforcing that Plan 13’s `AudioIo` is mono-only (`*_channels == 1`) until v0.4/v0.5 expands it.
 
@@ -370,13 +370,13 @@ Same as `host-cpal`: `cargo build/test -p agogo-host-midi` won’t work from the
 
 
 <!-- gh-id: 3140987498 -->
-### Copilot on [`crates/core/src/channel/scheduler.rs:47`](https://github.com/cmk/agogo/pull/15#discussion_r3140987498) (2026-04-25 00:55 UTC)
+### Copilot on [`crates/core/src/control/event.rs:47`](https://github.com/cmk/agogo/pull/15#discussion_r3140987498) (2026-04-25 00:55 UTC)
 
 Doc comment references `max_events_for_buffer(channel, frames)`, but no such function exists in this module (and the caller-side helper lives in `host-cpal::cpal::callback`). Please adjust the docs to avoid pointing at a nonexistent API and clarify what capacity bound callers should actually use to guarantee `tick_stream_into` stays allocation-free.
 
 
 <!-- gh-id: 3140987506 -->
-### Copilot on [`crates/core/src/channel/scheduler.rs:102`](https://github.com/cmk/agogo/pull/15#discussion_r3140987506) (2026-04-25 00:55 UTC)
+### Copilot on [`crates/core/src/control/event.rs:102`](https://github.com/cmk/agogo/pull/15#discussion_r3140987506) (2026-04-25 00:55 UTC)
 
 This comment still references a `tick_stream_into_matches_tick_stream` proptest, but the test in this file is now named `tick_stream_into_matches_transform_filtered`. Updating the comment would keep the “change either path’s arithmetic…” guidance accurate for future maintainers.
 
@@ -389,7 +389,7 @@ This comment still references a `tick_stream_into_matches_tick_stream` proptest,
 This PR implements Plan 13’s first runnable end-to-end demo pipeline by introducing an `AudioHost` trait in `agogo-core`, adding detached platform backends for cpal audio input and midir MIDI output, and wiring them into `agogo demo` behind feature flags. It also updates CI/docs and repository conventions to account for the new detached crates.
 
 **Changes:**
-- Added `agogo_core::host` (`AudioHost`, `AudioIo`, `Config`, `Handle`, `AudioHostError`) and an allocation-free scheduler API (`tick_stream_into`).
+- Added `agogo_core::sink::audio` (`AudioHost`, `AudioIo`, `Config`, `Handle`, `AudioHostError`) and an allocation-free scheduler API (`tick_stream_into`).
 - Introduced detached backend crates `agogo-host-cpal` (cpal stream + RT callback + rtrb SPSC/drain thread) and `agogo-host-midi` (midir `MidiSink`).
 - Integrated a feature-gated `agogo demo` CLI and updated float allowlisting/docs/CI metadata accordingly.
 
@@ -416,8 +416,8 @@ Copilot reviewed 21 out of 23 changed files in this pull request and generated 1
 | crates/host-cpal/README.md | Dev workflow and (currently inaccurate) smoke test instructions. |
 | crates/host-cpal/Cargo.toml | New detached crate manifest for `agogo-host-cpal`. |
 | crates/core/src/lib.rs | Exposes new `host` module. |
-| crates/core/src/host.rs | Defines `AudioHost` API and `AudioIo` callback payload. |
-| crates/core/src/channel/scheduler.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
+| crates/core/src/sink/audio.rs | Defines `AudioHost` API and `AudioIo` callback payload. |
+| crates/core/src/control/event.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
 | crates/cli/src/main.rs | Adds `agogo demo` subcommand and end-to-end wiring module. |
 | crates/cli/Cargo.toml | Adds optional path deps + features (`cpal`, `midi`, `demo`). |
 | Cargo.toml | Excludes new detached host crates from the workspace. |
@@ -578,7 +578,7 @@ The `host-cpal` CI job runs `cargo test -p agogo-host-cpal` / `cargo clippy -p .
 Adds Plan 13’s cross-platform “host” layer and demo wiring: cpal audio input feeds the core scheduler/renderer, MIDI is dispatched via an RT-safe SPSC + drain thread into a midir-backed sink, exposed through `agogo demo`.
 
 **Changes:**
-- Introduces `agogo_core::host` (`AudioHost`, `AudioIo`, `Handle`, errors) and an allocation-free `tick_stream_into` scheduler path.
+- Introduces `agogo_core::sink::audio` (`AudioHost`, `AudioIo`, `Handle`, errors) and an allocation-free `tick_stream_into` scheduler path.
 - Adds two detached backend crates: `agogo-host-cpal` (cpal input + RT callback/control plane) and `agogo-host-midi` (midir `MidiSink`).
 - Integrates a feature-gated `agogo demo` CLI plus CI/docs/allowlists for the new detached crates.
 
@@ -605,8 +605,8 @@ Copilot reviewed 21 out of 23 changed files in this pull request and generated 1
 | crates/host-cpal/README.md | Documents detached-crate workflow and intended hardware smoke testing. |
 | crates/host-cpal/Cargo.toml | Adds detached crate manifest + deps (cpal/rtrb/thiserror/tracing). |
 | crates/core/src/lib.rs | Exposes the new `host` module. |
-| crates/core/src/host.rs | Defines `AudioHost` trait surface and callback payload types. |
-| crates/core/src/channel/scheduler.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
+| crates/core/src/sink/audio.rs | Defines `AudioHost` trait surface and callback payload types. |
+| crates/core/src/control/event.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
 | crates/cli/src/main.rs | Adds feature-gated `agogo demo` subcommands and demo pipeline module. |
 | crates/cli/Cargo.toml | Adds optional path deps + features (`cpal`, `midi`, `demo`). |
 | Cargo.toml | Excludes new host crates from workspace members. |
@@ -627,7 +627,7 @@ Copilot reviewed 21 out of 23 changed files in this pull request and generated 1
 This README’s build/test commands use `-p agogo-host-midi`, but `agogo-host-midi` is not a workspace member, so `-p` from the repo root won’t resolve. Use `--manifest-path crates/host-midi/Cargo.toml` (or run cargo from `crates/host-midi/`). Also, the `midir_loopback_roundtrip` hardware test mentioned here doesn’t exist yet (no matches under `crates/host-midi/**/*.rs`), so readers will not be able to run it as written.
 
 <!-- gh-id: 3141035693 -->
-### Copilot on [`crates/core/src/host.rs:58`](https://github.com/cmk/agogo/pull/15#discussion_r3141035693) (2026-04-25 01:22 UTC)
+### Copilot on [`crates/core/src/sink/audio.rs:58`](https://github.com/cmk/agogo/pull/15#discussion_r3141035693) (2026-04-25 01:22 UTC)
 
 `AudioIo` exposes `frames` (“samples per channel”) but does not specify the channel layout or expose `input_channels`/`output_channels`. Since `Config` does carry channel counts (and cpal delivers interleaved buffers), this makes it ambiguous how callbacks should interpret `input`/`output`. Either document/enforce that Plan 13 is mono-only (e.g., `input_channels == 1`) or add explicit channel-count/layout fields to `AudioIo` so downstream code can safely handle multi-channel streams.
 
@@ -674,7 +674,7 @@ This plan doc’s Build gates section still uses `cargo build -p agogo-host-cpal
 Implements Plan 13’s first runnable end-to-end demo pipeline by adding an `AudioHost` trait to `agogo-core`, introducing detached platform backends for cpal audio input and midir MIDI output, and wiring them into `agogo demo` behind feature flags (plus CI/docs/conventions updates to support the detached crates).
 
 **Changes:**
-- Added `agogo_core::host` (`AudioHost`, `AudioIo`, `Config`, `Handle`, `AudioHostError`) and an allocation-free scheduler API (`tick_stream_into`).
+- Added `agogo_core::sink::audio` (`AudioHost`, `AudioIo`, `Config`, `Handle`, `AudioHostError`) and an allocation-free scheduler API (`tick_stream_into`).
 - Introduced detached backend crates `agogo-host-cpal` (cpal stream + RT callback + rtrb SPSC/drain thread) and `agogo-host-midi` (midir `MidiSink`).
 - Integrated feature-gated `agogo demo` CLI and updated CI + float allowlisting/docs to account for the new crates.
 
@@ -701,8 +701,8 @@ Copilot reviewed 21 out of 23 changed files in this pull request and generated 5
 | crates/host-cpal/README.md | Documents detached-crate workflow and development notes. |
 | crates/host-cpal/Cargo.toml | Adds detached `agogo-host-cpal` crate manifest and deps. |
 | crates/core/src/lib.rs | Exposes new `host` module. |
-| crates/core/src/host.rs | Defines `AudioHost` API and RT callback payload shape (`AudioIo`). |
-| crates/core/src/channel/scheduler.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
+| crates/core/src/sink/audio.rs | Defines `AudioHost` API and RT callback payload shape (`AudioIo`). |
+| crates/core/src/control/event.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
 | crates/cli/src/main.rs | Adds `agogo demo` commands and end-to-end wiring module. |
 | crates/cli/Cargo.toml | Adds optional path deps + features (`cpal`, `midi`, `demo`). |
 | Cargo.toml | Excludes new detached host crates from the workspace. |
@@ -827,7 +827,7 @@ Invalid user configuration (`input_channels != 1`) is currently returned as `Aud
 Implements Plan 13’s first runnable end-to-end demo pipeline by adding a core audio-host trait (`AudioHost`/`AudioIo`), introducing detached platform backends for cpal audio input and midir MIDI output, and wiring the full RT callback → scheduler → renderer → SPSC drain → MIDI-out chain behind `agogo demo`.
 
 **Changes:**
-- Adds `agogo_core::host` and extends the scheduler with allocation-free `tick_stream_into`.
+- Adds `agogo_core::sink::audio` and extends the scheduler with allocation-free `tick_stream_into`.
 - Introduces detached crates `agogo-host-cpal` (cpal stream + RT callback + rtrb SPSC/drain) and `agogo-host-midi` (midir-backed `MidiSink`).
 - Updates CLI (`agogo demo`), CI, and repo conventions (float allowlist, detached-crate CI jobs, gitignore).
 
@@ -854,8 +854,8 @@ Copilot reviewed 21 out of 23 changed files in this pull request and generated 3
 | crates/host-cpal/README.md | Documents detached-crate workflow and development notes. |
 | crates/host-cpal/Cargo.toml | Adds detached `agogo-host-cpal` manifest and deps. |
 | crates/core/src/lib.rs | Exposes new `host` module. |
-| crates/core/src/host.rs | Defines `AudioHost` API, `AudioIo`, `Handle`, and `AudioHostError`. |
-| crates/core/src/channel/scheduler.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
+| crates/core/src/sink/audio.rs | Defines `AudioHost` API, `AudioIo`, `Handle`, and `AudioHostError`. |
+| crates/core/src/control/event.rs | Adds `tick_stream_into` and refactors `tick_stream` to delegate. |
 | crates/cli/src/main.rs | Adds feature-gated `agogo demo` subcommands and wiring. |
 | crates/cli/Cargo.toml | Adds optional path deps + features (`cpal`, `midi`, `demo`). |
 | Cargo.toml | Excludes new host crates from workspace members. |

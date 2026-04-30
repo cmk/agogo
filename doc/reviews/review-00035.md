@@ -19,17 +19,17 @@ are deferred to follow-up plans; this PR is already meaty.
 
 | Source | Destination | Why |
 |---|---|---|
-| `fxp.rs` `Phase` (Q0.32 NCO state) | `crate::sync::phase` | NCO controller state — wrapping_add IS the controller math |
-| `fxp.rs` `Tempo` (BPM × 10⁶) | `crate::time::tempo` | musical-time noun: BPM is a rate over time, pairs with Tick / Time / Sxxx |
+| `fxp.rs` `Phase` (Q0.32 NCO state) | `crate::conn::phase` | NCO controller state — wrapping_add IS the controller math |
+| `fxp.rs` `Tempo` (BPM × 10⁶) | `crate::conn::tempo` | musical-time noun: BPM is a rate over time, pairs with Tick / Time / Sxxx |
 | `fxp.rs` `Quantum` + `f64_beats_to_quantum` + `parse_quantum_from_beats` | `agogo_host_link::quantum` | Link-FFI only — pulled out of `core` entirely |
-| `fxp.rs` `SampleTime` trait + `samples_f64` | `crate::time::sample` | rate-typed; lives over the `Sxxx` family |
-| `fxp.rs` `SampleTickConn` (was in `time::conn`) | `crate::sync::sample_tick` | tempo-coupled — violated `time/`'s "no tempo coupling" invariant |
+| `fxp.rs` `SampleTime` trait + `samples_f64` | `crate::conn::sample` | rate-typed; lives over the `Sxxx` family |
+| `fxp.rs` `SampleTickConn` (was in `time::conn`) | `crate::time::conn` | tempo-coupled — violated `time/`'s "no tempo coupling" invariant |
 | `time::conn` SampleTickConn tests | `sync::sample_tick::tests` | follow the type |
 | `time::exact_rates` (200 lines of `#[cfg(test)] mod tests`) | `sync::sample_tick::tests::exactness` | misnamed + misplaced; folds into the type's test block |
 | `time::decimal` `float_conn!` macro + 7 `F064FDxx` Conns | `time::float` (new) | qualitatively different from integer `fix_fix!` — separate proof obligations |
-| `fxp.rs` f64 boundary helpers (`f64_*`, `tempo_to_*`, `pico_to_*`, `bits_q48_16_*`, `pico_to_samples`) | `crate::boundary` (new) | the f64↔fxp seam, separate from type definitions |
+| `fxp.rs` f64 boundary helpers (`f64_*`, `tempo_to_*`, `pico_to_*`, `bits_q48_16_*`, `pico_to_samples`) | `crate::conn::boundary` (new) | the f64↔fxp seam, separate from type definitions |
 | `fxp.rs` ramps (`linear_u8`, `smoothstep_u8`) | `crate::time::envelope` | envelope curves, not arithmetic primitives |
-| `fxp.rs` `Pico` / `Micro` domain aliases | `crate::time::decimal` | with the FD types they alias |
+| `fxp.rs` `Pico` / `Micro` domain aliases | `crate::conn::fixed` | with the FD types they alias |
 
 ### Other changes
 
@@ -38,7 +38,7 @@ are deferred to follow-up plans; this PR is already meaty.
 - **`finite_or_unreachable` helper** in `boundary` dedupes the two `match ExtendedFloat::Extend(_) => x, Bot|Top => unreachable!()` patterns previously open-coded in `tempo_to_f64_bpm` and `pico_to_f64_seconds`.
 - **`host-link::next_quantum_boundary_us` inlined** into `snap_offset_micro` (T10). The helper put `(current_beat / q_f64).ceil() * q_f64` 4–6 lines away from each FFI call, violating CLAUDE.md exception 5. Each FFI call now sits adjacent to its f64-domain math with an explicit `// Link FFI` marker.
 - **`host-link::source.rs::feed_samples`** gains the missing `// PCM ABI` annotation on its `&[f32]` parameter (file already allowlisted in `scripts/check-floats.sh`, but the reviewer-facing marker was missing).
-- **`time::float` re-exports `Extended` / `ExtendedFloat`** so downstream `cli` / `host-link` can reach them through `agogo_core::time::float::*` without a direct `connections` dependency.
+- **`time::float` re-exports `Extended` / `ExtendedFloat`** so downstream `cli` / `host-link` can reach them through `agogo_core::conn::float::*` without a direct `connections` dependency.
 
 ### Why no transitional shim
 
@@ -91,8 +91,8 @@ consequence. No merge commits; history is linear.
 ### Code Quality
 
 **Must-fix (round 1, addressed below): `scripts/check-floats.sh`
-allowlist was stale.** Four new files (`crates/core/src/boundary.rs`,
-`crates/core/src/time/float.rs`, `crates/core/src/time/tempo.rs`,
+allowlist was stale.** Four new files (`crates/core/src/conn/boundary.rs`,
+`crates/core/src/conn/float.rs`, `crates/core/src/conn/tempo.rs`,
 `crates/host-link/src/quantum.rs`) contained legitimate `f64` uses
 (PI-exempt, vendored-Conn-machinery, FFI-parity) but weren't on the
 allowlist; the deleted `crates/core/src/fxp.rs` was still listed.
@@ -109,7 +109,7 @@ skip already handles. Removed from the allowlist.
   exactly two sites (`tempo_to_f64_bpm`, `pico_to_f64_seconds`) —
   intent-preserving dedupe, not a smell.
 - `time::float` re-exports `Extended` / `ExtendedFloat` so cli /
-  host-link reach them via `agogo_core::time::float::*` without a
+  host-link reach them via `agogo_core::conn::float::*` without a
   direct `connections` dep. Plan's Review section explicitly
   documents this deviation.
 - No bespoke `f64_*_to_*` helpers where a `Conn` would do —
@@ -151,7 +151,7 @@ cleanups in T5; `Extended`/`ExtendedFloat` re-exported from
 ### Risks
 
 **Resolved (round 1):** `Tempo::MAX_BPM_F64` was a `pub const f64`
-on a non-allowlisted file. Moved to `crate::boundary::MAX_BPM_F64`
+on a non-allowlisted file. Moved to `crate::conn::boundary::MAX_BPM_F64`
 (callers updated in `cli/main.rs` and `cli/run.rs`). Keeps
 `time/tempo.rs` f64-free.
 
@@ -187,7 +187,7 @@ structural Rust moves).
    kitchen-sink splits) all remain reasonable post-merge follow-ups.
 
 <!-- gh-id: 3153870594 -->
-### Copilot on [`crates/core/src/boundary.rs:44`](https://github.com/cmk/agogo/pull/35#discussion_r3153870594) (2026-04-28 11:54 UTC)
+### Copilot on [`crates/core/src/conn/boundary.rs:44`](https://github.com/cmk/agogo/pull/35#discussion_r3153870594) (2026-04-28 11:54 UTC)
 
 The doc comment for `MAX_BPM_F64` claims `tempo_to_f64_bpm(Tempo(u32::MAX))` returns ~`i64::MAX / 1e6` due to `I064U032.inner` “saturating-widen”, but `tempo_to_f64_bpm` uses `I064U032.inner` as a lossless u32→i64 widen (and the property test below expects `raw as f64 / 1_000_000.0` for all `u32`). This explanation looks incorrect/misleading—please update the comment to reflect the actual conversion behavior (or adjust the code if saturation is intended).
 ```suggestion
@@ -200,7 +200,7 @@ The doc comment for `MAX_BPM_F64` claims `tempo_to_f64_bpm(Tempo(u32::MAX))` ret
 ```
 
 <!-- gh-id: 3153870693 -->
-### Copilot on [`crates/core/src/sync/sample_tick.rs:68`](https://github.com/cmk/agogo/pull/35#discussion_r3153870693) (2026-04-28 11:54 UTC)
+### Copilot on [`crates/core/src/time/conn.rs:68`](https://github.com/cmk/agogo/pull/35#discussion_r3153870693) (2026-04-28 11:54 UTC)
 
 `SampleTickConn::inner` computes the result in `u128` but then narrows with `as u64` without any bounds check/saturation. For some valid inputs (`Tick` up to `u32::MAX`, very small `bpm`/`ppqn`), the quotient can exceed `u64::MAX`, and the cast will truncate (wrap) rather than saturate or error. Consider clamping to `u64::MAX`, returning `Option<u64>`, or asserting the result fits—similar to how `to_tick` saturates to `u32::MAX`.
 
@@ -239,19 +239,19 @@ Copilot reviewed 45 out of 46 changed files in this pull request and generated 3
 | crates/cli/src/main.rs | Update CLI types/imports for moved `Tempo`/`Phase`/`Pico`/`Micro`; re-export `parse_quantum_from_beats` from host-link under `feature=link`. |
 | crates/cli/src/run.rs | Update imports for moved `Tempo`/sample-rate types and `Quantum`; use `boundary::tempo_to_f64_bpm`. |
 | crates/core/src/lib.rs | Remove `fxp` module; add new `boundary` module export. |
-| crates/core/src/boundary.rs | New f64↔fxp boundary helpers (argv/FFI/PI seams) split out of `fxp`. |
+| crates/core/src/conn/boundary.rs | New f64↔fxp boundary helpers (argv/FFI/PI seams) split out of `fxp`. |
 | crates/core/src/fxp.rs | Delete former kitchen-sink module. |
-| crates/core/src/sync.rs | Add `phase` + `sample_tick` modules and re-exports. |
-| crates/core/src/sync/phase.rs | New `Phase` module (Q0.32 NCO accumulator) split from `fxp`. |
-| crates/core/src/sync/sample_tick.rs | New home for tempo-coupled `SampleTickConn` and absorbed exactness tests. |
-| crates/core/src/sync/source.rs | Update imports to moved `Phase`/`Tempo`/`SampleTime`/`Pico`. |
-| crates/core/src/sync/pll.rs | Update imports to moved types/helpers (`boundary`, `time`, `sync`). |
-| crates/core/src/sync/detect.rs | Update `SampleTime` import to `time::sample`. |
+| crates/core/src/control/sync.rs | Add `phase` + `sample_tick` modules and re-exports. |
+| crates/core/src/conn/phase.rs | New `Phase` module (Q0.32 NCO accumulator) split from `fxp`. |
+| crates/core/src/time/conn.rs | New home for tempo-coupled `SampleTickConn` and absorbed exactness tests. |
+| crates/core/src/control/sync/source.rs | Update imports to moved `Phase`/`Tempo`/`SampleTime`/`Pico`. |
+| crates/core/src/control/sync/pll.rs | Update imports to moved types/helpers (`boundary`, `time`, `sync`). |
+| crates/core/src/control/sync/detect.rs | Update `SampleTime` import to `time::sample`. |
 | crates/core/src/time.rs | Add `time::float` and `time::tempo`; remove `exact_rates` module; clarify tempo-coupling note. |
-| crates/core/src/time/tempo.rs | New `Tempo` type module split from `fxp`. |
-| crates/core/src/time/float.rs | New `F064FDxx` Conn definitions split out of `time::decimal`. |
-| crates/core/src/time/decimal.rs | Remove float Conn machinery; keep integer ladder + add `Micro`/`Pico` aliases. |
-| crates/core/src/time/sample.rs | Add `SampleTime` trait + `samples_f64` moved from `fxp`. |
+| crates/core/src/conn/tempo.rs | New `Tempo` type module split from `fxp`. |
+| crates/core/src/conn/float.rs | New `F064FDxx` Conn definitions split out of `time::decimal`. |
+| crates/core/src/conn/fixed.rs | Remove float Conn machinery; keep integer ladder + add `Micro`/`Pico` aliases. |
+| crates/core/src/conn/sample.rs | Add `SampleTime` trait + `samples_f64` moved from `fxp`. |
 | crates/core/src/time/envelope.rs | Move `linear_u8`/`smoothstep_u8` primitives here from `fxp` and update envelope functions/tests. |
 | crates/core/src/time/conn.rs | Remove `SampleTickConn` (moved to `sync`); minor import ordering. |
 | crates/core/src/time/exact_rates.rs | Delete standalone exactness test module (moved under `sync::sample_tick` tests). |
@@ -261,15 +261,15 @@ Copilot reviewed 45 out of 46 changed files in this pull request and generated 3
 | crates/core/src/time/swing.rs | Formatting-only change in test helper. |
 | crates/core/src/arb.rs | Update imports to moved `Tempo`/`Pico` and boundary helpers; minor formatting. |
 | crates/core/src/channel/role.rs | Update `Micro` import to `time::decimal`. |
-| crates/core/src/channel/scheduler.rs | Update imports (`SampleTickConn`, `Micro`) to new locations. |
-| crates/core/src/channel/transform.rs | Update imports (`pico_to_samples`, `SampleTickConn`, `Micro`) to new locations. |
-| crates/core/src/out/midi.rs | Update imports to moved `SampleTickConn`, `Tempo`, `Micro`. |
-| crates/core/src/machine.rs | Update imports (`SampleTickConn`, `Tempo`, `SampleTime`, `Micro`); formatting tweaks in tests. |
-| crates/core/src/machine/spec.rs | Update imports for moved `Micro`/`F064FD06` and `Extended*`; change `snap_intent()` return type to `Option<Micro>`. |
-| crates/core/src/dsl.rs | Formatting-only changes in tests. |
-| crates/core/src/dsl/eval.rs | Formatting-only changes (single-line match arms/tests). |
-| crates/core/src/dsl/display.rs | Formatting-only change in test construction. |
-| crates/core/src/dsl/parser.rs | Formatting-only change in `UnexpectedEof` handling. |
+| crates/core/src/control/event.rs | Update imports (`SampleTickConn`, `Micro`) to new locations. |
+| crates/core/src/channel/time.rs | Update imports (`pico_to_samples`, `SampleTickConn`, `Micro`) to new locations. |
+| crates/core/src/sink/midi.rs | Update imports to moved `SampleTickConn`, `Tempo`, `Micro`. |
+| crates/core/src/control.rs | Update imports (`SampleTickConn`, `Tempo`, `SampleTime`, `Micro`); formatting tweaks in tests. |
+| crates/core/src/channel/spec.rs | Update imports for moved `Micro`/`F064FD06` and `Extended*`; change `snap_intent()` return type to `Option<Micro>`. |
+| crates/core/src/channel/dsl.rs | Formatting-only changes in tests. |
+| crates/core/src/channel/dsl/eval.rs | Formatting-only changes (single-line match arms/tests). |
+| crates/core/src/channel/dsl/display.rs | Formatting-only change in test construction. |
+| crates/core/src/channel/dsl/parser.rs | Formatting-only change in `UnexpectedEof` handling. |
 </details>
 
 
