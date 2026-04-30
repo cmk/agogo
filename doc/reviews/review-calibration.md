@@ -194,7 +194,7 @@ cross-system bug that unit tests per-system would never catch.
 
 ## Pattern 9: Stored `f32`/`f64` outside the allowed exceptions
 
-> **File:** `crates/core/src/channel/transform.rs`
+> **File:** `crates/core/src/channel/time.rs`
 >
 > **Diff context:**
 > ```
@@ -224,7 +224,7 @@ ladder-native replacement.
 
 ## Pattern 10: Hardcoded `A → C` conversion when `A → B → C` Conns exist
 
-> **File:** `crates/core/src/channel/transform.rs`
+> **File:** `crates/core/src/channel/time.rs`
 >
 > **Diff context:**
 > ```

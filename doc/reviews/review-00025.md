@@ -3,7 +3,7 @@
 ## Summary
 
 Removes the `snap_to_quantum: Option<Quantum>` field from
-`crates/core/src/channel/transform.rs:Channel`. The field was
+`crates/core/src/channel/time.rs:Channel`. The field was
 **never read in production**: its only consumer
 (`LinkSession::arm_channel`) is called from tests only, never from
 `run.rs`. So the field was purely arming-time intent stored as
@@ -18,7 +18,7 @@ wasted churn.
 
 ### What changed
 
-- **`crates/core/src/channel/transform.rs`**: removed the
+- **`crates/core/src/channel/time.rs`**: removed the
   `snap_to_quantum: Option<Quantum>` field from `Channel`. Dropped
   the now-unused `Quantum` import. Updated the `offset` doc
   comment to point at the new arming-intent path.
@@ -28,7 +28,7 @@ wasted churn.
   returned delta into its own `Channel.offset`. The
   `agogo_core::channel::Channel` import is gone — `LinkSession` no
   longer touches `Channel`.
-- **`crates/core/src/machine/spec.rs`**: kept
+- **`crates/core/src/channel/spec.rs`**: kept
   `ChannelSpec.snap_to_quantum_micro` and the `snap-quantum-us=N`
   parser key (back-compat). Added `ChannelSpec::snap_intent() ->
   Option<Quantum>` accessor. Removed the line in `into_channel`
@@ -38,10 +38,10 @@ wasted churn.
   snap delta via `snap_offset_for(snap_intent)`, and applies it
   manually. Net behaviour identical.
 - **15 `snap_to_quantum: None,` literals deleted** across
-  `crates/core/src/channel/scheduler.rs`,
-  `crates/core/src/channel/transform.rs`,
-  `crates/core/src/machine.rs`,
-  `crates/core/src/out/midi.rs`,
+  `crates/core/src/control/event.rs`,
+  `crates/core/src/channel/time.rs`,
+  `crates/core/src/control.rs`,
+  `crates/core/src/sink/midi.rs`,
   `crates/host-cpal/src/cpal/callback.rs`, and the original three
   `crates/host-link/src/session.rs` test fixtures.
 - Three new tests + three renamed equivalents (see "Test plan"
@@ -149,7 +149,7 @@ The field removal is safe.
 
 ### Test Coverage
 
-**`snap_intent_round_trips_through_spec` generator domain.** The proptest at `crates/core/src/machine/spec.rs` uses `any::<i64>()`. This spans the full signed 64-bit domain per the CLAUDE.md proptest requirement. The parser stores the raw `i64` and `snap_intent()` rewraps it without arithmetic, so there is no intermediate boundary to hide. Domain is correct.
+**`snap_intent_round_trips_through_spec` generator domain.** The proptest at `crates/core/src/channel/spec.rs` uses `any::<i64>()`. This spans the full signed 64-bit domain per the CLAUDE.md proptest requirement. The parser stores the raw `i64` and `snap_intent()` rewraps it without arithmetic, so there is no intermediate boundary to hide. Domain is correct.
 
 **Renamed `snap_offset_for_*` tests — semantic equivalence.** The three prior `arm_channel_*` tests covered:
 1. No-op when snap is None → `snap_offset_for_none_is_zero`: semantically equivalent, now tests the return value directly instead of observing `ch.offset` not changing. Equivalent.

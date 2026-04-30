@@ -9,7 +9,7 @@ end-to-end.
 
 ### What changed
 
-- **`agogo_core::machine`** (new module): N-channel `Machine<R>`
+- **`agogo_core::control`** (new module): N-channel `Machine<R>`
   orchestrator. Owns `Vec<Channel>`, shared `PhaseSource<R>` /
   `SampleTickConn`, transport state, and a reused per-channel
   scratch buffer. `on_buffer` is the single buffer-driven entry the
@@ -22,7 +22,7 @@ end-to-end.
   `request_stop`. LinkDriven reads `LinkSession::is_playing()`
   through a closure and emits on transitions. Scripted is a test
   fixture.
-- **`agogo_core::machine::spec`**: parser for the docker-style
+- **`agogo_core::channel::spec`**: parser for the docker-style
   `--ch key=val,...` mini-language. Required keys `div` / `dev`;
   optional `id` / `out` / `swing` / `swing-mult` / `shift-ms` /
   `offset-ms` / `snap-quantum-us`. Quoted values support embedded
@@ -54,7 +54,7 @@ end-to-end.
   `agogo-cli`. Adds `ctrlc = "3"` as the only new dep
   (small, MIT, cross-platform).
 - **`max_events_for_buffer`** moved from `host-cpal` to
-  `agogo_core::channel::scheduler` so `Machine` can size its pool
+  `agogo_core::control::event` so `Machine` can size its pool
   without depending on `host-cpal`. host-cpal re-exports for
   back-compat.
 - **`scripts/check-floats.sh` + `CLAUDE.md`** allowlist gains four
@@ -276,7 +276,7 @@ transitive deps locked. `deny.toml` should not flag.
    — Scripted Stop doesn't set `running = false`. Fix the comment.
 
 <!-- gh-id: 3141397303 -->
-### Copilot on [`crates/core/src/machine.rs:114`](https://github.com/cmk/agogo/pull/16#discussion_r3141397303) (2026-04-25 04:07 UTC)
+### Copilot on [`crates/core/src/control.rs:114`](https://github.com/cmk/agogo/pull/16#discussion_r3141397303) (2026-04-25 04:07 UTC)
 
 The `running` field docs say it becomes `false` after the first `Stop` is emitted “regardless of policy”, but `running` is only flipped in the `stop_pending` (Ctrl-C) path—`LinkDriven` and `Scripted` can emit `Stop` without changing `running`. Please update the comment to reflect the actual semantics (local stop/teardown latch vs. policy-emitted Stop bytes).
 ```suggestion
@@ -295,7 +295,7 @@ pub struct TransportState {
 ```
 
 <!-- gh-id: 3141397340 -->
-### Copilot on [`crates/core/src/machine.rs:169`](https://github.com/cmk/agogo/pull/16#discussion_r3141397340) (2026-04-25 04:07 UTC)
+### Copilot on [`crates/core/src/control.rs:169`](https://github.com/cmk/agogo/pull/16#discussion_r3141397340) (2026-04-25 04:07 UTC)
 
 `MachineStopHandle`’s docs claim that after `request_stop()` the callback “falls silent — clock and transport bytes alike”, but `Machine::on_buffer` still schedules/renders per-channel clock events after emitting `MidiRtByte::Stop` (and `TransportState` docs earlier even say the stream becomes clock-only). Please reconcile the documentation with the intended behavior (either update the docs, or gate clock emission after a stop request if silence is required).
 
@@ -338,7 +338,7 @@ In `phase_at_sample`'s comment, “Lock contention is uncontested” looks like 
 Implements Plan 14’s v0.1 “end-to-end runner” by introducing an N-channel `Machine` orchestrator, wiring Ableton Link as a `PhaseSource`, and adding a user-facing `agogo run` command plus a top-level `agogo` binary entry.
 
 **Changes:**
-- Add `agogo_core::machine::{Machine, TransportPolicy, ChannelSpec}` and move `max_events_for_buffer` into core for shared sizing.
+- Add `agogo_core::control::{Machine, TransportPolicy, ChannelSpec}` and move `max_events_for_buffer` into core for shared sizing.
 - Add Link adapter (`LinkPhaseSource`) and refactor the cpal callback to delegate to `Machine::on_buffer`.
 - Add CLI `agogo run` (six-rate static dispatch, internal/external/link sources, Ctrl-C stop) and update docs / float-allowlist accordingly.
 
@@ -359,10 +359,10 @@ Copilot reviewed 16 out of 17 changed files in this pull request and generated 7
 | crates/host-link/src/session.rs | Expose `phase_at_sample` shim on `LinkSession` for the adapter. |
 | crates/host-link/src/lib.rs | Export the new `source` module types under `rusty-link`. |
 | crates/host-cpal/src/cpal/callback.rs | Shrink callback state and delegate buffer work to `Machine`. |
-| crates/core/src/machine/spec.rs | Implement the docker-style `--ch key=val,...` spec parser + Display round-trip. |
-| crates/core/src/machine.rs | Implement the N-channel `Machine` orchestrator + transport policy + tests/proptests. |
+| crates/core/src/channel/spec.rs | Implement the docker-style `--ch key=val,...` spec parser + Display round-trip. |
+| crates/core/src/control.rs | Implement the N-channel `Machine` orchestrator + transport policy + tests/proptests. |
 | crates/core/src/lib.rs | Export the new `machine` module. |
-| crates/core/src/channel/scheduler.rs | Move `max_events_for_buffer` into core scheduler for reuse. |
+| crates/core/src/control/event.rs | Move `max_events_for_buffer` into core scheduler for reuse. |
 | crates/cli/src/run.rs | New `agogo run` handler (rate dispatch, sources, Ctrl-C teardown, smoke tests). |
 | crates/cli/src/main.rs | Add `run` subcommand behind the `run` feature; adapt demo to `Machine`. |
 | crates/cli/Cargo.toml | Add `run` feature, `ctrlc` dep, and explicit `agogo` + `agogo-cli` bin targets. |

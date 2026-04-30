@@ -4,7 +4,7 @@
 
 Lifts MIDI 7-bit / 4-bit field validation from runtime parser checks
 into compile-time impossibility, by introducing two newtypes in
-`crates/core/src/midi.rs`:
+`crates/core/src/conn/midi.rs`:
 
 - `U7(pub u8)` — `0..=127`. Covers MIDI note numbers, velocities,
   CC values, and channel-pressure bytes.
@@ -38,7 +38,7 @@ later phases (P3's per-target role enums can re-use the migrated
 
 ### What changed
 
-- **New module** `crates/core/src/midi.rs` (273 lines): `U7`, `U4`,
+- **New module** `crates/core/src/conn/midi.rs` (273 lines): `U7`, `U4`,
   `Ple`, `From`, `Display` impls, `U7U8` / `U4U8` connections,
   10 spot tests + 7 property tests covering range constructors,
   round-trip on the narrow side, saturation on the wide side, and
@@ -47,17 +47,17 @@ later phases (P3's per-target role enums can re-use the migrated
   vel, ch}` and `MidiClickAccent.{note, vel}` switch to `U7` /
   `U4`. `ChannelMode::MidiCc { cc, range }` switches to
   `(U7, U7)` for `range`.
-- **`crates/core/src/machine/spec.rs`**: parser uses
+- **`crates/core/src/channel/spec.rs`**: parser uses
   `U7::new` / `U4::new`. The `mch_one_based` local renames to
   `mch_zero_based: Option<U4>` since U4 already encodes the
   zero-based domain. `vel=0` rejection stays a separate check
   so the "Note Off" error message remains clear.
-- **`crates/core/src/out/midi.rs`**: `render_midi_click_block`
+- **`crates/core/src/sink/midi.rs`**: `render_midi_click_block`
   builds bytes via `cfg.ch.into()` once, then `n.into()` /
   `v.into()` per event. Test helper `click_cfg(u8, u8, u8, ...)`
   keeps its u8 signature for call-site brevity but constructs
   U7/U4 internally with `expect`.
-- **`crates/core/src/machine.rs`**: `collect_tick_samples` helper
+- **`crates/core/src/control.rs`**: `collect_tick_samples` helper
   takes `U4` directly. All `MidiClickConfig` literals in the
   test suite migrate to `U7(...)` / `U4(...)` constructors.
 
@@ -133,7 +133,7 @@ verbatim — no further field changes during the reshape.
 
 ### Reviewing diff on branch `plan/2026-04-25-05` (4 commits, 1355 lines)
 
-This sprint introduces `U7`/`U4` newtypes in `crates/core/src/midi.rs` and migrates all MIDI field types in `MidiClickConfig`, `MidiClickAccent`, and `ChannelMode::MidiCc` away from raw `u8`.
+This sprint introduces `U7`/`U4` newtypes in `crates/core/src/conn/midi.rs` and migrates all MIDI field types in `MidiClickConfig`, `MidiClickAccent`, and `ChannelMode::MidiCc` away from raw `u8`.
 
 ### Commit Hygiene
 
@@ -151,11 +151,11 @@ The implementation is clean throughout. The conventions are followed:
 - `mch_zero_based` rename is accurate (noted in plan's Review section as intended deviation).
 - No dead code, no obvious clippy hazards.
 
-One minor observation, not a rule violation: `click_cfg` in `crates/core/src/out/midi.rs` at line 537 keeps `(u8, u8, u8, ...)` parameter types and constructs internally via `U7::new(...).expect(...)`. The plan explicitly describes this as a deliberate call-site brevity tradeoff. The uses all pass values known at compile time (76, 100, 9, etc.), so the `expect` is safe in practice. This is acceptable.
+One minor observation, not a rule violation: `click_cfg` in `crates/core/src/sink/midi.rs` at line 537 keeps `(u8, u8, u8, ...)` parameter types and constructs internally via `U7::new(...).expect(...)`. The plan explicitly describes this as a deliberate call-site brevity tradeoff. The uses all pass values known at compile time (76, 100, 9, etc.), so the `expect` is safe in practice. This is acceptable.
 
 ### Test Coverage
 
-**Property tests.** All seven required properties from the Verification table are present and correctly named in `crates/core/src/midi.rs`:
+**Property tests.** All seven required properties from the Verification table are present and correctly named in `crates/core/src/conn/midi.rs`:
 
 | Plan property | Present | Generator domain |
 |---|---|---|
@@ -175,7 +175,7 @@ The plan also required `spec_round_trip` (the existing proptest) to keep passing
 
 ### Plan Conformance
 
-**T1** — `crates/core/src/midi.rs` created with `U7`, `U4`, `Ple` impls, `From` impls, `Display` impls, `U7U8`/`U4U8` constants. All correct. Module added to `lib.rs`.
+**T1** — `crates/core/src/conn/midi.rs` created with `U7`, `U4`, `Ple` impls, `From` impls, `Display` impls, `U7U8`/`U4U8` constants. All correct. Module added to `lib.rs`.
 
 **T2** — `channel/mode.rs` fields migrated. `all_variants_constructible` test updated. The plan says "construct via `U7::new(76).unwrap()`"; the implementation uses direct tuple-struct syntax `U7(76)`. Both are valid and equivalent — this is not a deviation worth noting since the plan's wording is illustrative, not prescriptive.
 
@@ -191,7 +191,7 @@ The plan also required `spec_round_trip` (the existing proptest) to keep passing
 
 **No TODOs or stubs** were introduced in this diff.
 
-**Existing call sites:** The migration is exhaustive over the files in scope. The `U7`/`U4` fields are `pub`, so crates outside `agogo-core` that construct `MidiClickConfig` directly (not via the spec parser) would need to be updated. The diff shows only one external consumer updating literals: `crates/core/src/machine.rs` (the test module). There is no evidence of `crates/cli/` constructing `MidiClickConfig` directly — the review summary confirms CLI goes through the spec parser. This is not a risk.
+**Existing call sites:** The migration is exhaustive over the files in scope. The `U7`/`U4` fields are `pub`, so crates outside `agogo-core` that construct `MidiClickConfig` directly (not via the spec parser) would need to be updated. The diff shows only one external consumer updating literals: `crates/core/src/control.rs` (the test module). There is no evidence of `crates/cli/` constructing `MidiClickConfig` directly — the review summary confirms CLI goes through the spec parser. This is not a risk.
 
 **The `pub` inner field exposure:** Both `U7(pub u8)` and `U4(pub u8)` expose their inner field, meaning code can still construct `U7(200)` or `U4(16)` without going through `U7::new`. This is a deliberate design choice mirroring the Haskell `newtype` pattern (the connection handles saturation; the constructor handles rejection). The plan's design rationale explains this. Not a bug, but worth noting that the type does not make invalid states unrepresentable at the constructor level — it makes them unproducible via the *checked* path. The `Display` and `Ple` impls will behave unexpectedly for an out-of-range `U7(200)` constructed via tuple syntax, but no code in the diff does this for production paths.
 

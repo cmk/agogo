@@ -2,16 +2,16 @@
 
 ## Summary
 
-`crates/core/src/machine/spec.rs` was 1325 lines doing five jobs in
+`crates/core/src/channel/spec.rs` was 1325 lines doing five jobs in
 one file (struct definition, error enum, parser, display, validation).
 This is the T9 deliverable from PR #35's audit — same kitchen-sink
 demolition that PR #37 did for `cli/main.rs`.
 
 After this PR:
 
-- **Parent `crates/core/src/machine/spec.rs` shrinks to 39 lines** —
+- **Parent `crates/core/src/channel/spec.rs` shrinks to 39 lines** —
   module-level doc + `pub mod` declarations + `pub use` re-exports.
-- Each concern lives in its own file under `crates/core/src/machine/spec/`:
+- Each concern lives in its own file under `crates/core/src/channel/spec/`:
 
 | File | Lines | Contents |
 |---|---|---|
@@ -30,7 +30,7 @@ in `display::tests`, `into_channel_*` and `snap_intent_*` in
 No functional changes. Pure file-layout work — every `pub fn` /
 `pub struct` keeps its name and signature; the parent
 `spec.rs`'s `pub use` re-exports keep external callers
-(`crate::machine::ChannelSpec` etc., re-exported again from
+(`crate::control::ChannelSpec` etc., re-exported again from
 `machine.rs`) resolving without changes.
 
 ### Other changes
@@ -65,7 +65,7 @@ cedc208 debt: Extract ChannelSpecError from machine/spec.rs
 | `cargo test -p agogo-host-link --features rusty-link` | 31 + 4 = 35 |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | clean |
 | `scripts/check-floats.sh` | OK (allowlist swap, same total) |
-| `wc -l crates/core/src/machine/spec.rs` | 39 (down from 1325) |
+| `wc -l crates/core/src/channel/spec.rs` | 39 (down from 1325) |
 
 ### What's deferred
 
@@ -97,7 +97,7 @@ The T3+T6 collapse is documented in the plan's Review section.
 
 ### Code Quality
 
-Modern module layout — five siblings under `crates/core/src/machine/spec/`,
+Modern module layout — five siblings under `crates/core/src/channel/spec/`,
 no `mod.rs`. Public API surface preserved through `pub use` re-exports
 in the 39-line parent shell; `crates/cli/src/run.rs` and other callers
 need no import changes.

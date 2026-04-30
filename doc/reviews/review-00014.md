@@ -10,7 +10,7 @@ slices to `MidiSink::send_at(&[0xF8], at_sample)` calls.
 
 ### What ships
 
-- **`crates/core/src/out/midi.rs`** — the new module:
+- **`crates/core/src/sink/midi.rs`** — the new module:
   - `MidiSink: Send` trait with
     `fn send_at(&self, msg: &[u8], at_sample: u64)`. Implementations
     may allocate or take locks (midir does both); Plan 13's
@@ -149,7 +149,7 @@ commits or merge commits are present. This section is clean.
 
 ### Code Quality
 
-**Module layout.** `crates/core/src/out.rs` as a file alongside a
+**Module layout.** `` as a file alongside a
 `src/out/` directory is correct modern Rust module layout.
 `#![forbid(unsafe_code)]` is already set crate-wide. No `mod.rs`
 used. All conventions followed.
@@ -276,7 +276,7 @@ landing.
    for multi-byte messages, replace the unchecked index with a
    length guard that returns an error rather than panicking.
 2. **`block_render_matches_scheduler` generator bounds**
-   (`crates/core/src/out/midi.rs`). Add an inline comment
+   (`crates/core/src/sink/midi.rs`). Add an inline comment
    explaining the bounds stay within `tick_stream`'s tested domain,
    not to avoid arithmetic in the render path.
 3. **BPM error message / range inconsistency** in
@@ -338,8 +338,8 @@ Copilot reviewed 5 out of 6 changed files in this pull request and generated 4 c
 | ---- | ----------- |
 | doc/reviews/review-00014.md | Adds a PR review record for Plan 12 changes. |
 | doc/plans/plan-2026-04-24-01.md | Adds the Plan 12 implementation plan and verification checklist. |
-| crates/core/src/out/midi.rs | Implements the MIDI sink trait, test sink, and clock/transport renderers + tests. |
-| crates/core/src/out.rs | Introduces `out` module root and exports `midi`. |
+| crates/core/src/sink/midi.rs | Implements the MIDI sink trait, test sink, and clock/transport renderers + tests. |
+|  | Introduces `out` module root and exports `midi`. |
 | crates/core/src/lib.rs | Exposes `pub mod out;` from `agogo-core`. |
 | crates/cli/src/main.rs | Adds `midi trace` subcommand and a `midi_trace` module to run scheduler+renderer and print CSV. |
 </details>

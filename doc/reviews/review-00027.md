@@ -3,9 +3,9 @@
 ## Summary
 
 Drops the `dev: ChannelDev` field from
-`crates/core/src/machine/spec.rs:ChannelSpec`. The `ChannelDev`
+`crates/core/src/channel/spec.rs:ChannelSpec`. The `ChannelDev`
 enum is removed entirely; the public re-export from
-`agogo_core::machine` is gone too.
+`agogo_core::control` is gone too.
 
 This is **P4 of the structural-type audit** — the cleanup of the
 last surviving parser-stage tag from the original `dev` × `mode`
@@ -19,13 +19,13 @@ MIDI-targeted by construction.
 
 ### What changed
 
-- **`crates/core/src/machine/spec.rs`**: `dev: ChannelDev` field
+- **`crates/core/src/channel/spec.rs`**: `dev: ChannelDev` field
   removed; `ChannelDev` enum + its `Display` impl removed; the
   `dev=audio` → `AudioDeferred` check moved from `into_channel`
   to the parser body. The parser still requires the `dev=` key
   (`MissingKey("dev")` contract preserved) via a local
   `dev_seen: bool` gate.
-- **`crates/core/src/machine.rs`**: `pub use spec::ChannelDev`
+- **`crates/core/src/control.rs`**: `pub use spec::ChannelDev`
   removed from the re-export list.
 - **`crates/cli/src/run.rs:122-136`**: the find-first-MIDI-spec
   filter (which was a tautology since every spec was MIDI)
@@ -176,8 +176,8 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 1 c
 
 | File | Description |
 | ---- | ----------- |
-| `crates/core/src/machine/spec.rs` | Removes `dev` field/enum, validates `dev=` presence via `dev_seen`, hardcodes `dev=midi` in `Display`, updates tests/proptests accordingly. |
-| `crates/core/src/machine.rs` | Removes `ChannelDev` from public re-exports. |
+| `crates/core/src/channel/spec.rs` | Removes `dev` field/enum, validates `dev=` presence via `dev_seen`, hardcodes `dev=midi` in `Display`, updates tests/proptests accordingly. |
+| `crates/core/src/control.rs` | Removes `ChannelDev` from public re-exports. |
 | `crates/cli/src/run.rs` | Collapses “find first MIDI spec” logic to “first spec”; adds a regression-style CLI test to ensure minimal MIDI spec parses through to rate dispatch. |
 | `doc/plans/plan-2026-04-26-03.md` | Adds Plan 22 documentation for audit P4 work. |
 | `doc/reviews/review-00027.md` | Adds review record for PR #27 / audit P4. |

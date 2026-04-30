@@ -232,9 +232,9 @@ Copilot reviewed 12 out of 12 changed files in this pull request and generated 5
 <!-- gh-id: 3157301370 -->
 ### Copilot on [`crates/cli/src/channel_trace.rs:46`](https://github.com/cmk/agogo/pull/37#discussion_r3157301370) (2026-04-28 21:22 UTC)
 
-The comment references `fxp::pico_to_samples`, but the float↔fixed boundary helpers (including `pico_to_samples`) live in `agogo_core::boundary` now (and `fxp.rs` has been deleted). Update this comment to point at the current function/module so readers can find the invariant being enforced here.
+The comment references `fxp::pico_to_samples`, but the float↔fixed boundary helpers (including `pico_to_samples`) live in `agogo_core::conn::boundary` now (and `fxp.rs` has been deleted). Update this comment to point at the current function/module so readers can find the invariant being enforced here.
 ```suggestion
-    // supported by `agogo_core::boundary::pico_to_samples` (the
+    // supported by `agogo_core::conn::boundary::pico_to_samples` (the
     // downstream Pico → Sample dispatch). Validate here rather than
     // letting `micro_to_samples` panic deep inside the transform.
 ```
@@ -262,4 +262,4 @@ Deferring — verified pre-existing: `cargo build -p agogo-cli --no-default-feat
 <!-- gh-id: 3157331660 -->
 #### ↳ cmk ([2026-04-28 21:28 UTC](https://github.com/cmk/agogo/pull/37#discussion_r3157331660))
 
-Done — updated the comment to point at `agogo_core::boundary::pico_to_samples` (the post-fxp.rs-deletion home from PR #35 T5). Thanks.
+Done — updated the comment to point at `agogo_core::conn::boundary::pico_to_samples` (the post-fxp.rs-deletion home from PR #35 T5). Thanks.

@@ -145,7 +145,7 @@ All six commits use the required conventional-prefix scheme (`plan:`, `feat(core
 
 **Grep gate**: The diff is clean at a read-level scan. The parabolic-fit locals in `detect.rs` are annotated `// ABI-local f64`. PI-law bodies in `pll.rs` are annotated `// PI-exempt`. `pulse_train` derives `bpm_f`, `sr`, etc. as local f64 within the function body only. `source.rs` `phase_at_sample` Internal arm uses integer arithmetic only.
 
-**NCO overflow — Internal phase** (`crates/core/src/sync/source.rs`): `num = n · bpm.0 · 2³²` kept together in u128 stays within bounds at realistic musical ranges (`n ≤ 10^7`, `bpm.0 ≤ 4×10^8`): 1.7×10²⁵ ≪ u128::MAX. For pathological `n = u64::MAX` the product overflows but that is 11 billion years at 48 kHz, unreachable in practice.
+**NCO overflow — Internal phase** (`crates/core/src/control/sync/source.rs`): `num = n · bpm.0 · 2³²` kept together in u128 stays within bounds at realistic musical ranges (`n ≤ 10^7`, `bpm.0 ≤ 4×10^8`): 1.7×10²⁵ ≪ u128::MAX. For pathological `n = u64::MAX` the product overflows but that is 11 billion years at 48 kHz, unreachable in practice.
 
 **`n_bits = (n as i128 * 65_536) as i64` cast in source.rs External arm**: silently truncates for `n > 2^47` (~93 000 years at 48 kHz). Within the documented Q48.16 range, but a `debug_assert!(n <= (i64::MAX as u64) / 65_536)` would make the boundary explicit. Filed as a follow-up.
 
@@ -233,7 +233,7 @@ impl<R: SampleTime> Pll<R> {
 `TraceRow { sample, sub_q16 }` is derived by splitting Q48.16 as `sample = bits >> 16` and `sub_q16 = low16 as i16`. For negative sub-sample offsets this decomposition is inconsistent (the fixed-point representation borrows from the integer part, so `low16` is near 0xFFFF and becomes negative even though the fractional part is actually ~0.75). If the intent is “integer sample + signed Q16 offset”, compute `sample` by rounding to nearest (or explicitly choose a convention) and set `sub_q16 = bits - (sample<<16)`; alternatively emit a single `bits_q48_16` column to make the CSV unambiguous.
 
 <!-- gh-id: 3130259409 -->
-### Copilot on [`crates/core/src/sync/source.rs:54`](https://github.com/cmk/agogo/pull/5#discussion_r3130259409) (2026-04-23 10:58 UTC)
+### Copilot on [`crates/core/src/control/sync/source.rs:54`](https://github.com/cmk/agogo/pull/5#discussion_r3130259409) (2026-04-23 10:58 UTC)
 
 The `n_bits` computation casts `(n as i128 * 65_536)` down to `i64`, which truncates once `n > i64::MAX / 65_536` (even though `n` is a `u64`). Either keep this in `i128` until the final conversion, or add an explicit (debug_)assert/checked conversion so out-of-range `n` can’t silently corrupt the elapsed time used for phase projection.
 ```suggestion
@@ -242,7 +242,7 @@ The `n_bits` computation casts `(n as i128 * 65_536)` down to `i64`, which trunc
 ```
 
 <!-- gh-id: 3130259435 -->
-### Copilot on [`crates/core/src/sync/detect.rs:132`](https://github.com/cmk/agogo/pull/5#discussion_r3130259435) (2026-04-23 10:58 UTC)
+### Copilot on [`crates/core/src/control/sync/detect.rs:132`](https://github.com/cmk/agogo/pull/5#discussion_r3130259435) (2026-04-23 10:58 UTC)
 
 The comment says the i128 arithmetic is exact for any `u64` stream index, but `bits_q48_16` is still computed via `as i64` which will truncate for `start_index` beyond the representable Q48.16 range. Consider making the range limitation explicit (debug_assert/checked conversion/clamp) and adjust the comment so it doesn’t imply full `u64` coverage.
 
@@ -278,9 +278,9 @@ Copilot reviewed 13 out of 14 changed files in this pull request and generated 8
 | doc/reviews/review-00005.md | Adds a local review record for the fixed-point refactor work. |
 | doc/plans/plan-2026-04-23-03.md | Adds the implementation plan/spec for the refactor. |
 | crates/core/src/time/envelope.rs | Delegates envelope shaping to integer `fxp` ramp/smoothstep. |
-| crates/core/src/sync/source.rs | Converts `PhaseSource` to `R: SampleTime` and fixed-point `Phase` output. |
-| crates/core/src/sync/pll.rs | Converts PLL surface to `MicroBpm`/`Phase` and adds `predicted_phase_at`. |
-| crates/core/src/sync/detect.rs | Converts peak detector to `Peak<R>` with Q48.16 sample positions and Q0.15 threshold. |
+| crates/core/src/control/sync/source.rs | Converts `PhaseSource` to `R: SampleTime` and fixed-point `Phase` output. |
+| crates/core/src/control/sync/pll.rs | Converts PLL surface to `MicroBpm`/`Phase` and adds `predicted_phase_at`. |
+| crates/core/src/control/sync/detect.rs | Converts peak detector to `Peak<R>` with Q48.16 sample positions and Q0.15 threshold. |
 | crates/core/src/lib.rs | Exposes new `fxp` module from the core crate root. |
 | crates/core/src/fxp.rs | Introduces fixed-point primitives, conversions, and the `SampleTime` trait. |
 | crates/core/src/arb.rs | Updates `pulse_train` + strategies to fixed-point/time-typed APIs and uses `rand_pcg`/`rand_distr`. |

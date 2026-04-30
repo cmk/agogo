@@ -16,7 +16,7 @@ moving part so the follow-up sprint can drop the bridge in place.
   `ext/rusty_link`). `#![forbid(unsafe_code)]`; rusty_link is
   safe-fronted so we never reach for `unsafe` ourselves.
 - **`PhaseSourceImpl` trait + `PhaseSource::Custom(...)` variant** in
-  `agogo_core::sync::source`. The extension point for sibling-crate
+  `agogo_core::control::sync::source`. The extension point for sibling-crate
   clock sources (Link first, DIN or MIDI-clock later). Documented
   RT-safety contract; delegate-through in the enum's
   `phase_at_sample` / `feed_samples`.
@@ -243,9 +243,9 @@ The module-level docs say peer/tempo reads go through `capture_audio_session_sta
 <!-- gh-id: 3130342170 -->
 ### Copilot on [`crates/host-link/src/lib.rs:9`](https://github.com/cmk/agogo/pull/6#discussion_r3130342170) (2026-04-23 11:12 UTC)
 
-Crate docs say `LinkClock` "in later sprints — will implement `agogo_core::sync::PhaseSourceImpl`", but `LinkClock` already implements `PhaseSourceImpl` in this PR (with `phase_at_sample` deferred via `todo!()`). Update the rustdoc to avoid misleading readers about the current API surface.
+Crate docs say `LinkClock` "in later sprints — will implement `agogo_core::control::sync::PhaseSourceImpl`", but `LinkClock` already implements `PhaseSourceImpl` in this PR (with `phase_at_sample` deferred via `todo!()`). Update the rustdoc to avoid misleading readers about the current API surface.
 ```suggestion
-//! a `LinkClock` that implements `agogo_core::sync::PhaseSourceImpl`.
+//! a `LinkClock` that implements `agogo_core::control::sync::PhaseSourceImpl`.
 //! This sprint ships the lifecycle surface (enable / tempo /
 //! num_peers); the `phase_at_sample` bridge remains deferred post-fxp.
 ```
@@ -311,8 +311,8 @@ Copilot reviewed 11 out of 12 changed files in this pull request and generated 6
 | `Cargo.toml` | Adds `crates/host-link` to workspace + introduces `ext/` exclusion and `rusty_link` path dep. |
 | `crates/cli/Cargo.toml` | Adds `link` feature and optional dependency on `agogo-host-link`. |
 | `crates/cli/src/main.rs` | Adds `link probe` command and the `link_probe` module. |
-| `crates/core/src/sync/source.rs` | Adds `PhaseSourceImpl` + `Custom` variant and delegates calls; adds a dispatch test. |
-| `crates/core/src/sync.rs` | Re-exports `PhaseSourceImpl`. |
+| `crates/core/src/control/sync/source.rs` | Adds `PhaseSourceImpl` + `Custom` variant and delegates calls; adds a dispatch test. |
+| `crates/core/src/control/sync.rs` | Re-exports `PhaseSourceImpl`. |
 | `crates/host-link/Cargo.toml` | Defines new `agogo-host-link` crate and dependencies. |
 | `crates/host-link/src/lib.rs` | New crate root; exports `LinkClock`. |
 | `crates/host-link/src/link.rs` | Implements `LinkClock` lifecycle + deferred `phase_at_sample` + tests. |

@@ -37,24 +37,24 @@ catch-all inside the renderer itself).
   Cc(MidiCcConfig) }`, `DinRole { Sync24 }`, `CvRole { Pulse, Lfo
   }`, plus `MidiClickConfig` / `MidiClickAccent` / `MidiCcConfig`
   (moved from the deleted `mode.rs`).
-- **`crates/core/src/channel/transform.rs`**: `Channel` becomes a
+- **`crates/core/src/channel/time.rs`**: `Channel` becomes a
   sum enum with `common()` / `common_mut()` accessors. `transform()`
   takes `&ChannelCommon` (not `&Channel`).
-- **`crates/core/src/channel/scheduler.rs`**: `tick_stream` and
+- **`crates/core/src/control/event.rs`**: `tick_stream` and
   `tick_stream_into` take `&ChannelCommon`. Tests use
   `ChannelCommon` directly — no `Channel` wrapper needed since the
   scheduler doesn't care about role.
-- **`crates/core/src/out/midi.rs`**: `render_channel_block` is
+- **`crates/core/src/sink/midi.rs`**: `render_channel_block` is
   **deleted**; replaced by `render_midi_channel(&ChannelCommon,
   &MidiRole, ...)` which is exhaustive on `MidiRole`. The
   `non_clock_modes_are_noop` proptest is deleted (structurally
   unrepresentable now); replaced by `cc_role_is_noop_until_v02`
   for the one remaining no-op MIDI role (`Cc(_)` v0.2+ stub).
-- **`crates/core/src/machine.rs`**: `Machine::on_buffer` per-channel
+- **`crates/core/src/control.rs`**: `Machine::on_buffer` per-channel
   loop now `match`es on the outer `Channel` variant. The
   `Channel::Midi { common, role }` arm calls `render_midi_channel`;
   `Din` / `Cv` arms are explicit no-renderer.
-- **`crates/core/src/machine/spec.rs`**: `ChannelSpec.mode: MidiRole`
+- **`crates/core/src/channel/spec.rs`**: `ChannelSpec.mode: MidiRole`
   (was `ChannelMode`). `into_channel` returns `Channel::Midi { ... }`
   — the parser only ever produces MIDI roles today.
 - **`crates/core/src/channel/mode.rs`** is **deleted**.
@@ -166,7 +166,7 @@ The deletion of `crates/core/src/channel/mode.rs` is the compiler-enforced verif
 
 ### Test Coverage
 
-**`non_clock_modes_are_noop` deletion:** Justified. `Channel::Cv` and `Channel::Din` cannot be constructed to call `render_midi_channel` — the function signature rejects them at compile time. The replacement `cc_role_is_noop_until_v02` is a unit test (not a proptest), which is appropriate: `MidiRole::Cc(_)` is the single remaining no-op arm and there's nothing to vary over in a property test (any `MidiCcConfig` produces the same empty output). The test at `crates/core/src/out/midi.rs` line 488 exercises that arm with real events and a transport byte and asserts `sink.is_empty()`. Satisfied.
+**`non_clock_modes_are_noop` deletion:** Justified. `Channel::Cv` and `Channel::Din` cannot be constructed to call `render_midi_channel` — the function signature rejects them at compile time. The replacement `cc_role_is_noop_until_v02` is a unit test (not a proptest), which is appropriate: `MidiRole::Cc(_)` is the single remaining no-op arm and there's nothing to vary over in a property test (any `MidiCcConfig` produces the same empty output). The test at `crates/core/src/sink/midi.rs` line 488 exercises that arm with real events and a transport byte and asserts `sink.is_empty()`. Satisfied.
 
 **All nine scheduler/transform/render proptests carry over.** The signatures changed from `&Channel` to `&ChannelCommon` but the logic is identical. Test bodies in `scheduler.rs` and `transform.rs` construct `ChannelCommon` directly; the proptest strategies (`tick_monotonicity`, `divider_rate_preservation`, `delay_upper_clamp`, `delay_lower_clamp`, `shuffle_identity_on_even_steps`, `scheduler_events_in_window`, `tick_stream_into_matches_transform_filtered`, `tick_stream_into_no_realloc`, `scheduler_block_equivalence`) are unchanged in assertion. Satisfied.
 
@@ -244,11 +244,11 @@ Copilot reviewed 12 out of 13 changed files in this pull request and generated 3
 | doc/reviews/review-00026.md | Adds review record for the P3 refactor. |
 | doc/plans/plan-2026-04-26-02.md | Adds plan doc for the P3 refactor (now slightly out of sync with implementation). |
 | crates/core/src/channel/role.rs | Introduces `ChannelCommon` + per-target role enums and configs. |
-| crates/core/src/channel/transform.rs | Makes `Channel` sum-typed and shifts transform pipeline to `&ChannelCommon`. |
-| crates/core/src/channel/scheduler.rs | Updates tick scheduling APIs to consume `&ChannelCommon`. |
-| crates/core/src/out/midi.rs | Deletes `render_channel_block`; adds `render_midi_channel` and updates tests accordingly. |
-| crates/core/src/machine.rs | Moves per-channel dispatch to `Machine::on_buffer` via `match Channel::{Midi,Din,Cv}`. |
-| crates/core/src/machine/spec.rs | Changes `ChannelSpec.mode` to `MidiRole` and emits `Channel::Midi` from `into_channel`. |
+| crates/core/src/channel/time.rs | Makes `Channel` sum-typed and shifts transform pipeline to `&ChannelCommon`. |
+| crates/core/src/control/event.rs | Updates tick scheduling APIs to consume `&ChannelCommon`. |
+| crates/core/src/sink/midi.rs | Deletes `render_channel_block`; adds `render_midi_channel` and updates tests accordingly. |
+| crates/core/src/control.rs | Moves per-channel dispatch to `Machine::on_buffer` via `match Channel::{Midi,Din,Cv}`. |
+| crates/core/src/channel/spec.rs | Changes `ChannelSpec.mode` to `MidiRole` and emits `Channel::Midi` from `into_channel`. |
 | crates/core/src/channel.rs | Removes `mode` module export; re-exports role/common types. |
 | crates/cli/src/main.rs | Updates trace/demo code to use `ChannelCommon` + `MidiRole` where appropriate. |
 | crates/host-link/tests/bidirectional.rs | Migrates integration fixture to `Channel::Midi` and uses `common_mut()` for offset. |
@@ -264,14 +264,14 @@ Copilot reviewed 12 out of 13 changed files in this pull request and generated 3
 <!-- gh-id: 3143358882 -->
 ### Copilot on [`crates/core/src/channel/role.rs:120`](https://github.com/cmk/agogo/pull/26#discussion_r3143358882) (2026-04-26 10:45 UTC)
 
-The doc comment for `CvRole` points readers to `out/audio.rs`, but `crates/core/src/out/` currently contains only `midi.rs` (no `audio.rs`). This reference is misleading; either update it to the correct planned location/name or reword it as a future module that does not exist yet.
+The doc comment for `CvRole` points readers to `out/audio.rs`, but `crates/core/src/sink/` currently contains only `midi.rs` (no `audio.rs`). This reference is misleading; either update it to the correct planned location/name or reword it as a future module that does not exist yet.
 ```suggestion
 /// in a future output module for both variants; `Pulse` is a
 /// single-sample gate, `Lfo` is a sample-rate continuous waveform.
 ```
 
 <!-- gh-id: 3143358887 -->
-### Copilot on [`crates/core/src/machine.rs:78`](https://github.com/cmk/agogo/pull/26#discussion_r3143358887) (2026-04-26 10:45 UTC)
+### Copilot on [`crates/core/src/control.rs:78`](https://github.com/cmk/agogo/pull/26#discussion_r3143358887) (2026-04-26 10:45 UTC)
 
 This field doc still says the click counter is threaded into `render_midi_click_block` via `render_channel_block`, but `render_channel_block` has been deleted in this PR (now routes through `render_midi_channel`). Update the comment to match the current call chain so it doesn't point to a non-existent API.
 ```suggestion

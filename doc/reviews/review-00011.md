@@ -152,8 +152,8 @@ Copilot reviewed 11 out of 11 changed files in this pull request and generated 4
 | scripts/check-floats.sh | New float-usage gate script intended to prevent unallowlisted `f32`/`f64` in Rust sources. |
 | .github/workflows/ci.yml | Adds a `floats` job that runs the float gate in CI. |
 | .claude/settings.json | Adds float gate to the local commit hook command chain. |
-| crates/core/src/channel/transform.rs | Switches channel config to `Micro`, introduces `micro_to_samples`, updates transform logic and tests. |
-| crates/core/src/channel/scheduler.rs | Uses `Micro` shift/offset and shares the new `micro_to_samples` conversion path. |
+| crates/core/src/channel/time.rs | Switches channel config to `Micro`, introduces `micro_to_samples`, updates transform logic and tests. |
+| crates/core/src/control/event.rs | Uses `Micro` shift/offset and shares the new `micro_to_samples` conversion path. |
 | crates/core/src/channel.rs | Re-exports `MAX_SHIFT` instead of `MAX_SHIFT_MS`. |
 | crates/host-link/src/link.rs | Changes `LinkClock` surface to take/return `Tempo` and confines f64 to Link FFI conversion lines; updates tests. |
 | crates/cli/src/main.rs | Moves CLI float args to `f64`, converts immediately to fxp types, and removes stored float fields from `ProbeRow`. |
@@ -198,7 +198,7 @@ The Conn legend example appears inconsistent with current usage: the code compos
 ```
 
 <!-- gh-id: 3136472056 -->
-### Copilot on [`crates/core/src/channel/transform.rs:65`](https://github.com/cmk/agogo/pull/11#discussion_r3136472056) (2026-04-24 08:37 UTC)
+### Copilot on [`crates/core/src/channel/time.rs:65`](https://github.com/cmk/agogo/pull/11#discussion_r3136472056) (2026-04-24 08:37 UTC)
 
 `micro_to_samples` is a new helper that encapsulates the Pico↔Sample composition, but CLAUDE.md’s “compose at the call site” rule explicitly lists a `micro_to_samples_at_sr` helper as an example of what *not* to add. Either inline the composition in both call sites, or update the documented rule to allow this specific helper (and explain why it doesn’t conflict with the composition guideline).
 

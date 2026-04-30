@@ -30,7 +30,7 @@ Inter-strategy dependencies (`arb_swing → arb_tbase`,
 `sync/sample_tick.rs::tests` and stays put.
 
 **`pulse_train` migration (T2).** Not testkit (used by `cli/sync_trace`
-at runtime), so it moves to `crates/core/src/sync/pulse_train.rs` as a
+at runtime), so it moves to `crates/core/src/control/sync/pulse.rs` as a
 regular `pub` module — declared in `sync.rs` alongside `pll`, `detect`,
 `source`. The three `pulse_train_*` tests carry along inline. The
 `scripts/check-floats.sh` allowlist entry follows the file (same
@@ -48,10 +48,10 @@ file"). Pattern matches upstream Rust `connections::prop::arb` and the
 Haskell `Test/Data/Connection/{Float,Int,…}.hs` layout.
 
 External-call surface change: `agogo_core::arb::pulse_train` →
-`agogo_core::sync::pulse_train::pulse_train`. Internal `crate::arb::*`
+`agogo_core::control::sync::pulse_train::pulse_train`. Internal `crate::arb::*`
 sites move to per-type paths. The `testkit` feature flag stays;
 external proptest consumers (none today) would now do
-`agogo_core::time::grid::arb::arb_grid` instead of
+`agogo_core::time::arb::arb_grid` instead of
 `agogo_core::arb::arb_grid` — verbose but truthful.
 
 ## Test plan
@@ -87,7 +87,7 @@ All three commits carry correct prefixes (`plan:`, `debt:`, `doc:`). Landing T1+
 
 **Doc strings** — the 9 new `arb.rs` files each carry a module-level doc comment explaining the gate. Consistent, not boilerplate-padded. Intra-doc links spot-checked: `crate::time::conn::quantize_at`, `crate::time::tick::from_ticks`, `crate::time::conn::TICKTIME`, `crate::time::swing::SwingConfig` — all resolvable.
 
-**`sync/source.rs` qualified-path usage** — both `crate::arb::pulse_train::<S048>` raw-qualified-path calls (not in `use` statements) updated to `crate::sync::pulse_train::pulse_train::<S048>`. Caught by the build, fully resolved.
+**`sync/source.rs` qualified-path usage** — both `crate::arb::pulse_train::<S048>` raw-qualified-path calls (not in `use` statements) updated to `crate::control::sync::pulse::pulse_train::<S048>`. Caught by the build, fully resolved.
 
 ### Test Coverage
 
@@ -106,7 +106,7 @@ All three commits carry correct prefixes (`plan:`, `debt:`, `doc:`). Landing T1+
 
 **T3** — `arb.rs` deleted, `pub mod arb;` removed from `lib.rs`, `_sample_rate_sealed` dropped. Complete.
 
-**Plan doc inconsistency — stale Critical Files section** *(confidence: 82)*. As-reviewed, the Critical Files section listed `crates/core/src/sync/sample_tick.rs` as getting a `pub mod arb;` declaration and `sync/sample_tick/arb.rs` as a new file; neither was implemented (`arb_integer_stc` stays inline as a documented deviation). Resolved before push: the auto-fix step pruned the Critical Files entries; a follow-up round-1 also pruned the matching tree-diagram entry at the top of the plan and the dependency graph's T1 line.
+**Plan doc inconsistency — stale Critical Files section** *(confidence: 82)*. As-reviewed, the Critical Files section listed `crates/core/src/time/conn.rs` as getting a `pub mod arb;` declaration and `sync/sample_tick/arb.rs` as a new file; neither was implemented (`arb_integer_stc` stays inline as a documented deviation). Resolved before push: the auto-fix step pruned the Critical Files entries; a follow-up round-1 also pruned the matching tree-diagram entry at the top of the plan and the dependency graph's T1 line.
 
 ### Risks
 
@@ -114,7 +114,7 @@ All three commits carry correct prefixes (`plan:`, `debt:`, `doc:`). Landing T1+
 
 **CLAUDE.md wording vs. implementation** — new rule example (`time/grid.rs` declares the mod; `time/grid/arb.rs` holds `arb_grid`) matches the diff exactly.
 
-**`check-floats.sh` allowlist** — old `crates/core/src/arb.rs` entry removed from both the ALLOWED array AND the comment header. New `crates/core/src/sync/pulse_train.rs` added to both. Symmetric.
+**`check-floats.sh` allowlist** — old `crates/core/src/arb.rs` entry removed from both the ALLOWED array AND the comment header. New `crates/core/src/control/sync/pulse.rs` added to both. Symmetric.
 
 **`arb_bpm_in_range` bound** — assertion upper bound is inclusive 400_000_000 but the strategy's widest arm stops at 399_999_999 (exclusive range). Inherited from old `arb.rs` unchanged; no regression.
 
@@ -148,7 +148,7 @@ This PR removes the `crates/core/src/arb.rs` “kitchen-sink” module by reloca
 
 **Changes:**
 - Split shared proptest strategies into per-type `time/*/arb.rs` modules and update all internal test imports accordingly.
-- Move `pulse_train` into `crates/core/src/sync/pulse_train.rs`, update callsites (core tests + CLI), and update the float-check allowlist entry.
+- Move `pulse_train` into `crates/core/src/control/sync/pulse.rs`, update callsites (core tests + CLI), and update the float-check allowlist entry.
 - Delete `crates/core/src/arb.rs`, remove `pub mod arb;` from `lib.rs`, and codify the colocation rule in `CLAUDE.md`.
 
 ### Reviewed changes
@@ -163,32 +163,32 @@ Copilot reviewed 30 out of 30 changed files in this pull request and generated 2
 | scripts/check-floats.sh | Updates allowlist/comments to track `pulse_train` after the move. |
 | doc/reviews/review-00045.md | Adds a review record for PR #45 (contains a factual mismatch vs the plan doc). |
 | doc/plans/plan-2026-04-28-08.md | Adds the plan document for the refactor (contains stale references to a non-existent `sample_tick/arb.rs`). |
-| crates/core/src/time/tick/arb.rs | New strategies for `Tick`/`Time` with explicit dependency on `grid::arb`. |
+| crates/core/src/time/arb.rs | New strategies for `Tick`/`Time` with explicit dependency on `grid::arb`. |
 | crates/core/src/time/tick.rs | Updates test imports and declares `pub mod arb` under test/testkit cfg. |
-| crates/core/src/time/tempo/arb.rs | New `Tempo` strategy (`arb_bpm`) + migrated proptest. |
-| crates/core/src/time/tempo.rs | Declares `pub mod arb` under test/testkit cfg. |
-| crates/core/src/time/tbase/arb.rs | New `TBase` strategy (`arb_tbase`). |
+| crates/core/src/conn/arb.rs | New `Tempo` strategy (`arb_bpm`) + migrated proptest. |
+| crates/core/src/conn/tempo.rs | Declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/arb.rs | New `TBase` strategy (`arb_tbase`). |
 | crates/core/src/time/tbase.rs | Updates test imports and declares `pub mod arb` under test/testkit cfg. |
-| crates/core/src/time/swing/arb.rs | New `SwingConfig` strategy (`arb_swing`) importing `arb_tbase`. |
+| crates/core/src/time/arb.rs | New `SwingConfig` strategy (`arb_swing`) importing `arb_tbase`. |
 | crates/core/src/time/swing.rs | Updates test imports and declares `pub mod arb` under test/testkit cfg. |
-| crates/core/src/time/sample/arb.rs | New sample-rate strategy (`arb_sample_rate`) + migrated proptest. |
-| crates/core/src/time/sample.rs | Declares `pub mod arb` under test/testkit cfg. |
-| crates/core/src/time/grid/arb.rs | New `Grid` strategy (`arb_grid`). |
+| crates/core/src/conn/arb.rs | New sample-rate strategy (`arb_sample_rate`) + migrated proptest. |
+| crates/core/src/conn/sample.rs | Declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/time/arb.rs | New `Grid` strategy (`arb_grid`). |
 | crates/core/src/time/grid.rs | Declares `pub mod arb` under test/testkit cfg. |
-| crates/core/src/time/decimal/arb.rs | New jitter strategy (`arb_jitter_sigma`) + migrated proptest. |
-| crates/core/src/time/decimal.rs | Declares `pub mod arb` under test/testkit cfg. |
-| crates/core/src/time/conn/arb.rs | New rational strategy (`arb_rational_nonneg`). |
+| crates/core/src/conn/arb.rs | New jitter strategy (`arb_jitter_sigma`) + migrated proptest. |
+| crates/core/src/conn/fixed.rs | Declares `pub mod arb` under test/testkit cfg. |
+| crates/core/src/conn/arb.rs | New rational strategy (`arb_rational_nonneg`). |
 | crates/core/src/time/conn.rs | Updates test imports and declares `pub mod arb` under test/testkit cfg. |
-| crates/core/src/sync/source.rs | Updates `pulse_train` callsites to the new module path. |
-| crates/core/src/sync/pulse_train.rs | New home for `pulse_train` + constant + migrated unit tests. |
-| crates/core/src/sync/pll.rs | Updates test import of `pulse_train`. |
-| crates/core/src/sync/detect.rs | Updates test imports (`pulse_train`, `arb_bpm`). |
-| crates/core/src/sync.rs | Exposes `pub mod pulse_train;` and documents the submodule. |
+| crates/core/src/control/sync/source.rs | Updates `pulse_train` callsites to the new module path. |
+| crates/core/src/control/sync/pulse.rs | New home for `pulse_train` + constant + migrated unit tests. |
+| crates/core/src/control/sync/pll.rs | Updates test import of `pulse_train`. |
+| crates/core/src/control/sync/detect.rs | Updates test imports (`pulse_train`, `arb_bpm`). |
+| crates/core/src/control/sync.rs | Exposes `pub mod pulse_train;` and documents the submodule. |
 | crates/core/src/lib.rs | Removes `pub mod arb;` from the crate root. |
-| crates/core/src/channel/transform.rs | Updates test import of `arb_grid`. |
-| crates/core/src/channel/scheduler.rs | Updates test import of `arb_grid`. |
+| crates/core/src/channel/time.rs | Updates test import of `arb_grid`. |
+| crates/core/src/control/event.rs | Updates test import of `arb_grid`. |
 | crates/core/src/arb.rs | Deletes the former kitchen-sink `arb.rs` module. |
-| crates/cli/src/sync_trace.rs | Updates runtime import to `agogo_core::sync::pulse_train::pulse_train`. |
+| crates/cli/src/sync_trace.rs | Updates runtime import to `agogo_core::control::sync::pulse_train::pulse_train`. |
 | CLAUDE.md | Updates proptest discipline docs to codify per-type `arb` colocation. |
 </details>
 

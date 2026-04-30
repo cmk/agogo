@@ -19,7 +19,7 @@ Polyrhythm DSL parser sprint (Plan 16) plus CLI surface cleanup.
   and non-Boolean witnesses.
 
 - **DSL parser** (T1–T6): Hand-written recursive descent parser in
-  `crates/core/src/dsl/` producing `TrackSpec` from grid algebra
+  `crates/core/src/channel/dsl/` producing `TrackSpec` from grid algebra
   expressions. Modules: `ast.rs`, `error.rs`, `lexer.rs`, `parser.rs`,
   `eval.rs`, `display.rs`. Grammar: `&` (meet) > `|` (join) >
   `>`/`<` (imply/coimp), `!` (neg prefix), `~` (swing), `@` (offset).
@@ -126,12 +126,12 @@ This plan document is internally inconsistent about polyrhythm and operator symb
 This review summary claims the operator swap is `&`=polyrhythm, `|`=join, `^`=meet and that the parser produces `Vec<TrackSpec>`, but the updated `doc/designs/dsl.md` / Plan 16 draft currently have conflicting definitions (e.g., `&` appears as both meet and polyrhythm). Once the design/plan docs are reconciled, please update this review record to match the final, unambiguous DSL spec.
 
 <!-- gh-id: 3142789407 -->
-### Copilot on [`crates/core/src/channel/transform.rs`](https://github.com/cmk/agogo/pull/19#discussion_r3142789407) (2026-04-26 00:42 UTC)
+### Copilot on [`crates/core/src/channel/time.rs`](https://github.com/cmk/agogo/pull/19#discussion_r3142789407) (2026-04-26 00:42 UTC)
 
 Test/property names here still use `shift_*` terminology after the `shift`→`delay` rename (see also `shift_over_300ms_saturates` at ~189 and `shift_upper_clamp`/`shift_lower_clamp` around ~293/304). Renaming these to `delay_*` would keep terminology consistent and reduce confusion when grepping for legacy `shift` references.
 
 <!-- gh-id: 3142789411 -->
-### Copilot on [`crates/core/src/machine/spec.rs:163`](https://github.com/cmk/agogo/pull/19#discussion_r3142789411) (2026-04-26 00:42 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:163`](https://github.com/cmk/agogo/pull/19#discussion_r3142789411) (2026-04-26 00:42 UTC)
 
 Delay conversion here relies on `micro_from_ms`, which saturates out-of-range millisecond values to `i64::{MIN,MAX}`; after the clamp, extremely large inputs effectively become 0 ms or 300 ms without any user-visible error. Since this is user-provided `--ch delay=...`, consider rejecting out-of-range values with a `ChannelSpecError::BadValue("delay", "out of range")` (similar to `channel_trace`’s argv-boundary conversion) to avoid silently masking typos.
 
@@ -162,11 +162,11 @@ Copilot reviewed 14 out of 15 changed files in this pull request and generated 6
 | crates/host-link/tests/bidirectional.rs | Updated tests for `MAX_DELAY` and `Channel.delay`. |
 | crates/host-link/src/session.rs | Updated session tests for `MAX_DELAY` and `Channel.delay`. |
 | crates/host-cpal/src/cpal/callback.rs | Updated test channel construction to use `delay`. |
-| crates/core/src/out/midi.rs | Updated test channel construction to use `delay`. |
-| crates/core/src/machine/spec.rs | Updated `--ch` spec parsing to `grid` + `delay`, removed swing/offset keys. |
-| crates/core/src/machine.rs | Comment update to reflect delay terminology. |
-| crates/core/src/channel/transform.rs | Renamed shift concepts to delay in core transform pipeline. |
-| crates/core/src/channel/scheduler.rs | Updated scheduler to use `MAX_DELAY`/`delay`. |
+| crates/core/src/sink/midi.rs | Updated test channel construction to use `delay`. |
+| crates/core/src/channel/spec.rs | Updated `--ch` spec parsing to `grid` + `delay`, removed swing/offset keys. |
+| crates/core/src/control.rs | Comment update to reflect delay terminology. |
+| crates/core/src/channel/time.rs | Renamed shift concepts to delay in core transform pipeline. |
+| crates/core/src/control/event.rs | Updated scheduler to use `MAX_DELAY`/`delay`. |
 | crates/core/src/channel.rs | Re-export rename `MAX_SHIFT`→`MAX_DELAY`. |
 | crates/cli/src/run.rs | Updated `--ch` help text and tests to `grid` + `delay`. |
 | crates/cli/src/main.rs | Updated CLI subcommands/trace plumbing from `divider/shift-ms` to `grid/delay`. |
@@ -179,7 +179,7 @@ Copilot reviewed 14 out of 15 changed files in this pull request and generated 6
 
 
 <!-- gh-id: 3142789415 -->
-### Copilot on [`crates/core/src/machine/spec.rs`](https://github.com/cmk/agogo/pull/19#discussion_r3142789415) (2026-04-26 00:42 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs`](https://github.com/cmk/agogo/pull/19#discussion_r3142789415) (2026-04-26 00:42 UTC)
 
 The comment says to “use grid= with DSL syntax instead”, but `grid` is still parsed as a plain `Grid` name in this PR (full DSL expressions are only planned later per the module docs). Consider rewording this to avoid implying that `grid=` already accepts the DSL today.
 
@@ -194,7 +194,7 @@ The grammar/operator table currently assigns `&` to both polyrhythm (`poly := ..
 The `channel trace` CLI help calls this a “Grid expression” (implying the full DSL), but the code path parses it as a plain `Grid` name via `Grid::from_str` (no operators/modifiers). Consider renaming this help text/argument label to “grid name” (or explicitly noting that the full DSL is not yet accepted here) to avoid misleading users.
 
 <!-- gh-id: 3142815664 -->
-### Copilot on [`crates/core/src/channel/transform.rs`](https://github.com/cmk/agogo/pull/19#discussion_r3142815664) (2026-04-26 01:13 UTC)
+### Copilot on [`crates/core/src/channel/time.rs`](https://github.com/cmk/agogo/pull/19#discussion_r3142815664) (2026-04-26 01:13 UTC)
 
 These test names still use the old `shift_...` terminology (`shift_10ms_adds_exactly_480_samples`, `shift_over_300ms_saturates`, `shift_upper_clamp`, `shift_lower_clamp`) even though the field is now `delay`. Renaming them would keep terminology consistent and make grepping for delay-related behavior easier.
 
@@ -216,7 +216,7 @@ This plan describes the DSL output as `Vec<TrackSpec>` (Context/Goal) but later 
 This PR advances Plan 16 by landing the updated DSL design docs and implementing the initial Rust DSL parser + evaluator, while also renaming channel “shift” latency compensation to “delay” and unifying the CLI channel key from `div` to `grid`.
 
 **Changes:**
-- Added a `agogo_core::dsl` module (AST/lexer/parser/eval/display/error) for parsing a single-track grid DSL into `TrackSpec`.
+- Added a `agogo_core::channel::dsl` module (AST/lexer/parser/eval/display/error) for parsing a single-track grid DSL into `TrackSpec`.
 - Extended `Grid` algebra with bi-Heyting operations (`imply`, `neg`, `mid`, `coimp`, `coneg`, `comid`) and added spot checks + property tests.
 - Renamed `Channel.shift` → `Channel.delay` and updated CLI/spec parsing (`div` → `grid`, `shift-ms` → `delay`) across the workspace.
 
@@ -236,19 +236,19 @@ Copilot reviewed 23 out of 24 changed files in this pull request and generated 7
 | crates/host-link/src/session.rs | Updates LinkSession tests and constants for `delay`. |
 | crates/host-cpal/src/cpal/callback.rs | Updates callback test channel struct initialization (`delay`). |
 | crates/core/src/time/grid.rs | Renames heyting→imply, adds co-Heyting ops, and expands test suite. |
-| crates/core/src/out/midi.rs | Updates test channel initialization (`delay`). |
-| crates/core/src/machine/spec.rs | Updates `--ch` spec keys and maps into `Channel` with `delay`. |
-| crates/core/src/machine.rs | Updates docs/tests for `delay` field naming. |
+| crates/core/src/sink/midi.rs | Updates test channel initialization (`delay`). |
+| crates/core/src/channel/spec.rs | Updates `--ch` spec keys and maps into `Channel` with `delay`. |
+| crates/core/src/control.rs | Updates docs/tests for `delay` field naming. |
 | crates/core/src/lib.rs | Exposes the new `dsl` module. |
-| crates/core/src/dsl/parser.rs | Implements recursive descent parser (tokens → AST) + tests/proptests. |
-| crates/core/src/dsl/lexer.rs | Implements single-pass lexer + tests/proptests. |
-| crates/core/src/dsl/eval.rs | Implements AST evaluation to `TrackSpec` + tests. |
-| crates/core/src/dsl/error.rs | Adds `DslError`/`DslErrorKind` with span-aware display. |
-| crates/core/src/dsl/display.rs | Adds precedence-aware `Display` impls + tests. |
-| crates/core/src/dsl/ast.rs | Defines DSL AST, spans, modifiers, and `TrackSpec`. |
-| crates/core/src/dsl.rs | Adds public `dsl::parse()` API + integration tests/proptests. |
-| crates/core/src/channel/transform.rs | Renames shift→delay throughout transform pipeline and tests. |
-| crates/core/src/channel/scheduler.rs | Renames shift→delay in scheduler pipeline and property tests. |
+| crates/core/src/channel/dsl/parser.rs | Implements recursive descent parser (tokens → AST) + tests/proptests. |
+| crates/core/src/channel/dsl/lexer.rs | Implements single-pass lexer + tests/proptests. |
+| crates/core/src/channel/dsl/eval.rs | Implements AST evaluation to `TrackSpec` + tests. |
+| crates/core/src/channel/dsl/error.rs | Adds `DslError`/`DslErrorKind` with span-aware display. |
+| crates/core/src/channel/dsl/display.rs | Adds precedence-aware `Display` impls + tests. |
+| crates/core/src/channel/dsl/ast.rs | Defines DSL AST, spans, modifiers, and `TrackSpec`. |
+| crates/core/src/channel/dsl.rs | Adds public `dsl::parse()` API + integration tests/proptests. |
+| crates/core/src/channel/time.rs | Renames shift→delay throughout transform pipeline and tests. |
+| crates/core/src/control/event.rs | Renames shift→delay in scheduler pipeline and property tests. |
 | crates/core/src/channel.rs | Updates module docs and re-exports (`MAX_DELAY`). |
 | crates/cli/src/run.rs | Updates `--ch` help text and error examples to `grid=`. |
 | crates/cli/src/main.rs | Renames CLI args from divider/shift to grid/delay across subcommands. |
@@ -271,9 +271,9 @@ The examples use `^` for “common refinement” (lines 71 and 73), but the gram
 This summary says swing/offset now come from the DSL via `grid=` (line 12), but later in the same doc it notes the DSL parser is not yet wired into `ChannelSpec::parse` (lines 66–68). As implemented, the CLI currently can’t accept swing/offset via `grid=` and those knobs are effectively removed. Please reconcile this section with the current behavior (or wire `dsl::parse` into the `--ch grid=` path).
 
 <!-- gh-id: 3142815680 -->
-### Copilot on [`crates/core/src/machine/spec.rs:173`](https://github.com/cmk/agogo/pull/19#discussion_r3142815680) (2026-04-26 01:13 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:173`](https://github.com/cmk/agogo/pull/19#discussion_r3142815680) (2026-04-26 01:13 UTC)
 
-`ChannelSpec::into_channel` currently hard-codes `shuffle` to `T16/0` and `offset` to `Micro::ZERO`, and `ChannelSpec::parse` only accepts `grid` as a plain `Grid` name. Since this PR also removes the legacy CLI keys (`swing`, `swing-res`, `offset-ms`), there’s no longer any way to configure swing/offset from `--ch` despite docs claiming they move into `grid=`. Consider (a) keeping the legacy keys until `grid=` is wired to the DSL parser, or (b) parsing `grid=` via `agogo_core::dsl::parse` and mapping at least swing immediately (and explicitly handling/rejecting tick-based offsets until the pipeline supports them).
+`ChannelSpec::into_channel` currently hard-codes `shuffle` to `T16/0` and `offset` to `Micro::ZERO`, and `ChannelSpec::parse` only accepts `grid` as a plain `Grid` name. Since this PR also removes the legacy CLI keys (`swing`, `swing-res`, `offset-ms`), there’s no longer any way to configure swing/offset from `--ch` despite docs claiming they move into `grid=`. Consider (a) keeping the legacy keys until `grid=` is wired to the DSL parser, or (b) parsing `grid=` via `agogo_core::channel::dsl::parse` and mapping at least swing immediately (and explicitly handling/rejecting tick-based offsets until the pipeline supports them).
 
 <!-- gh-id: 3142826099 -->
 ### Copilot on [`doc/plans/plan-2026-04-25-01.md:75`](https://github.com/cmk/agogo/pull/19#discussion_r3142826099) (2026-04-26 01:26 UTC)
@@ -291,12 +291,12 @@ The module layout / task breakdown still mentions `PolyAst` and `eval.rs` produc
 In the summary you state that `offset-ms`, `swing`, and `swing-res` were removed from the CLI because they “now come from the DSL via `grid=`”, but later in this same review you note the DSL parser is not yet wired into `ChannelSpec::parse`. As of this PR, users can’t actually set swing/offset via `grid=` yet, so this summary bullet should be reworded to reflect that it’s a follow-up step.
 
 <!-- gh-id: 3142826113 -->
-### Copilot on [`crates/core/src/machine/spec.rs:13`](https://github.com/cmk/agogo/pull/19#discussion_r3142826113) (2026-04-26 01:26 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:13`](https://github.com/cmk/agogo/pull/19#discussion_r3142826113) (2026-04-26 01:26 UTC)
 
-The module docs say “When the DSL parser lands (Plan 16), it will accept full DSL expressions…”, but this PR already adds `agogo_core::dsl::parse`. What’s missing is wiring it into `ChannelSpec::parse` / `grid=`. Consider rewording this comment to avoid implying the parser doesn’t exist yet, and instead point to the follow-up integration work.
+The module docs say “When the DSL parser lands (Plan 16), it will accept full DSL expressions…”, but this PR already adds `agogo_core::channel::dsl::parse`. What’s missing is wiring it into `ChannelSpec::parse` / `grid=`. Consider rewording this comment to avoid implying the parser doesn’t exist yet, and instead point to the follow-up integration work.
 
 <!-- gh-id: 3142826116 -->
-### Copilot on [`crates/core/src/dsl/lexer.rs:77`](https://github.com/cmk/agogo/pull/19#discussion_r3142826116) (2026-04-26 01:26 UTC)
+### Copilot on [`crates/core/src/channel/dsl/lexer.rs:77`](https://github.com/cmk/agogo/pull/19#discussion_r3142826116) (2026-04-26 01:26 UTC)
 
 The lexer indexes into `input.as_bytes()` and converts a single byte to `char` (`bytes[pos] as char`). For non-ASCII UTF-8 input this reports the wrong character (and the span length is always 1 byte), producing misleading `UnexpectedChar` errors and misaligned carets. Consider iterating with `char_indices()` (or `input[pos..].chars().next()`) and advancing by `len_utf8()`, so both the reported char and span are correct for Unicode input.
 
@@ -310,7 +310,7 @@ The operator table still includes a polyrhythm row using `&`, but this document�
 
 ## Pull request overview
 
-This PR lands the Plan 16 planning/design documentation, introduces a new `agogo_core::dsl` parser for grid algebra expressions (including swing/offset modifiers), extends `Grid` with bi-Heyting operations and property tests, and unifies the CLI/channel surface by renaming shift→delay and `div`→`grid`.
+This PR lands the Plan 16 planning/design documentation, introduces a new `agogo_core::channel::dsl` parser for grid algebra expressions (including swing/offset modifiers), extends `Grid` with bi-Heyting operations and property tests, and unifies the CLI/channel surface by renaming shift→delay and `div`→`grid`.
 
 **Changes:**
 - Add a DSL lexer/parser/evaluator + Display round-trip support that parses a single-track expression into `TrackSpec`.
@@ -333,19 +333,19 @@ Copilot reviewed 23 out of 24 changed files in this pull request and generated 7
 | crates/host-link/src/session.rs | Update Link session tests for `MAX_DELAY` and `Channel.delay`. |
 | crates/host-cpal/src/cpal/callback.rs | Update callback test channel construction to use `delay`. |
 | crates/core/src/time/grid.rs | Add/rename bi-Heyting ops (`imply`, `coimp`, etc.) + spot checks/proptests. |
-| crates/core/src/out/midi.rs | Update tests for `Channel.delay`. |
-| crates/core/src/machine/spec.rs | Update `--ch` parsing surface (`grid`, `delay`) and remove swing/offset CLI fields. |
-| crates/core/src/machine.rs | Update internal test channel construction to use `delay`. |
+| crates/core/src/sink/midi.rs | Update tests for `Channel.delay`. |
+| crates/core/src/channel/spec.rs | Update `--ch` parsing surface (`grid`, `delay`) and remove swing/offset CLI fields. |
+| crates/core/src/control.rs | Update internal test channel construction to use `delay`. |
 | crates/core/src/lib.rs | Export new `dsl` module. |
-| crates/core/src/dsl/parser.rs | New recursive descent parser producing `TrackAst` from tokens. |
-| crates/core/src/dsl/lexer.rs | New single-pass lexer producing token stream + proptests. |
-| crates/core/src/dsl/eval.rs | New evaluator mapping AST to `TrackSpec` via `Grid` operations. |
-| crates/core/src/dsl/error.rs | New error types with span-aware display formatting. |
-| crates/core/src/dsl/display.rs | New precedence-aware Display impls for AST/modifiers. |
-| crates/core/src/dsl/ast.rs | New AST + `TrackSpec` definitions. |
-| crates/core/src/dsl.rs | New public entrypoint `dsl::parse` wiring lexer→parser→eval. |
-| crates/core/src/channel/transform.rs | Rename shift→delay in transform pipeline + constant `MAX_DELAY`. |
-| crates/core/src/channel/scheduler.rs | Rename shift→delay in scheduling window math and tests. |
+| crates/core/src/channel/dsl/parser.rs | New recursive descent parser producing `TrackAst` from tokens. |
+| crates/core/src/channel/dsl/lexer.rs | New single-pass lexer producing token stream + proptests. |
+| crates/core/src/channel/dsl/eval.rs | New evaluator mapping AST to `TrackSpec` via `Grid` operations. |
+| crates/core/src/channel/dsl/error.rs | New error types with span-aware display formatting. |
+| crates/core/src/channel/dsl/display.rs | New precedence-aware Display impls for AST/modifiers. |
+| crates/core/src/channel/dsl/ast.rs | New AST + `TrackSpec` definitions. |
+| crates/core/src/channel/dsl.rs | New public entrypoint `dsl::parse` wiring lexer→parser→eval. |
+| crates/core/src/channel/time.rs | Rename shift→delay in transform pipeline + constant `MAX_DELAY`. |
+| crates/core/src/control/event.rs | Rename shift→delay in scheduling window math and tests. |
 | crates/core/src/channel.rs | Re-export `MAX_DELAY` and update module docs. |
 | crates/cli/src/run.rs | Update CLI docs/examples and error text for `grid`/`delay` channel spec keys. |
 | crates/cli/src/main.rs | Rename CLI flags/args for grid + delay; remove shuffle/offset from `channel trace`. |

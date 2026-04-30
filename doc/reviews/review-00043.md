@@ -97,7 +97,7 @@ The old `ticks()` accessor no longer exists; it was renamed to `ticktime()`. The
 
 **`sample_tick_inner_saturates_on_overflow` no longer tests saturation (confidence: 82)**
 
-`crates/core/src/sync/sample_tick.rs` — the generator was updated from `(u32::MAX / 2)..=u32::MAX` to `u64::from(u32::MAX / 2)..=u64::from(u32::MAX)`. Before the widening, `u32::MAX` was both the type ceiling of `Tick.0` and the clamp target in `to_tick`, so this range tested the saturation boundary. After widening, `to_tick` clamps at `u64::MAX`, which is ~4.3 billion times larger than `u32::MAX`. The test now feeds values far below the new saturation point. The test doc comment says "rule" (referring to the `to_tick` saturation behavior), but it no longer exercises it. The saturation can only be reached when `u128` sample accumulation overflows `u64::MAX`, which requires the old `u32::MAX`-level tick values multiplied by a large sample rate — that region is entirely unsampled by the new generator. As written the test will pass vacuously: `to_tick` just returns the tick unchanged (no clamping happens) for all inputs in range, so the saturation branch is never taken.
+`crates/core/src/time/conn.rs` — the generator was updated from `(u32::MAX / 2)..=u32::MAX` to `u64::from(u32::MAX / 2)..=u64::from(u32::MAX)`. Before the widening, `u32::MAX` was both the type ceiling of `Tick.0` and the clamp target in `to_tick`, so this range tested the saturation boundary. After widening, `to_tick` clamps at `u64::MAX`, which is ~4.3 billion times larger than `u32::MAX`. The test now feeds values far below the new saturation point. The test doc comment says "rule" (referring to the `to_tick` saturation behavior), but it no longer exercises it. The saturation can only be reached when `u128` sample accumulation overflows `u64::MAX`, which requires the old `u32::MAX`-level tick values multiplied by a large sample rate — that region is entirely unsampled by the new generator. As written the test will pass vacuously: `to_tick` just returns the tick unchanged (no clamping happens) for all inputs in range, so the saturation branch is never taken.
 
 ---
 
@@ -153,7 +153,7 @@ The plan verification table says `arb_time_full_u32_domain` should assert `any::
 
 2. **Add `tbase_le_matches_old_ple` all-pairs test.** `crates/core/src/time/tbase.rs`. The plan's Verification table mandates it. An exhaustive nested loop over `TBase::ALL × TBase::ALL` asserting `(a <= b) == (a.exp() >= b.exp())` is 9×9 pairs and takes microseconds. The plan's Review section doesn't document why it was omitted, so it cannot be treated as a deliberate deferral.
 
-3. **Fix `sample_tick_inner_saturates_on_overflow` to test the actual saturation boundary.** `crates/core/src/sync/sample_tick.rs`. The generator `u64::from(u32::MAX / 2)..=u64::from(u32::MAX)` is ~2 billion below the new `u64::MAX` saturation point. Either: (a) rename the test to make clear it's testing normal arithmetic in the u32 legacy range and add a separate spot-check at the actual overflow boundary (a tick value where `tick.0 * pico_per_tick` in u128 would overflow u64), or (b) update the generator to sample near the new saturation point. The current test no longer exercises what its name says it exercises.
+3. **Fix `sample_tick_inner_saturates_on_overflow` to test the actual saturation boundary.** `crates/core/src/time/conn.rs`. The generator `u64::from(u32::MAX / 2)..=u64::from(u32::MAX)` is ~2 billion below the new `u64::MAX` saturation point. Either: (a) rename the test to make clear it's testing normal arithmetic in the u32 legacy range and add a separate spot-check at the actual overflow boundary (a tick value where `tick.0 * pico_per_tick` in u128 would overflow u64), or (b) update the generator to sample near the new saturation point. The current test no longer exercises what its name says it exercises.
 
 **Follow-up (future work):**
 
@@ -174,7 +174,7 @@ Doc comment still refers to the `ticks` Galois connection, but the Conn accessor
 <!-- gh-id: 3157909717 -->
 ### Copilot on [`crates/core/src/time/conn.rs:24`](https://github.com/cmk/agogo/pull/43#discussion_r3157909717) (2026-04-29 00:00 UTC)
 
-The module docs say "`Conn::new` isn't `const fn` upstream", but this repo already uses `Conn::new(...)` in `pub const` Conn definitions elsewhere (e.g. `crates/core/src/time/decimal.rs`). This comment looks stale/misleading—either update it to the current reality or explain the real reason these Conns are exposed via accessors instead of constants.
+The module docs say "`Conn::new` isn't `const fn` upstream", but this repo already uses `Conn::new(...)` in `pub const` Conn definitions elsewhere (e.g. `crates/core/src/conn/fixed.rs`). This comment looks stale/misleading—either update it to the current reality or explain the real reason these Conns are exposed via accessors instead of constants.
 
 
 <!-- gh-id: 3157909731 -->
@@ -216,7 +216,7 @@ Comment heading still says `// ── ticks ──` even though the connection a
 nit: These proptest names still use the `ple_*` prefix even though the `Ple` trait was removed and the tests now exercise `<=`/`Ord`. Renaming them (e.g. `le_reflexive`, `order_transitive`) would better match the post-T2 terminology.
 
 <!-- gh-id: 3157909823 -->
-### Copilot on [`crates/core/src/midi.rs:174`](https://github.com/cmk/agogo/pull/43#discussion_r3157909823) (2026-04-29 00:00 UTC)
+### Copilot on [`crates/core/src/conn/midi.rs:174`](https://github.com/cmk/agogo/pull/43#discussion_r3157909823) (2026-04-29 00:00 UTC)
 
 nit: This test name still refers to `ple`, but `Ple` was removed and the assertions now use `<=`/`>`. Renaming the test would keep terminology consistent.
 
@@ -250,12 +250,12 @@ Copilot reviewed 17 out of 17 changed files in this pull request and generated 1
 | crates/core/src/time/grid.rs | Removes `Ple`, implements divisibility via `PartialOrd`, and updates lattice-law tests. |
 | crates/core/src/time/envelope.rs | Widens ramp/smoothstep helpers to `u64` and uses `u128` intermediates. |
 | crates/core/src/time/conn.rs | Renames Conns, adapts to partial `from_ticks`, and updates adjoint-law tests to use `<=`. |
-| crates/core/src/sync/sample_tick.rs | Updates Tick saturation/clamps to `u64::MAX` and extends overflow boundary testing. |
+| crates/core/src/time/conn.rs | Updates Tick saturation/clamps to `u64::MAX` and extends overflow boundary testing. |
 | crates/core/src/preorder.rs | Deletes the local `Ple` trait module. |
-| crates/core/src/midi.rs | Removes `Ple` impls for `U7/U4` and switches tests to `<=`. |
+| crates/core/src/conn/midi.rs | Removes `Ple` impls for `U7/U4` and switches tests to `<=`. |
 | crates/core/src/lib.rs | Removes `pub mod preorder;` export. |
-| crates/core/src/channel/transform.rs | Updates tick/divisor arithmetic to `u64` and adjusts tests accordingly. |
-| crates/core/src/channel/scheduler.rs | Widens tick window math to `i128`/`u64` to avoid overflow after Tick widening. |
+| crates/core/src/channel/time.rs | Updates tick/divisor arithmetic to `u64` and adjusts tests accordingly. |
+| crates/core/src/control/event.rs | Widens tick window math to `i128`/`u64` to avoid overflow after Tick widening. |
 | crates/core/src/arb.rs | Updates `arb_tick`/`arb_time` strategies for widened Tick + full `u32` beats domain. |
 | crates/cli/src/time_sched.rs | Updates CLI scheduling math/tests for `Tick(u64)`. |
 | crates/cli/src/channel_trace.rs | Widens trace row tick field to `u64`. |

@@ -8,7 +8,7 @@ Bumps the `connections` git dependency from
 Plans 23, 25, and 26. The breaking-change surface from upstream is
 narrow for agogo: only the `connections::int::*` module-path
 removal hits, since Plan 25 merged `int/` into `fixed/`. Single
-import-path update in `crates/core/src/boundary.rs`:
+import-path update in `crates/core/src/conn/boundary.rs`:
 `connections::int::u32::I064U032` → `connections::fixed::u32::I064U032`.
 The `I064U032` Conn name itself is unchanged — only the path
 moved.

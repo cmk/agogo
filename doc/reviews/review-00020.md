@@ -111,12 +111,12 @@ Variable name collision with future grid names is inherent to the
    `offset_ticks` (currently rejected at `into_channel`).
 
 <!-- gh-id: 3142980195 -->
-### Copilot on [`crates/core/src/machine/spec.rs:233`](https://github.com/cmk/agogo/pull/20#discussion_r3142980195) (2026-04-26 04:29 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:233`](https://github.com/cmk/agogo/pull/20#discussion_r3142980195) (2026-04-26 04:29 UTC)
 
 `parse_channels` allows duplicate channel IDs. Because variable lookup scans `env` linearly and returns the first match, a later channel reusing an earlier ID will silently resolve to the older grid, which is very likely unintended. Consider detecting duplicate IDs here and returning a clear error (or define/implement "last one wins" by updating the existing entry).
 
 <!-- gh-id: 3142980198 -->
-### Copilot on [`crates/core/src/machine/spec.rs:230`](https://github.com/cmk/agogo/pull/20#discussion_r3142980198) (2026-04-26 04:29 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:230`](https://github.com/cmk/agogo/pull/20#discussion_r3142980198) (2026-04-26 04:29 UTC)
 
 `parse_channels` should likely reject IDs that are valid grid literals (e.g. `id=T16`). The DSL always interprets valid grid names as `Grid` atoms before considering variables, so such IDs can never be referenced and will lead to confusing "works when defined, can't be used" behavior.
 ```suggestion
@@ -140,14 +140,14 @@ Variable name collision with future grid names is inherent to the
 
 Error reporting lost per-entry context: `parse_channels(&args.ch).map_err(|e| format!("--ch: {e}"))?` no longer indicates which `--ch` spec failed. Consider including the channel index and/or the original spec text in the error so users can quickly locate the problematic entry.
 ```suggestion
-    let named = match agogo_core::machine::parse_channels(&args.ch) {
+    let named = match agogo_core::control::parse_channels(&args.ch) {
         Ok(named) => named,
         Err(e) => {
             if let Some((idx, spec, entry_err)) = args.ch
                 .iter()
                 .enumerate()
                 .find_map(|(idx, spec)| {
-                    agogo_core::machine::parse_channels(&args.ch[..=idx])
+                    agogo_core::control::parse_channels(&args.ch[..=idx])
                         .err()
                         .map(|entry_err| (idx, spec, entry_err))
                 })
@@ -171,12 +171,12 @@ Similarly, errors from `spec.into_channel()` are surfaced as `--ch: {e}` without
 ```
 
 <!-- gh-id: 3142980212 -->
-### Copilot on [`crates/core/src/machine/spec.rs:612`](https://github.com/cmk/agogo/pull/20#discussion_r3142980212) (2026-04-26 04:29 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:612`](https://github.com/cmk/agogo/pull/20#discussion_r3142980212) (2026-04-26 04:29 UTC)
 
 The proptest `out` generator (`[a-zA-Z0-9]{1,10}`) no longer produces values requiring quotes (spaces/commas/`=`), and the earlier spot tests for quoted `out` values were removed. This reduces coverage of the tokenizer + `quote_if_needed` round-trip for realistic MIDI port names; consider restoring a spot check or widening the `out` strategy to include separators/whitespace.
 
 <!-- gh-id: 3142980215 -->
-### Copilot on [`crates/core/src/dsl/error.rs:31`](https://github.com/cmk/agogo/pull/20#discussion_r3142980215) (2026-04-26 04:29 UTC)
+### Copilot on [`crates/core/src/channel/dsl/error.rs:31`](https://github.com/cmk/agogo/pull/20#discussion_r3142980215) (2026-04-26 04:29 UTC)
 
 `DslErrorKind::InvalidAtom` looks unreachable now: the parser no longer errors on invalid grid-like idents (it falls back to `Expr::Var`), so inputs like `T3` will surface as `UnknownVariable` instead. Consider either removing `InvalidAtom` (and updating docs/tests accordingly) or reintroducing a parse-time `InvalidAtom` path for grid-looking identifiers to keep error reporting clear.
 
@@ -203,15 +203,15 @@ Copilot reviewed 12 out of 12 changed files in this pull request and generated 7
 | ---- | ----------- |
 | doc/reviews/review-00020.md | Adds a local review record for Plan 17 / PR #20. |
 | doc/plans/plan-2026-04-25-02.md | Adds the implementation plan and verification matrix for Plan 17. |
-| crates/core/src/machine/spec.rs | Implements env-aware `ChannelSpec::parse`, adds swing/offset, and introduces `parse_channels`. |
-| crates/core/src/machine.rs | Re-exports `parse_channels` from the machine module. |
-| crates/core/src/dsl/ast.rs | Removes track/modifier types; adds `Expr::Var` for variables. |
-| crates/core/src/dsl/lexer.rs | Simplifies tokens to identifiers/operators; removes modifier/int lexing. |
-| crates/core/src/dsl/parser.rs | Parses identifiers into `Atom(Grid)` or `Var`, removes modifier parsing. |
-| crates/core/src/dsl/eval.rs | Evaluates `Expr` to `Grid` with env-based variable resolution. |
-| crates/core/src/dsl/display.rs | Updates `Display` to handle variables and expression-only printing. |
-| crates/core/src/dsl/error.rs | Removes modifier-related errors; adds unknown-variable error kind. |
-| crates/core/src/dsl.rs | Updates public `dsl::parse` API to return `Grid` and accept an env. |
+| crates/core/src/channel/spec.rs | Implements env-aware `ChannelSpec::parse`, adds swing/offset, and introduces `parse_channels`. |
+| crates/core/src/control.rs | Re-exports `parse_channels` from the machine module. |
+| crates/core/src/channel/dsl/ast.rs | Removes track/modifier types; adds `Expr::Var` for variables. |
+| crates/core/src/channel/dsl/lexer.rs | Simplifies tokens to identifiers/operators; removes modifier/int lexing. |
+| crates/core/src/channel/dsl/parser.rs | Parses identifiers into `Atom(Grid)` or `Var`, removes modifier parsing. |
+| crates/core/src/channel/dsl/eval.rs | Evaluates `Expr` to `Grid` with env-based variable resolution. |
+| crates/core/src/channel/dsl/display.rs | Updates `Display` to handle variables and expression-only printing. |
+| crates/core/src/channel/dsl/error.rs | Removes modifier-related errors; adds unknown-variable error kind. |
+| crates/core/src/channel/dsl.rs | Updates public `dsl::parse` API to return `Grid` and accept an env. |
 | crates/cli/src/run.rs | Wires `agogo run` through `parse_channels` and pre-parsed spec extraction. |
 </details>
 
@@ -268,11 +268,11 @@ Fixed — "five" → "six".
 
 `parse_channels(&args.ch)` failures are still surfaced as `--ch: {e}`, but `ChannelSpecError` doesn’t include which `--ch` entry (index/text/id) caused the failure. This makes it hard to locate malformed specs or unknown-variable errors when multiple channels are provided. Consider attaching per-entry context (index and/or original spec string, or the parsed/auto-assigned id when available) when returning/formatting the error.
 ```suggestion
-    let named = match agogo_core::machine::parse_channels(&args.ch) {
+    let named = match agogo_core::control::parse_channels(&args.ch) {
         Ok(named) => named,
         Err(e) => {
             let failing_entry = (0..args.ch.len()).find_map(|idx| {
-                agogo_core::machine::parse_channels(&args.ch[..=idx])
+                agogo_core::control::parse_channels(&args.ch[..=idx])
                     .err()
                     .map(|_| (idx, args.ch[idx].as_str()))
             });
@@ -297,7 +297,7 @@ Copilot reviewed 12 out of 12 changed files in this pull request and generated 4
 
 
 <!-- gh-id: 3142994597 -->
-### Copilot on [`crates/core/src/machine/spec.rs:10`](https://github.com/cmk/agogo/pull/20#discussion_r3142994597) (2026-04-26 04:46 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:10`](https://github.com/cmk/agogo/pull/20#discussion_r3142994597) (2026-04-26 04:46 UTC)
 
 The module docs list `offset` as a supported key, but `into_channel` currently rejects any non-zero `offset_ticks` (tempo-dependent Tick→Micro conversion not implemented). This is likely to surprise users who see `offset=` advertised and then get a runtime error. Consider documenting this limitation in the header comment (and/or in the `offset` key docs) until the conversion path is implemented.
 
@@ -307,7 +307,7 @@ The module docs list `offset` as a supported key, but `into_channel` currently r
 The CLI example includes `offset=20`, but the current implementation rejects any non-zero `offset` until tempo-dependent Tick→Micro conversion is implemented. Consider adding a note here (or adjusting the example) so the plan/record matches current behavior.
 
 <!-- gh-id: 3142994612 -->
-### Copilot on [`crates/core/src/dsl.rs:301`](https://github.com/cmk/agogo/pull/20#discussion_r3142994612) (2026-04-26 04:46 UTC)
+### Copilot on [`crates/core/src/channel/dsl.rs:301`](https://github.com/cmk/agogo/pull/20#discussion_r3142994612) (2026-04-26 04:46 UTC)
 
 In `display_parse_round_trip`, the `(Err(_), Err(_)) => {}` branch treats “both failed” as success. Since `arb_expr()` only generates valid operators/leaves and the test provides `x` in the env, eval/parse are expected to succeed; allowing both to error can mask regressions where `Display` emits invalid syntax or the parser becomes overly strict. Consider asserting both results are `Ok` (or at least asserting matching `DslErrorKind`/span) so the property reliably fails on regressions.
 ```suggestion

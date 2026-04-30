@@ -144,31 +144,31 @@ The plan lists the bottom four rows under "Properties (must pass)" — meaning t
 
 **Issue 1 — `click_counter_advances_across_buffer_boundaries` is a spot check, not a proptest.**
 
-`crates/core/src/out/midi.rs:591`
+`crates/core/src/sink/midi.rs:591`
 
 `click_counter_persists_across_calls` hardcodes `accent.every = 3`, split at index 3, total 7 events. The plan requires this to be a property test: arbitrary split point `m`, arbitrary suffix count `n`, arbitrary accent period. With fixed values it doesn't catch regressions where off-by-one in counter advancement only manifests at specific (m+n, n) combinations.
 
 **Issue 2 — `bars_filter_emits_every_nth_grid_event` is a spot check, not a proptest.**
 
-`crates/core/src/machine.rs:771`
+`crates/core/src/control.rs:771`
 
 `bars_filter_keeps_every_nth_event` tests only `Grid::T1`, `bars=3`, 9 buffers of 96,000 frames. The plan's Verification table says: "Strategy varies divider across `Grid::ALL` and mode across clock/click." Only one divider and one mode are tested. The filter mechanism is divider-agnostic so the same filter bug could manifest on a `Grid::T8Q` (192-tick period) and this test would miss it.
 
 **Issue 3 — `bars_counter_resets_on_transport_stop` and `click_counter_resets_on_transport_stop` are both spot checks, not proptests.**
 
-`crates/core/src/machine.rs:855`
+`crates/core/src/control.rs:855`
 
 `counters_reset_on_transport_stop` covers both with fixed parameters (4 buffers of 96,000 frames, `Grid::T1`, `bars=2`, `accent-every=4`). A proptest varying these parameters would be more robust.
 
 **Issue 4 — Generator domain for `accent_every` in `arb_mode` is bounded to `1..=64`.**
 
-`crates/core/src/machine/spec.rs:749`
+`crates/core/src/channel/spec.rs:749`
 
 CLAUDE.md: "Bounding the generator to keep intermediate arithmetic 'safe'... is an anti-pattern — it fakes coverage by hiding the exact region where wrap / saturation bugs live. If you genuinely must bound the domain, document *why* immediately above the strategy." There is no comment explaining why `accent_every` is bounded at 64 rather than `u32::MAX`. The code (`counter % a.every.get()`) is well-defined for any `NonZeroU32`, so there is no arithmetic reason to restrict the domain. Same applies to `arb_bars` using `1..=1000` rather than `1..=u16::MAX`.
 
 **Issue 5 — `arb_spec` generator bounds `shift_ms` to `0..=300` without comment.**
 
-`crates/core/src/machine/spec.rs:781`
+`crates/core/src/channel/spec.rs:781`
 
 The `shift_ms` field of `ChannelSpec` can be any `f64` (including negative), but the strategy generates only `0..=300`. A negative `shift_ms` is a valid spec that round-trips through `Display`/`parse` cleanly — `into_channel` clamps it, but the round-trip test doesn't call `into_channel`. CLAUDE.md requires a comment documenting why the domain is bounded if it must be.
 
@@ -222,8 +222,8 @@ All three Must-fix items above were addressed before push and survived the subse
 Follow-up #4 (shift_ms — now `delay_ms` after rebase) was also addressed as a bonus: `arb_spec.delay_ms` widened with a comment. Follow-up #5 (typed Click/non-Click contract) remains a v0.2 debt item, captured in the plan's Review section.
 
 <!-- gh-id: 3143031925 -->
-### Copilot on [`crates/core/src/machine/spec.rs:10`](https://github.com/cmk/agogo/pull/21#discussion_r3143031925) (2026-04-26 05:29 UTC)
-### Copilot on [`crates/core/src/machine/spec.rs:10`](https://github.com/cmk/agogo/pull/21#discussion_r3143031925) (2026-04-26 05:29 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:10`](https://github.com/cmk/agogo/pull/21#discussion_r3143031925) (2026-04-26 05:29 UTC)
+### Copilot on [`crates/core/src/channel/spec.rs:10`](https://github.com/cmk/agogo/pull/21#discussion_r3143031925) (2026-04-26 05:29 UTC)
 
 Module docs describe `bars` as a “T1-multiplier on the divider”, but the implemented semantics (and the plan) are divider-agnostic “emit every Nth scheduled tick_stream event”. This wording is contradictory and can mislead readers into thinking `bars` is tied to `div=t1`.
 
@@ -261,11 +261,11 @@ Copilot reviewed 12 out of 13 changed files in this pull request and generated 3
 | crates/host-link/src/session.rs | Updates test helper channel construction for new field. |
 | crates/host-cpal/src/cpal/callback.rs | Updates test fixtures to include `bar_multiplier: None`. |
 | crates/core/src/channel/mode.rs | Introduces `ClickConfig` / `MidiClickConfig` / `MidiClickAccent` and `ChannelMode::Click`. |
-| crates/core/src/channel/transform.rs | Adds `Channel.bar_multiplier: Option<NonZeroU16>` to runtime `Channel`. |
-| crates/core/src/channel/scheduler.rs | Updates scheduler test fixtures for `bar_multiplier`. |
-| crates/core/src/out/midi.rs | Adds MIDI Note On/Off constants, click rendering, and dispatch via `render_channel_block`. |
-| crates/core/src/machine/spec.rs | Extends spec grammar/parser/Display + proptests and spot checks for `mode=click` and `bars`. |
-| crates/core/src/machine.rs | Adds per-channel counters, bars filtering, and click-counter threading/reset logic + tests. |
+| crates/core/src/channel/time.rs | Adds `Channel.bar_multiplier: Option<NonZeroU16>` to runtime `Channel`. |
+| crates/core/src/control/event.rs | Updates scheduler test fixtures for `bar_multiplier`. |
+| crates/core/src/sink/midi.rs | Adds MIDI Note On/Off constants, click rendering, and dispatch via `render_channel_block`. |
+| crates/core/src/channel/spec.rs | Extends spec grammar/parser/Display + proptests and spot checks for `mode=click` and `bars`. |
+| crates/core/src/control.rs | Adds per-channel counters, bars filtering, and click-counter threading/reset logic + tests. |
 | crates/cli/src/run.rs | Adds CLI smoke tests to accept `mode=click` and `bars` on non-T1 dividers. |
 | crates/cli/src/main.rs | Updates midi_trace call site for new `render_channel_block` signature; updates fixtures for `bar_multiplier`. |
 </details>
@@ -276,7 +276,7 @@ Copilot reviewed 12 out of 13 changed files in this pull request and generated 3
 
 
 <!-- gh-id: 3143031929 -->
-### Copilot on [`crates/core/src/machine.rs:1005`](https://github.com/cmk/agogo/pull/21#discussion_r3143031929) (2026-04-26 05:29 UTC)
+### Copilot on [`crates/core/src/control.rs:1005`](https://github.com/cmk/agogo/pull/21#discussion_r3143031929) (2026-04-26 05:29 UTC)
 
 The `const _: u8 = MIDI_NOTE_OFF;` line looks like it’s only here to silence an unused import. This makes the test module noisier than necessary.
 
@@ -299,7 +299,7 @@ Prefer removing the unused `MIDI_NOTE_OFF` import (and this dummy const), or use
 ```
 
 <!-- gh-id: 3143031933 -->
-### Copilot on [`crates/core/src/machine.rs:70`](https://github.com/cmk/agogo/pull/21#discussion_r3143031933) (2026-04-26 05:29 UTC)
+### Copilot on [`crates/core/src/control.rs:70`](https://github.com/cmk/agogo/pull/21#discussion_r3143031933) (2026-04-26 05:29 UTC)
 
 `bar_counters` / `click_counters` are indexed in lock-step with `self.channels`, but `Machine.channels` is a public `Vec`. If any caller mutates `machine.channels` after construction (push/remove/reorder), `on_buffer` can panic due to out-of-bounds indexing or silently associate counters with the wrong channel.
 
@@ -321,7 +321,7 @@ Fixed — replaced the dummy const with a real Note Off assertion in `bars_and_a
 Fixed — `channels` is now `pub(crate)` so external mutation can't desync the parallel `bar_counters`/`click_counters` vecs. Confirmed no external `machine.channels` access exists today; the field's doc comment now spells out the lockstep invariant.
 
 <!-- gh-id: 3143077286 -->
-### Copilot on [`crates/core/src/machine.rs:965`](https://github.com/cmk/agogo/pull/21#discussion_r3143077286) (2026-04-26 06:17 UTC)
+### Copilot on [`crates/core/src/control.rs:965`](https://github.com/cmk/agogo/pull/21#discussion_r3143077286) (2026-04-26 06:17 UTC)
 
 This doc comment uses `div=t1`, but the spec key used by `ChannelSpec` in this PR is `grid=`. Updating the example to `grid=t1` would avoid confusing readers (especially since nearby docs/tests use `grid=` consistently).
 ```suggestion

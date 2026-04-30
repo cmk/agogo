@@ -460,11 +460,11 @@ Copilot reviewed 23 out of 24 changed files in this pull request and generated 4
 | crates/core/src/time/exact_rates.rs | New integer-exactness proptests for `SampleTickConn` at 48k/96k with 960 PPQN. |
 | crates/core/src/time/conn.rs | Migrates connections to `Grid` (incl. `quantize_at(Grid)` and lattice `grid()` conn); updates tests. |
 | crates/core/src/time.rs | Exposes new `grid` module and wires in exact-rate tests. |
-| crates/core/src/out/midi.rs | Updates MIDI output tests for new divider/swing types and 960 PPQN. |
-| crates/core/src/machine/spec.rs | Updates channel mini-language (`div`→`Grid`, `swing-res`, `swing` as i8) + tests. |
-| crates/core/src/machine.rs | Updates machine tests for `Grid` divider and new `SwingConfig`. |
-| crates/core/src/channel/transform.rs | Migrates divider to `Grid`, swing changes, and updates/extends tests. |
-| crates/core/src/channel/scheduler.rs | Updates scheduler swing-window logic for new sign convention and `Grid` divider + tests. |
+| crates/core/src/sink/midi.rs | Updates MIDI output tests for new divider/swing types and 960 PPQN. |
+| crates/core/src/channel/spec.rs | Updates channel mini-language (`div`→`Grid`, `swing-res`, `swing` as i8) + tests. |
+| crates/core/src/control.rs | Updates machine tests for `Grid` divider and new `SwingConfig`. |
+| crates/core/src/channel/time.rs | Migrates divider to `Grid`, swing changes, and updates/extends tests. |
+| crates/core/src/control/event.rs | Updates scheduler swing-window logic for new sign convention and `Grid` divider + tests. |
 | crates/core/src/arb.rs | Adds `arb_grid`, updates `arb_tbase`/`arb_time`/`arb_tick`/`arb_swing` for the new model. |
 | crates/core/proptest-regressions/time/tick.txt | Adds regression seeds for updated tick canonicalisation tests. |
 | crates/core/proptest-regressions/time/swing.txt | Adds regression seeds for swing properties. |

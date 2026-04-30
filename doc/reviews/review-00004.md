@@ -295,12 +295,12 @@ open documentation gap.
 ```
 
 <!-- gh-id: 3129881871 -->
-### Copilot on [`crates/core/src/channel/transform.rs:213`](https://github.com/cmk/agogo/pull/4#discussion_r3129881871) (2026-04-23 09:50 UTC)
+### Copilot on [`crates/core/src/channel/time.rs:213`](https://github.com/cmk/agogo/pull/4#discussion_r3129881871) (2026-04-23 09:50 UTC)
 
 The `tick_monotonicity` test description says it checks that the per-channel “tick stream is non-decreasing”, but the assertion is on `ScheduledEvent.sample_index` (post Tick→Sample + shift/offset), not on the tick values. Please either assert monotonicity of `e.tick` (or both), or rename/reword the property so it matches what is actually being verified.
 
 <!-- gh-id: 3129881894 -->
-### Copilot on [`crates/core/src/channel/scheduler.rs:50`](https://github.com/cmk/agogo/pull/4#discussion_r3129881894) (2026-04-23 09:50 UTC)
+### Copilot on [`crates/core/src/control/event.rs:50`](https://github.com/cmk/agogo/pull/4#discussion_r3129881894) (2026-04-23 09:50 UTC)
 
 `buffer_start_sample as i64` will wrap for values > `i64::MAX`, which can make the scheduler compute incorrect bounds (and potentially return spurious/missing events) for very long-running streams. If feasible, avoid the lossy cast by doing the math with `i128`/`u128` or by using checked/saturating unsigned arithmetic when applying `delta`.
 ```suggestion
@@ -359,10 +359,10 @@ Copilot reviewed 13 out of 13 changed files in this pull request and generated 9
 | doc/plans/plan-2026-04-23-01.md | Adds Plan 03 spec + review/deviation notes. |
 | doc/plans/plan-2026-04-22-02.md | Adds a footnote clarifying the `pll_phase_converges` measurement deviation. |
 | crates/core/src/time/conn.rs | Adds `SampleTickConn` implementation + unit/proptests. |
-| crates/core/src/sync/pll.rs | Wraps `PllOutput.phase` to 0.0 when f32 rounding yields 1.0; fixes a test-comment typo. |
+| crates/core/src/control/sync/pll.rs | Wraps `PllOutput.phase` to 0.0 when f32 rounding yields 1.0; fixes a test-comment typo. |
 | crates/core/src/lib.rs | Exposes the new `channel` module. |
-| crates/core/src/channel/transform.rs | Adds `Channel`/`ScheduledEvent` and the pure transform pipeline + tests. |
-| crates/core/src/channel/scheduler.rs | Adds per-buffer `tick_stream` scheduler + tests. |
+| crates/core/src/channel/time.rs | Adds `Channel`/`ScheduledEvent` and the pure transform pipeline + tests. |
+| crates/core/src/control/event.rs | Adds per-buffer `tick_stream` scheduler + tests. |
 | crates/core/src/channel/mode.rs | Adds `ChannelMode` enum covering v0.1 spec surface (stubs except `MidiClock`). |
 | crates/core/src/channel.rs | Adds the top-level `channel` module façade and re-exports. |
 | crates/core/proptest-regressions/sync/pll.txt | Checks in a proptest regression seed for the PLL phase edge case. |

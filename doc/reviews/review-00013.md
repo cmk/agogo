@@ -93,8 +93,8 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 3 c
 | doc/reviews/review-00013.md | Adds PR review record describing the refactor and test plan. |
 | crates/core/src/time/conn.rs | Removes `PicoSampleConn` + large test suite; adds smaller agreement/guard tests using `pico_to_samples`. |
 | crates/core/src/fxp.rs | Re-exports `F12Sxx` and adds `pico_to_samples` runtime dispatch helper. |
-| crates/core/src/channel/transform.rs | Updates `micro_to_samples` to use `pico_to_samples` and documents the new behavior. |
-| crates/core/src/channel/scheduler.rs | Updates comments to reflect the new conversion path via `pico_to_samples`. |
+| crates/core/src/channel/time.rs | Updates `micro_to_samples` to use `pico_to_samples` and documents the new behavior. |
+| crates/core/src/control/event.rs | Updates comments to reflect the new conversion path via `pico_to_samples`. |
 </details>
 
 
@@ -103,7 +103,7 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 3 c
 
 
 <!-- gh-id: 3136768107 -->
-### Copilot on [`crates/core/src/channel/transform.rs:66`](https://github.com/cmk/agogo/pull/13#discussion_r3136768107) (2026-04-24 09:31 UTC)
+### Copilot on [`crates/core/src/channel/time.rs:66`](https://github.com/cmk/agogo/pull/13#discussion_r3136768107) (2026-04-24 09:31 UTC)
 
 `micro_to_samples` claims the unsupported-`sr` panic is unreachable because `SampleTickConn::new` rejects unsupported rates, but `SampleTickConn::new` only asserts `sr > 0` (it doesn't enforce the 6-rate allowlist). As a result, this panic is reachable from e.g. CLI `--sr` inputs and represents a user-visible behavior change vs the old `PicoSampleConn` path (which worked for any positive `sr`). Consider either validating `sr` against the allowlist at the boundary / in `SampleTickConn::new`, or making `micro_to_samples` return `Option/Result` and propagating an error instead of panicking; update the doc comment accordingly.
 
