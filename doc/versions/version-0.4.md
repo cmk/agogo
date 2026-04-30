@@ -18,18 +18,20 @@ surface" work and share the same cpal-output scaffolding.
 ## Upstream dependency
 
 stdio-core 0.2's `ObservationDispatcher`
-(stdio-core/src/observation/dispatcher.rs:36–124) and wire format
-(stdio-core/src/observation/wire.rs:20–104) must be in place. The
-stdio-core-side TUI renderer (which v0.1's stdio-core docs
-incorrectly attributed to the sibling `stdio` binary) consumes
-agogo's snapshot stream.
+(stdio-core/src/observation/dispatcher.rs:36–124), wire format
+(stdio-core/src/observation/wire.rs:20–104), and Plan 11 agogo
+snapshot contract must be in place. The contract fixes
+`FormType::Other("agogo-state")`, `stream_id = "agogo.main"`,
+`form_id = "agogo.main"`, monotonic `seq`, and full-snapshot `Patch`
+payloads for v1. The stdio-core-side TUI renderer consumes agogo's
+snapshot stream.
 
 ## Sprint slots
 
 | # | Slug | Status | Scope |
 |---|------|--------|-------|
-| 01 | `plan-2026-04-2N-01` (TBD) | next | `AgogoSnapshot` type and JSON schema: serde shape covering BPM, transport state, PLL lock indicator, per-channel phase/active state. Decimation cadence (~30 Hz). Stable `form_type` — `Meter` or `Other("agogo-state")` — coordinated with the stdio-core-side renderer. Schema doc lands in `doc/designs/snapshot.md`. |
-| 02 | `plan-2026-04-2N-02` (TBD) | next-next | Push path from RT: audio thread writes a compact snapshot via `triple_buffer` or wait-free atomics; background task reads at the decimation rate and calls `ObservationDispatcher::dispatch`. Monotonic `seq` counter so the consumer can detect drops; drop policy documented (newest-drop at the stdio-core boundary is survivable for telemetry). |
+| 01 | `plan-2026-04-30-02` | next | `AgogoSnapshot` type, JSON schema, and stdio-core publisher: serde shape covering BPM, transport state, PLL lock indicator, audio load, and per-channel phase/active state. Decimation cadence targets ~30 Hz. Stable observation identifiers are `Other("agogo-state")`, `agogo.main`, and full-snapshot `Patch` v1. Schema doc lands in `doc/designs/snapshot.md`. |
+| 02 | `plan-2026-04-2N-02` (TBD) | next-next | Push path hardening from RT: audio thread writes a compact snapshot via `triple_buffer` or wait-free atomics; background task reads at the decimation rate and calls `ObservationDispatcher::dispatch`. Monotonic `seq` lets consumers detect gaps; stdio-core newest-drop policy is acceptable for telemetry only. |
 | 03 | `plan-2026-04-2N-03` (TBD) | last | CV pulse output: `out/audio` module + cpal output host; single-sample impulse per tick; 4-channel interleaving; bipolar ±1.0 option to avoid DC offset on AC-coupled interfaces. Covers the v0.1 deferred "§4 precision crown jewel." |
 
 ## Properties (must pass)
@@ -39,6 +41,7 @@ agogo's snapshot stream.
 | `snapshot_schema_round_trips` | `agogo_stdio::snapshot` | `AgogoSnapshot` serde → `serde_json::Value` → `AgogoSnapshot` is identity for arbitrary generated snapshots. |
 | `seq_monotonic_under_decimation` | `agogo_stdio::snapshot::push` | The `seq` field on published `ObservationParams` is strictly monotonic per-`stream_id`, even when the RT writer and the decimating reader run at different rates. |
 | `rt_push_has_no_alloc` | `agogo_stdio::snapshot::push` | Writing a snapshot from the audio thread does not allocate. The serialization and `dispatch()` call happen on the decimating task, not in the RT callback. |
+| `agogo_snapshot_drop_is_detectable` | `agogo_stdio::snapshot::push` | Forced observation backpressure produces a detectable `seq` gap, not corrupted or unparsable snapshot state. |
 | `cv_impulse_is_sample_accurate` | `out::audio::cv` | For any `(sr, ppqn, bpm)` with an integer samples-per-tick (the v0.2 sweet-spot band), the emitted CV impulse lands on the exact tick-boundary sample index with zero offset. |
 | `cv_impulse_energy_is_one_sample` | `out::audio::cv` | Each emitted CV pulse is exactly one non-zero sample (`±1.0`) followed by zero; no multi-sample ringing or DC creep. |
 
@@ -71,6 +74,10 @@ agogo's snapshot stream.
   shape, `FormType` enum.
 - `../stdio-core/src/observation/dispatcher.rs:36–124` — push
   protocol; 128-slot channel; drop-newest-on-full policy.
+- `../stdio-core/doc/designs/agogo.md` — `agogo-state` form contract
+  and audio-rate event boundary.
+- `../stdio-core/doc/plans/plan-2026-04-30-02.md` — stdio-core Plan
+  11 agogo snapshot observation contract.
 - `doc/agogo.md` §4 — precision budget; CV out is the "crown jewel"
   path whose acceptance is sample-accurate impulse alignment.
 - `doc/versions/version-0.1.md` — CV pulse output entry in the
