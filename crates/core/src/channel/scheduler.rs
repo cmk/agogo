@@ -13,8 +13,8 @@
 
 use crate::channel::role::ChannelCommon;
 use crate::channel::transform::{MAX_DELAY, ScheduledEvent, micro_to_samples};
+use crate::conn::fixed::Micro;
 use crate::sync::sample_tick::SampleTickConn;
-use crate::time::decimal::Micro;
 use crate::time::swing;
 use crate::time::tick::Tick;
 
@@ -160,7 +160,7 @@ mod tests {
     fn stc_120_48k() -> SampleTickConn {
         SampleTickConn::new(
             48_000,
-            crate::time::tempo::Tempo::from_bpm_integer(120),
+            crate::conn::tempo::Tempo::from_bpm_integer(120),
             960,
         )
     }

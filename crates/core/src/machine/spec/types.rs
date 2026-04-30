@@ -7,7 +7,7 @@
 use core::num::NonZeroU16;
 
 use crate::channel::role::MidiRole;
-use crate::time::decimal::Micro;
+use crate::conn::fixed::Micro;
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
 

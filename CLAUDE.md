@@ -181,7 +181,11 @@ code based on it.
   and `cli/src/link_probe.rs` when those inline modules were
   extracted from `cli/src/main.rs`'s 1722-line kitchen sink; each
   inherits its predecessor's allowlist eligibility (same exception
-  classes, same boundaries, just split into sibling modules). The
+  classes, same boundaries, just split into sibling modules). Plan
+  2026-04-29-01 T2 collapsed the conn-shaped value types into one
+  parent: `boundary.rs` → `conn/boundary.rs`,
+  `time/float.rs` → `conn/float.rs`, `time/sample.rs` →
+  `conn/sample.rs` — same allowlist eligibility, new path. The
   current allowlist is the 20 entries in
   `scripts/check-floats.sh::ALLOWED` (Plan 2026-04-28-06 T3 swapped
   `machine/spec.rs` for `machine/spec/parser.rs` when the kitchen
@@ -199,11 +203,11 @@ code based on it.
 - **Every numerical conversion comes from a named `Conn` (or a
   Conn-lookalike with proptested adjoint laws).** Bespoke `fn
   f64_some_thing_to_other(x: f64) -> Other` helpers (now living in
-  `crate::boundary` after Plan 2026-04-28-03 T5 deleted `fxp.rs`)
-  are only allowed for types that can't be expressed as a lawful
-  `Conn` (e.g. `Phase` is a wrapping quotient onto a torus, not a
-  monotone map — the bespoke `f64_phase_to_phase` is the one
-  legitimate exception). Naming follows the conventions in the
+  `crate::conn::boundary` after Plan 2026-04-28-03 T5 deleted `fxp.rs`
+  and Plan 2026-04-29-01 T2 moved boundary under `conn/`) are only
+  allowed for types that can't be expressed as a lawful `Conn` (e.g.
+  `Phase` is a wrapping quotient onto a torus, not a monotone map —
+  the bespoke `f64_phase_to_phase` is the one legitimate exception). Naming follows the conventions in the
   upstream library:
   - The total identifier is **exactly 8 ASCII chars**. Names shorter
     than 8 chars (e.g. the legacy `S88S44`) are not permitted.

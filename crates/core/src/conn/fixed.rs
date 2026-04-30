@@ -144,7 +144,7 @@ fix_fix!(FD12FD03, FD12, FD03, 1_000_000_000);
 fix_fix!(FD12FD06, FD12, FD06, 1_000_000);
 
 // `ExtendedFloat<f64>` ↔ `Extended<FDxx>` Conns (`F064FDxx`) live in
-// `crate::time::float` (Plan 2026-04-28-03 T1). Qualitatively different
+// `crate::conn::float` (Plan 2026-04-28-03 T1). Qualitatively different
 // shape (correction loops, NaN/saturation handling) from the
 // integer-tier `fix_fix!` Conns above.
 
@@ -304,7 +304,7 @@ mod tests {
     }
 
     // ── ExtendedFloat<f??> → Extended<Rung> tests live in
-    // `crate::time::float::tests` (Plan 2026-04-28-03 T1).
+    // `crate::conn::float::tests` (Plan 2026-04-28-03 T1).
 }
 
 #[cfg(any(test, feature = "testkit"))]

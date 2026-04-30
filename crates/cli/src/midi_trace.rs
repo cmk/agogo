@@ -8,13 +8,13 @@
 //! Plan 2026-04-28-05 T6: extracted from `cli/main.rs`.
 
 use agogo_core::channel::{ChannelCommon, MidiRole, scheduler::tick_stream};
+use agogo_core::conn::fixed::Micro;
+use agogo_core::conn::tempo::Tempo;
 use agogo_core::out::midi::{MidiRtByte, TestSink, render_midi_channel};
 use agogo_core::sync::sample_tick::SampleTickConn;
-use agogo_core::time::decimal::Micro;
 use agogo_core::time::grid::Grid;
 use agogo_core::time::swing::SwingConfig;
 use agogo_core::time::tbase::TBase;
-use agogo_core::time::tempo::Tempo;
 use agogo_core::time::tick::PPQN;
 
 #[derive(Debug, Clone)]
@@ -122,7 +122,7 @@ mod tests {
 
     fn base_args() -> TraceArgs {
         TraceArgs {
-            bpm: agogo_core::time::tempo::Tempo::from_bpm_integer(120),
+            bpm: agogo_core::conn::tempo::Tempo::from_bpm_integer(120),
             sr: 48_000,
             grid: "t4".to_string(),
             frames: 24_000,

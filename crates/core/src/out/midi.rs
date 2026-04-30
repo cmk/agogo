@@ -426,12 +426,12 @@ mod tests {
     // ── render_midi_channel ───────────────────────────────────────
 
     use crate::channel::{Channel, scheduler::tick_stream};
+    use crate::conn::fixed::Micro;
+    use crate::conn::tempo::Tempo;
     use crate::sync::sample_tick::SampleTickConn;
-    use crate::time::decimal::Micro;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
-    use crate::time::tempo::Tempo;
 
     fn stc_120_48k() -> SampleTickConn {
         SampleTickConn::new(48_000, Tempo::from_bpm_integer(120), 960)
@@ -484,8 +484,8 @@ mod tests {
     fn cc_role_is_noop_until_v02() {
         let common = midi_common(Grid::T4);
         let role = MidiRole::Cc(crate::channel::MidiCcConfig {
-            cc: crate::midi::U7(74),
-            range: (crate::midi::U7(0), crate::midi::U7(127)),
+            cc: crate::conn::midi::U7(74),
+            range: (crate::conn::midi::U7(0), crate::conn::midi::U7(127)),
         });
         let evs = [ev(0), ev(24_000)];
         let sink = TestSink::new();
@@ -540,7 +540,7 @@ mod tests {
     // ── render_midi_click_block ───────────────────────────────────
 
     use crate::channel::role::{MidiClickAccent, MidiClickConfig};
-    use crate::midi::{U4, U7};
+    use crate::conn::midi::{U4, U7};
     use core::num::NonZeroU32;
 
     fn click_cfg(note: u8, vel: u8, ch: u8, accent: Option<MidiClickAccent>) -> MidiClickConfig {

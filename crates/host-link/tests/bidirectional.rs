@@ -16,8 +16,8 @@
 
 #![cfg(feature = "rusty-link")]
 
+use agogo_core::conn::tempo::Tempo;
 use agogo_core::test::fixture_or_skip;
-use agogo_core::time::tempo::Tempo;
 use agogo_host_link::{HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum, TransportState};
 use rusty_link::{AblLink, SessionState};
 use std::num::NonZeroU32;
@@ -193,7 +193,7 @@ fn quantum_snap_produces_positive_offset() {
     // which lands with Plan 05.
     link_multicast_or_skip!();
     use agogo_core::channel::{Channel, ChannelCommon, MAX_DELAY, MidiRole};
-    use agogo_core::time::decimal::Micro;
+    use agogo_core::conn::fixed::Micro;
     use agogo_core::time::grid::Grid;
     use agogo_core::time::swing::SwingConfig;
     use agogo_core::time::tbase::TBase;

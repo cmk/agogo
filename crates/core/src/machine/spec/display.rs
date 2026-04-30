@@ -9,7 +9,7 @@
 use std::fmt::{self, Display};
 
 use crate::channel::role::MidiRole;
-use crate::time::decimal::Micro;
+use crate::conn::fixed::Micro;
 use crate::time::tbase::TBase;
 
 use super::ChannelSpec;
@@ -109,7 +109,7 @@ fn quote_if_needed(v: &str) -> String {
 mod tests {
     use super::*;
     use crate::channel::role::{MidiClickAccent, MidiClickConfig};
-    use crate::midi::{U4, U7};
+    use crate::conn::midi::{U4, U7};
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use core::num::{NonZeroU16, NonZeroU32};

@@ -10,15 +10,15 @@
 //! Plan 2026-04-28-05 T7: extracted from `cli/main.rs`.
 
 use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
+use agogo_core::conn::fixed::Micro;
+use agogo_core::conn::sample::{S048, SampleRate};
+use agogo_core::conn::tempo::Tempo;
 use agogo_core::host::{AudioHost, Config};
 use agogo_core::machine::{Machine, TransportPolicy};
 use agogo_core::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-use agogo_core::time::decimal::Micro;
 use agogo_core::time::grid::Grid;
-use agogo_core::time::sample::{S048, SampleRate};
 use agogo_core::time::swing::SwingConfig;
 use agogo_core::time::tbase::TBase;
-use agogo_core::time::tempo::Tempo;
 use agogo_core::time::tick::PPQN;
 use agogo_host_cpal::CpalHost;
 use agogo_host_cpal::cpal::callback::CallbackState;
@@ -183,7 +183,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         "agogo demo: running for {} ms, --bpm {:.2} --sr {} --grid {} \
          --source {} --audio-in {} --midi-out {}",
         args.duration_ms,
-        agogo_core::boundary::tempo_to_f64_bpm(args.bpm),
+        agogo_core::conn::boundary::tempo_to_f64_bpm(args.bpm),
         args.sr,
         args.grid,
         args.source,

@@ -16,10 +16,10 @@ pub struct ProbeRow {
     /// monotonically-increasing timestamps end-to-end.
     pub t_ms: u64,
     pub peers: u64,
-    pub tempo: agogo_core::time::tempo::Tempo,
+    pub tempo: agogo_core::conn::tempo::Tempo,
     /// Beat-phase in `[0, 1)` at sample `t_ms × sr / 1000`,
     /// mapped through the anchor captured at probe start.
-    pub phase: agogo_core::sync::phase::Phase,
+    pub phase: agogo_core::conn::phase::Phase,
 }
 
 /// Run a probe loop for `duration_ms`, sampling every `period_ms`.
@@ -33,7 +33,7 @@ pub struct ProbeRow {
 /// turn the `sleep(Duration::ZERO)` inside the loop into a no-op
 /// and starve the row consumer if it can't keep up.
 pub fn probe<F: FnMut(ProbeRow)>(
-    initial_tempo: agogo_core::time::tempo::Tempo,
+    initial_tempo: agogo_core::conn::tempo::Tempo,
     sr: u32,
     duration_ms: u32,
     period_ms: u32,
@@ -80,7 +80,7 @@ pub fn probe<F: FnMut(ProbeRow)>(
             t_ms,
             peers: clock.num_peers(),
             tempo: clock.tempo(),
-            phase: agogo_core::sync::phase::Phase(phase_u32),
+            phase: agogo_core::conn::phase::Phase(phase_u32),
         });
         sleep(period);
     }
@@ -104,7 +104,7 @@ mod tests {
     fn probe_emits_rows_and_keeps_initial_tempo() {
         let mut rows = Vec::new();
         probe(
-            agogo_core::time::tempo::Tempo::from_bpm_integer(125),
+            agogo_core::conn::tempo::Tempo::from_bpm_integer(125),
             48_000,
             100,
             50,
@@ -116,7 +116,7 @@ mod tests {
         // Tempo is integer µBPM: 125 BPM → 125_000_000.
         assert_eq!(
             first.tempo,
-            agogo_core::time::tempo::Tempo(125_000_000),
+            agogo_core::conn::tempo::Tempo(125_000_000),
             "tempo {:?} differs from initial Tempo(125_000_000)",
             first.tempo
         );

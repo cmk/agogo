@@ -23,14 +23,10 @@
 //! it lives under `sync`, not `time`).
 
 pub mod conn;
-pub mod decimal;
 pub mod envelope;
-pub mod float;
 pub mod grid;
-pub mod sample;
 pub mod swing;
 pub mod tbase;
-pub mod tempo;
 pub mod tick;
 
 #[cfg(test)]

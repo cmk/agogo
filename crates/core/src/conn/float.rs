@@ -2,7 +2,7 @@
 //!
 //! Seven `Conn` constants — `F064FD00 / F064FD01 / F064FD02 / F064FD03 /
 //! F064FD06 / F064FD09 / F064FD12` — bridging the f64 boundary into the
-//! agogo decimal fixed-point ladder defined in [`crate::time::decimal`].
+//! agogo decimal fixed-point ladder defined in [`crate::conn::fixed`].
 //!
 //! Split out of `time/decimal.rs` (Plan 2026-04-28-03 T1): integer-tier
 //! `FDxxFDyy` Conns and the f64-boundary `F064FDxx` Conns are
@@ -13,11 +13,11 @@ use connections::conn::Conn;
 
 // Re-export the float-boundary primitive types so downstream crates
 // that don't depend on `connections` directly (cli, host-link) can
-// reach them through `agogo_core::time::float::{Extended, ExtendedFloat}`.
+// reach them through `agogo_core::conn::float::{Extended, ExtendedFloat}`.
 pub use connections::extended::Extended;
 pub use connections::float::ExtendedFloat;
 
-use super::decimal::{FD00, FD01, FD02, FD03, FD06, FD09, FD12};
+use super::fixed::{FD00, FD01, FD02, FD03, FD06, FD09, FD12};
 
 // ExtendedFloat<f??> → Extended<Rung>. Lawful under `PartialOrd` on both
 // sides.

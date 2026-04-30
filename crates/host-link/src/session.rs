@@ -5,10 +5,10 @@
 //! (T2) + quantum snap (T3) are in place.
 
 use agogo_core::channel::Channel;
+use agogo_core::conn::fixed::Micro;
+use agogo_core::conn::phase::Phase;
+use agogo_core::conn::tempo::Tempo;
 use agogo_core::machine::ChannelSpec;
-use agogo_core::sync::phase::Phase;
-use agogo_core::time::decimal::Micro;
-use agogo_core::time::tempo::Tempo;
 // Required for `LinkClock::phase_at_sample` (trait-provided method
 // called by the `phase_at_sample` shim below). Copilot flagged this
 // as unused on PR #16 round 1 — false positive: removing it breaks

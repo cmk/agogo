@@ -16,10 +16,10 @@
 //! 5. **Offset** — same composition chain for the signed calibration
 //!    offset.
 
-use crate::boundary::pico_to_samples;
 use crate::channel::role::{ChannelCommon, CvRole, DinRole, MidiRole};
+use crate::conn::boundary::pico_to_samples;
+use crate::conn::fixed::{FD12FD06, Micro};
 use crate::sync::sample_tick::SampleTickConn;
-use crate::time::decimal::{FD12FD06, Micro};
 use crate::time::swing;
 use crate::time::tick::Tick;
 
@@ -155,7 +155,7 @@ mod tests {
     fn stc_120_48k() -> SampleTickConn {
         SampleTickConn::new(
             48_000,
-            crate::time::tempo::Tempo::from_bpm_integer(120),
+            crate::conn::tempo::Tempo::from_bpm_integer(120),
             960,
         )
     }
