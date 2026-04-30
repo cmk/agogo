@@ -15,6 +15,7 @@ pub struct Tempo(pub u32);
 
 impl Tempo {
     pub const ZERO: Self = Self(0);
+    pub const MAX_BPM_INTEGER: u32 = u32::MAX / 1_000_000;
 
     /// Construct from an integer BPM. Panics if `n > 4294` (`n × 10⁶`
     /// overflows `u32`). `checked_mul` avoids the silent release-build
@@ -22,7 +23,7 @@ impl Tempo {
     pub const fn from_bpm_integer(n: u32) -> Self {
         match n.checked_mul(1_000_000) {
             Some(v) => Self(v),
-            None => panic!("Tempo::from_bpm_integer: n must be ≤ 4294"),
+            None => panic!("Tempo::from_bpm_integer: n exceeds MAX_BPM_INTEGER"),
         }
     }
 

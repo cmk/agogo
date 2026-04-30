@@ -143,6 +143,7 @@ impl AgogoDriver {
             Tool::TempoSet => args
                 .get("prior_bpm")
                 .and_then(Value::as_u64)
+                .filter(|bpm| *bpm <= u64::from(Tempo::MAX_BPM_INTEGER))
                 .map(|bpm| (Tool::TempoSet.name().to_owned(), json!({ "bpm": bpm }))),
             Tool::Start => Some((Tool::Stop.name().to_owned(), json!({}))),
             Tool::Stop => Some((Tool::Start.name().to_owned(), json!({}))),
@@ -167,8 +168,8 @@ fn accepted_next_buffer() -> Value {
 
 fn parse_integer_bpm(args: &Value) -> Result<Tempo, String> {
     let bpm = parse_u32_field(args, "bpm")?;
-    if bpm > 4_294 {
-        return Err("field `bpm` must be <= 4294".to_owned());
+    if bpm > Tempo::MAX_BPM_INTEGER {
+        return Err(format!("field `bpm` must be <= {}", Tempo::MAX_BPM_INTEGER));
     }
     Ok(Tempo::from_bpm_integer(bpm))
 }
@@ -176,8 +177,9 @@ fn parse_integer_bpm(args: &Value) -> Result<Tempo, String> {
 fn parse_u32_field(args: &Value, field: &str) -> Result<u32, String> {
     let value = args
         .get(field)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("missing integer field `{field}`"))?;
+        .ok_or_else(|| format!("missing integer field `{field}`"))?
+        .as_u64()
+        .ok_or_else(|| format!("field `{field}` must be an unsigned integer"))?;
     u32::try_from(value).map_err(|_| format!("field `{field}` exceeds u32"))
 }
 
@@ -230,10 +232,28 @@ mod tests {
         driver.on_mount().expect("mount");
 
         let err = driver
-            .handle_call(Tool::TempoSet.name(), json!({ "bpm": 4_295 }))
+            .handle_call(
+                Tool::TempoSet.name(),
+                json!({ "bpm": Tempo::MAX_BPM_INTEGER + 1 }),
+            )
             .unwrap_err();
 
-        assert_eq!(err, "field `bpm` must be <= 4294");
+        assert_eq!(
+            err,
+            format!("field `bpm` must be <= {}", Tempo::MAX_BPM_INTEGER)
+        );
+    }
+
+    #[test]
+    fn tempo_set_rejects_non_integer_bpm_with_precise_error() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let err = driver
+            .handle_call(Tool::TempoSet.name(), json!({ "bpm": "140" }))
+            .unwrap_err();
+
+        assert_eq!(err, "field `bpm` must be an unsigned integer");
     }
 
     #[test]
@@ -284,6 +304,18 @@ mod tests {
                 &json!({ "bpm": 140, "prior_bpm": 120 })
             ),
             Some((Tool::TempoSet.name().to_owned(), json!({ "bpm": 120 })))
+        );
+    }
+
+    #[test]
+    fn inverse_op_rejects_out_of_range_prior_tempo() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        assert_eq!(
+            driver.inverse_op(
+                Tool::TempoSet.name(),
+                &json!({ "bpm": 140, "prior_bpm": u64::from(Tempo::MAX_BPM_INTEGER) + 1 })
+            ),
+            None
         );
     }
 
