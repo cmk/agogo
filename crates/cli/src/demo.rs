@@ -24,10 +24,13 @@ use agogo_host_cpal::CpalHost;
 use agogo_host_cpal::cpal::callback::CallbackState;
 use agogo_host_cpal::cpal::control::spsc;
 use agogo_host_midi::MidirSink;
+use bpaf::Bpaf;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+
+use crate::parsers::{parse_bpm_to_tempo, parse_positive_u32};
 
 /// `--ppq 24` — MIDI clock baseline. Hard-coded for the demo;
 /// the user picks the *output* PPQN via `--grid` (`t64t` =
@@ -43,6 +46,87 @@ pub struct DemoArgs {
     pub grid: String,
     pub buffer_frames: u32,
     pub duration_ms: u32,
+}
+
+#[derive(Debug, Clone, Bpaf)]
+pub enum DemoSub {
+    /// Run the demo pipeline. Connects cpal input + midir output,
+    /// constructs a single MidiClock channel, and pumps the
+    /// scheduler/renderer through the SPSC drain thread for
+    /// `--duration-ms` ms.
+    #[bpaf(command("run"))]
+    Run {
+        /// cpal input device name; pass `default` for the host's
+        /// default input.
+        #[bpaf(long, argument("DEVICE"))]
+        audio_in: String,
+        /// midir output port name; pass `default` for the first
+        /// available output port.
+        #[bpaf(long, argument("PORT"))]
+        midi_out: String,
+        /// Phase source: `internal` runs from `--bpm`,
+        /// `external` drives a PLL from the audio input pulse train.
+        #[bpaf(long, argument("SOURCE"))]
+        source: String,
+        /// Tempo in BPM.
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
+        bpm: Tempo,
+        /// Sample rate in Hz. `agogo demo` currently supports 48000.
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
+        sr: u32,
+        /// Per-channel grid.
+        #[bpaf(long, argument("GRID"))]
+        grid: String,
+        /// cpal buffer size in frames.
+        #[bpaf(long, argument("FRAMES"), parse(parse_positive_u32), fallback(1024))]
+        buffer_frames: u32,
+        /// How long to run before exiting.
+        #[bpaf(long, argument("MS"), parse(parse_positive_u32), fallback(5_000))]
+        duration_ms: u32,
+    },
+    /// Print the names of cpal input devices visible to the host.
+    #[bpaf(command("list-audio-inputs"))]
+    ListAudioInputs,
+    /// Print the names of midir output ports visible to the host.
+    #[bpaf(command("list-midi-outputs"))]
+    ListMidiOutputs,
+}
+
+pub fn dispatch(sub: DemoSub) -> Result<(), String> {
+    match sub {
+        DemoSub::Run {
+            audio_in,
+            midi_out,
+            source,
+            bpm,
+            sr,
+            grid,
+            buffer_frames,
+            duration_ms,
+        } => run(&DemoArgs {
+            audio_in,
+            midi_out,
+            source,
+            bpm,
+            sr,
+            grid,
+            buffer_frames,
+            duration_ms,
+        }),
+        DemoSub::ListAudioInputs => {
+            for name in list_audio_inputs() {
+                println!("{name}");
+            }
+            Ok(())
+        }
+        DemoSub::ListMidiOutputs => {
+            let names = list_midi_outputs()?;
+            for name in names {
+                println!("{name}");
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Run the demo for `args.duration_ms` ms, then drop the audio

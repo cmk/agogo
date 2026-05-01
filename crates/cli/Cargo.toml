@@ -9,13 +9,13 @@ publish = false
 [features]
 default = ["core"]
 core = ["dep:agogo-core"]
-link = ["dep:agogo-host-link", "agogo-host-link/rusty-link"]
+link = ["core", "dep:agogo-host-link", "agogo-host-link/rusty-link"]
 cpal = ["dep:agogo-host-cpal"]
 midi = ["dep:agogo-host-midi"]
 # `demo` activates the `agogo demo` subcommand: cpal audio in +
 # midir MIDI out + the SPSC drain thread + CallbackState pipeline.
 # Plan 13 T5.
-demo = ["cpal", "midi"]
+demo = ["core", "cpal", "midi"]
 # `run` activates Plan 14's `agogo run`: N-channel Machine,
 # six-rate static dispatch, Ctrl-C handling, top-level pipeline.
 # Includes `link` so `--source link` is wired up; without `link`

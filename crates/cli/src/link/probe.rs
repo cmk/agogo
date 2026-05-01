@@ -87,6 +87,22 @@ pub fn probe<F: FnMut(ProbeRow)>(
     clock.enable(false);
 }
 
+pub fn print_csv(
+    initial_bpm: agogo_core::conn::tempo::Tempo,
+    sr: u32,
+    duration_ms: u32,
+    period_ms: u32,
+) {
+    println!("t_ms,peers,tempo_bpm,phase");
+    probe(initial_bpm, sr, duration_ms, period_ms, |row| {
+        // Display-only conversion: fxp -> f64 at println! time,
+        // never stored in `ProbeRow`.
+        let tempo_bpm = agogo_core::conn::boundary::tempo_to_f64_bpm(row.tempo);
+        let phase = f64::from(row.phase.0) / (1u64 << 32) as f64;
+        println!("{},{},{:.4},{:.6}", row.t_ms, row.peers, tempo_bpm, phase);
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

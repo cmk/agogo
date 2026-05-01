@@ -60,13 +60,13 @@ use std::num::NonZeroU32;
 /// scheduler uses [`PPQN`] (960).
 const PULSE_PPQ: u32 = 24;
 
-use crate::{parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats};
+use crate::parsers::{parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats};
 
 /// Argv container for `agogo run`. Used by both the bpaf derive and
 /// the dispatcher in `main.rs`. The two formerly-`f64` fields
 /// (`bpm`, `link_quantum`) now land as typed `Tempo` / `Quantum`
 /// directly — the f64 surface area collapses to the bodies of
-/// `parse_bpm_to_tempo` and `parse_quantum_from_beats` (in `main.rs`).
+/// `parse_bpm_to_tempo` and `parse_quantum_from_beats` (in `parsers.rs`).
 #[derive(Debug, Clone, Bpaf)]
 pub struct RunArgs {
     /// Tempo in beats per minute. Applies to all channels.
