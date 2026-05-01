@@ -1,11 +1,8 @@
 # agogo-host-cpal
 
-cpal back-end for `agogo_core::sink::audio::AudioHost`. Plan 13's
-first platform-audio integration; v0.1 wires the audio-in path (CV
-output lands in v0.4 via the `sink/` parent — the renderer's
-file name will be picked when that plan ships, since
-`sink/audio.rs` is now occupied by the audio-host abstraction
-formerly at `host.rs`).
+cpal back-end for `agogo_core::sink::audio::AudioHost`. This is the
+first platform-audio integration; v0.1 wires the audio-in path, and
+v0.4 owns CV/gate output through the heterogeneous output layer.
 
 Not a workspace member by design — `cargo test --workspace` skips it
 so the default CI path doesn't pull cpal + its platform system
@@ -42,13 +39,12 @@ setup needed.
 
 ### Hardware smoke test
 
-Plan 13 T6 (the `cpal_default_input_smoke` fixture-gated hardware
-test) is deferred — see Plan 13's Review section. Plan 14 will land
-this alongside `agogo run`'s acceptance scenario, where a real
-audio device is in scope.
+The `cpal_default_input_smoke` fixture-gated hardware test belongs
+with `agogo run`'s acceptance scenario, where a real audio device is
+in scope.
 
 ## Where the logic lives
 
 - `src/cpal.rs` — `CpalHost` (impl `AudioHost`) + device enumeration.
-- `src/cpal/callback.rs` — `CallbackState` + `on_buffer` (T4).
-- `src/cpal/control.rs` — rtrb SPSC + RT→drain plumbing (T3).
+- `src/cpal/callback.rs` — `CallbackState` + `on_buffer`.
+- `src/cpal/control.rs` — rtrb SPSC + RT→drain plumbing.

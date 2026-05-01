@@ -1,4 +1,4 @@
-# Polyrhythm DSL (v0.3+)
+# Polyrhythm DSL (post-v0.2)
 
 ## Design principle
 

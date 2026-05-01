@@ -7,10 +7,10 @@
 //! lock is uncontended on the audio thread because the control thread
 //! only writes at human-pace boundaries (Ctrl-C, `--push-tempo`); the
 //! audio-thread read is sub-µs and bounded by Link's own
-//! `capture_audio_session_state`. v0.5 Sprint 02 swaps this for a
-//! seqlock pattern per `link.md:23-29` once the precision matters.
+//! `capture_audio_session_state`. v0.3 swaps this for a seqlock
+//! pattern per `link.md` once the precision matters.
 //!
-//! Plan 14 wires this in at the CLI boundary when the user passes
+//! `agogo run` wires this in at the CLI boundary when the user passes
 //! `--source link`.
 
 use std::sync::{Arc, Mutex};
@@ -58,7 +58,7 @@ impl LinkPhaseSource {
 impl PhaseSourceImpl for LinkPhaseSource {
     fn phase_at_sample(&mut self, n: u64) -> Phase {
         // Lock acquisition is uncontended on the audio thread because
-        // the control thread writes at human pace. v0.5 Sprint 02
+        // the control thread writes at human pace. v0.3
         // swaps this for a seqlock-packed anchor when the per-buffer
         // re-anchoring lands.
         self.inner
@@ -93,8 +93,8 @@ impl LinkSessionHandle {
     }
 
     /// Drive the FSM by polling Link's `is_playing` flag. Call this
-    /// from the control thread (Plan 14's main loop park-and-poll
-    /// pattern).
+    /// from the control thread (`agogo run`'s main loop
+    /// park-and-poll pattern).
     pub fn poll_transport(&self) {
         self.inner
             .lock()
@@ -110,7 +110,7 @@ impl LinkSessionHandle {
             .user_start();
     }
 
-    /// Drive the FSM with `UserStop`. The Ctrl-C handler in Plan 14's
+    /// Drive the FSM with `UserStop`. The Ctrl-C handler in
     /// `agogo run` calls this to mirror the local Stop into the Link
     /// session.
     pub fn user_stop(&self) {
@@ -176,7 +176,7 @@ mod tests {
         let _phase = src.phase_at_sample(48_000);
     }
 
-    /// Plan 14 property `link_phase_source_no_deadlock`: interleaved
+    /// `link_phase_source_no_deadlock`: interleaved
     /// `phase_at_sample` (audio-thread proxy) and `set_tempo` /
     /// `is_playing` (control-thread proxy) for ~100 ms must not
     /// deadlock or panic. Lock-contention sanity, not a performance

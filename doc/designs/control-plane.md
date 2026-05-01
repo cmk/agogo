@@ -6,11 +6,10 @@
 
 **Context**: agogo's standalone CLI + TUI needs a lock-free bridge
 between the UI/keyboard thread and the RT audio callback from v0.1
-onward — this is not invented by v0.3. What v0.3 adds is a *second*
-writer on the same bridge: the `crates/host/` adapter that lets a
-stdio-core dispatcher issue tool calls alongside (or instead of) the
-local TUI. v0.3 sprint 02 is named "Lock-free control plane" and
-calls out this file as the landing spot, but the design belongs to
+onward. The v0.2 hard-time steel thread makes that bridge explicit:
+soft agent/tool commands enter through the host adapter, become typed
+RT command envelopes, and either reach the callback by a declared
+deadline or are rejected before admission. The design belongs to
 agogo core, not to the host adapter.
 
 ## Adopt
@@ -18,8 +17,8 @@ agogo core, not to the host adapter.
 - **Single-writer-single-reader shape.** Control plane has two
   surfaces: atomic scalars (`AtomicU64`-packed tempo, `AtomicI32`
   per-channel shift, etc.) read per-buffer by the RT thread and
-  written by the control thread (TUI keyboard handler, or — in
-  v0.3 — the stdio-core dispatcher adapter), and an `rtrb` SPSC
+  written by the control thread (TUI keyboard handler, or the
+  stdio-core dispatcher adapter), and an `rtrb` SPSC
   queue for events that need to arrive in order (e.g., channel
   reconfigure, preset load). The distinction is "is it safe to miss
   an intermediate value" — if yes, atomic; if no, queue. One writer
@@ -38,28 +37,27 @@ agogo core, not to the host adapter.
   that the next buffer sees the new value instead of this one,
   which is exactly the latency budget the control plane is sold on.
 - **Pack BPM as scaled integer.** agogo's `Tempo` already does this
-  (`crates/core/src/fxp.rs`); the v0.3 bridge stores a plain
+  (`crates/core/src/conn/tempo.rs`); the v0.2 bridge stores a plain
   `AtomicU64` carrying the same scaled integer. One tempo
   representation end-to-end, no per-boundary conversion.
 
 ## Defer
 
-- **`triple_buffer` for larger-than-atomic state.** v0.4's snapshot
-  push (agogo → observation) is the other direction and the obvious
-  place to use `triple_buffer` or equivalent. Not needed in v0.3 if
-  the control plane is scalar-dominant.
+- **`triple_buffer` for larger-than-atomic state.** v0.2's snapshot
+  slot and observation publisher are the other direction and the
+  obvious place to use `triple_buffer` or equivalent. Not needed in
+  the command bridge while the control plane is scalar-dominant.
 - **Parameter dezippering / smoothing.** Gemini's
   `ParameterSmoother` (lines 969–989) is correct for user-facing
-  analog-feeling controls (shift ramp, LFO depth), but v0.3's goal
-  is dispatch correctness, not polish. Defer to the first sprint
-  that surfaces a parameter whose step change is audibly rough —
-  probably shift-value changes via the TUI.
+  analog-feeling controls (shift ramp, LFO depth), but v0.2's goal
+  is admission and deadline correctness, not polish. Defer to the
+  first sprint that surfaces a parameter whose step change is audibly
+  rough — probably shift-value changes via the TUI.
 - **CPU pinning / thread affinity.** Gemini mentions `taskset` and
   thread affinity to stop OS migration. Real concern, but measure
-  before tuning — Plan 02's PLL jitter spec is already being hit
-  on stock scheduling. Park this in the v0.4 review notes and
-  return to it only if we see spikes correlated with scheduler
-  migration.
+  before tuning — the PLL jitter spec is already being hit on stock
+  scheduling. Park this with v0.4 timing diagnostics and return to it
+  only if measured output jitter correlates with scheduler migration.
 
 ## Reject
 

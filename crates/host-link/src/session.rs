@@ -104,9 +104,9 @@ impl LinkSession {
 
     /// Beat-phase ([0, 1) cycles) at the given absolute sample
     /// index. RT-safe — delegates to [`LinkClock::phase_at_sample`].
-    /// Plan 14's `LinkPhaseSource` adapter routes through this so
-    /// the audio thread can read phase via the same `Arc<Mutex<_>>`
-    /// the control thread holds.
+    /// `LinkPhaseSource` routes through this so the audio thread can
+    /// read phase via the same `Arc<Mutex<_>>` the control thread
+    /// holds.
     pub fn phase_at_sample(&mut self, n: u64) -> Phase {
         self.clock.phase_at_sample(n)
     }

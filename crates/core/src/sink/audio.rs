@@ -1,8 +1,8 @@
 //! Audio-host trait + RT-callback shape.
 //!
-//! Mirrors Plan 12's `MidiSink` / `MidirSink` split: core holds the
-//! trait contract, back-end crates hold the implementations. Plan 13's
-//! `host-cpal` is the first implementor; future JACK / CoreAudio /
+//! Mirrors the `MidiSink` / `MidirSink` split: core holds the trait
+//! contract, back-end crates hold the implementations. `host-cpal` is
+//! the first implementor; future JACK / CoreAudio /
 //! ASIO back-ends plug in via the same shape.
 //!
 //! See `doc/agogo.md` §5 for the pinned trait shape and
@@ -12,7 +12,7 @@
 //! runs on the host's audio thread. Implementations must not block,
 //! allocate, or take locks inside the callback. Parameter updates
 //! from the control thread come in via an atomic snapshot at the top
-//! of each buffer (`control-plane.md:17-43`, v0.3 scope).
+//! of each buffer (`control-plane.md`, v0.2 scope).
 
 use thiserror::Error;
 
@@ -33,16 +33,16 @@ pub trait AudioHost {
 
 /// Per-buffer callback payload.
 ///
-/// **Channel layout (Plan 13).** `input` and `output` are mono in
+/// **Channel layout.** `input` and `output` are mono in
 /// v0.1 — back-ends enforce `Config::input_channels == 1` (and the
 /// CV output side is empty until v0.4). Multi-channel support
-/// arrives with v0.4's `out/audio` work, at which point this
+/// arrives with v0.4's heterogeneous output work, at which point this
 /// struct gains explicit `input_channels` / `output_channels`
 /// fields and the buffers carry interleaved frames. Pattern
 /// matches against `AudioIo` should use `..` to ride the
 /// `#[non_exhaustive]` forward-compat.
 ///
-/// Marked `#[non_exhaustive]` so v0.5's Link work can add a cpal
+/// Marked `#[non_exhaustive]` so v0.3's Link work can add a cpal
 /// `timestamp().playback` field without breaking downstream pattern
 /// matches — `doc/designs/link.md:23-29` requires the
 /// "first-sample-hits-DAC" instant for sync-accurate Link queries.
@@ -52,7 +52,7 @@ pub struct AudioIo<'a> {
     /// was opened without an input device.
     pub input: &'a [f32],
     /// Output buffer for this buffer. Empty in input-only configs
-    /// (Plan 13 scope — CV output arrives in v0.4's `out/audio`).
+    /// (v0.1 scope — CV output arrives in v0.4).
     /// When non-empty, back-ends give the callback undefined-content
     /// memory and the callback must write every sample
     /// (`doc/designs/cv-pulse.md:47-52`).
@@ -71,7 +71,7 @@ impl<'a> AudioIo<'a> {
     /// Back-ends (like `host-cpal`) use this rather than the struct
     /// literal because `AudioIo` is `#[non_exhaustive]` for
     /// forward-compat with future fields (see the struct doc for
-    /// the v0.5 Link timestamp rationale). When a new field lands,
+    /// the v0.3 Link timestamp rationale). When a new field lands,
     /// this constructor's signature breaks intentionally so every
     /// back-end is forced to acknowledge it.
     pub fn new(
@@ -99,7 +99,7 @@ pub struct Config {
     /// [`AudioHostError::DeviceNotFound`].
     pub input_device: Option<String>,
     /// Output device name; `None` selects the host's default output.
-    /// Plan 13 passes `None` and ignores the output slice (CV out
+    /// Current callers pass `None` and ignore the output slice (CV out
     /// lands in v0.4).
     pub output_device: Option<String>,
     /// Target sample rate. Back-ends surface unsupported rates as

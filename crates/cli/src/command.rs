@@ -62,8 +62,8 @@ enum Command {
         #[bpaf(external(crate::demo::demo_sub))]
         sub: crate::demo::DemoSub,
     },
-    /// Plan 14's end-to-end runner. N-channel Machine, six-rate
-    /// dispatch, internal/external/link sources, Ctrl-C teardown.
+    /// End-to-end runner. N-channel Machine, six-rate dispatch,
+    /// internal/external/link sources, Ctrl-C teardown.
     #[cfg(feature = "run")]
     #[bpaf(command("run"))]
     Run {

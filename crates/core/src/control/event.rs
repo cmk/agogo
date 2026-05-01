@@ -26,8 +26,8 @@ use crate::time::tick::Tick;
 /// `+16` slack absorbs swing-boundary overrun where the scheduler
 /// expands its tick window by `swing_d` ticks.
 ///
-/// Used by Plan 14's [`Machine`](crate::control::Machine) and
-/// Plan 13's `host-cpal` callback to size their pre-allocated
+/// Used by [`Machine`](crate::control::Machine) and `host-cpal`'s
+/// callback to size their pre-allocated
 /// `Vec<ScheduledEvent>` so [`tick_stream_into`] never reallocates
 /// inside the audio callback.
 pub fn max_events_for_buffer(frames: usize) -> usize {
@@ -61,7 +61,7 @@ pub fn tick_stream(
 /// `ScheduledEvent` into `buf` rather than returning a fresh `Vec`.
 /// When `buf.capacity()` is sized to the worst-case event count for
 /// the buffer window, this call allocates zero bytes on the heap —
-/// the contract Plan 13's audio callback relies on. Use
+/// the contract the audio callback relies on. Use
 /// [`max_events_for_buffer`] to compute that upper bound.
 ///
 /// `buf` is not cleared on entry; callers who want a fresh window
@@ -274,13 +274,12 @@ mod tests {
             }
         }
 
-        /// Plan 13 property `tick_stream_into_matches_transform_filtered`:
         /// `tick_stream_into`'s inlined per-tick pipeline stays
         /// bit-identical to `transform`'s forward path (filtered to
         /// the buffer window). Comparing `tick_stream_into` against
         /// `tick_stream` would be circular — `tick_stream` delegates
-        /// to `tick_stream_into` post-Plan-13-T0b — so the reference
-        /// here is `transform` directly. Drift between the two
+        /// to `tick_stream_into` — so the reference here is
+        /// `transform` directly. Drift between the two
         /// pipelines trips this test immediately.
         ///
         /// The reference applies `transform` over a generous fixed
@@ -326,8 +325,7 @@ mod tests {
             prop_assert_eq!(pushed, reference);
         }
 
-        /// Plan 13 property `tick_stream_into_no_realloc`: when the
-        /// caller pre-sizes `buf` with enough capacity, the call
+        /// When the caller pre-sizes `buf` with enough capacity, the call
         /// leaves `buf.capacity()` unchanged. Pins the allocation-free
         /// contract — the RT callback relies on reusing one
         /// pre-allocated scratch buffer per channel across buffers.

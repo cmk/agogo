@@ -9,8 +9,8 @@ publish = false
 # `agogo-host-cpal` is NOT a `[workspace].members` entry — it's
 # pulled in only as an optional path dep from `crates/cli/Cargo.toml`
 # when `agogo-cli --features cpal` (or `--features demo`) is on,
-# starting in Plan 13 T5. The detached status keeps `cargo test
-# --workspace` from eagerly pulling cpal + its platform system deps
+# so the detached status keeps `cargo test --workspace` from eagerly
+# pulling cpal + its platform system deps
 # (libasound on Linux, CoreAudio on macOS, WASAPI on Windows) into
 # the default CI path. A dedicated `host-cpal` job in
 # `.github/workflows/ci.yml` (with `working-directory:

@@ -1,10 +1,9 @@
-//! `agogo demo run` end-to-end pipeline (Plan 13 T5).
+//! `agogo demo run` single-channel end-to-end pipeline.
 //!
-//! Wires together every Plan 13 piece: cpal audio in via
-//! `host-cpal::CpalHost`, the `CallbackState` hot loop, the
-//! rtrb SPSC + drain thread, and midir output via
-//! `host-midi::MidirSink`. Single-channel `MidiClock` for v0.1;
-//! Plan 14's `agogo run` generalises to N channels via
+//! Wires together cpal audio in via `host-cpal::CpalHost`, the
+//! `CallbackState` hot loop, the rtrb SPSC + drain thread, and
+//! midir output via `host-midi::MidirSink`. Single-channel
+//! `MidiClock` for v0.1; `agogo run` generalises to N channels via
 //! `Machine`.
 //!
 //! Plan 2026-04-28-05 T7: extracted from `cli/main.rs`.
@@ -149,13 +148,13 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
             ));
         }
     }
-    // Plan 13 T5 instantiates `CallbackState<S048>` only —
-    // multi-rate dispatch via a static `match args.sr { ... }`
-    // arrives with `agogo run` in Plan 14.
+    // The demo instantiates `CallbackState<S048>` only. Multi-rate
+    // dispatch via a static `match args.sr { ... }` lives in
+    // `agogo run`.
     if args.sr != S048::HZ {
         return Err(format!(
-            "--sr {} not yet supported by `agogo demo` (only 48000 in Plan 13 T5; \
-             wider rate dispatch lands with `agogo run` in Plan 14)",
+            "--sr {} not yet supported by `agogo demo` (only 48000; \
+             wider rate dispatch lives with `agogo run`)",
             args.sr
         ));
     }
@@ -208,12 +207,12 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     let drain_sink: Arc<dyn agogo_core::sink::midi::MidiSink + Send + Sync> = sink;
     let drain = consumer.spawn_drain(drain_sink);
 
-    // Machine + CallbackState. Plan 14 generalises Plan 13's
+    // Machine + CallbackState. `agogo run` generalises this
     // single-channel state to N channels; the demo keeps its
     // single-channel CLI surface by building a one-channel
     // Machine with `TransportPolicy::Scripted { empty }` so the
-    // emitted byte stream stays byte-identical to Plan 13's
-    // (no Start / Stop / Continue, just clock).
+    // emitted byte stream stays byte-identical to the original demo
+    // path (no Start / Stop / Continue, just clock).
     let channel = Channel::Midi {
         common: ChannelCommon {
             divider: grid,
@@ -276,8 +275,8 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     );
 
     // Block the main thread for the requested duration. Ctrl-C
-    // handling lands with `agogo run` (Plan 14); for the demo
-    // a fixed duration is sufficient.
+    // handling lives with `agogo run`; for the demo a fixed duration
+    // is sufficient.
     std::thread::sleep(Duration::from_millis(u64::from(args.duration_ms)));
 
     // Tear down: stream first (stops the producer), then drain

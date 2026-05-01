@@ -5,11 +5,11 @@ Read-Ahead" / `CompensatedChannel`).
 
 **Context**: agogo.md §2 and §6 call out Shift (±300 ms against
 master) as one of the two transforms that live at the Sample layer
-rather than the grid layer. v0.1 Plan 03 ships `channel/transform.rs`
-with divider/shuffle/shift/offset; the shift *math* is trivial
-(`at_sample + k`), but the **negative** case — playing a pulse
-earlier than the master — needs a lookahead budget and is the
-substance of this design.
+rather than the grid layer. The channel transform layer owns
+divider/shuffle/shift/offset; the shift *math* is trivial
+(`at_sample + k`), but the **negative** case — playing a pulse earlier
+than the master — needs a lookahead budget and is the substance of
+this design.
 
 ## Adopt
 
@@ -44,7 +44,7 @@ substance of this design.
   samples mid-buffer").** Gemini's `ParameterSmoother` in
   lines 969–989. Correct concern, but for v0.1 Plan 03 (pure-logic
   transform) we just accept step changes. Dezippering lives on top
-  of `SharedParams` and is a v0.3 concern; cross-reference from
+  of the v0.2 control bridge and remains polish; cross-reference from
   `control-plane.md`.
 - **Crossfading the delay-line read pointer during large shift
   jumps.** Same concern as above, one level higher — if the user

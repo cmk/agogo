@@ -5,17 +5,16 @@
 //! callback, the integration tests). Stateless w.r.t. the host —
 //! holds only musical + transport state.
 //!
-//! Plan 14 generalises Plan 13's single-channel `CallbackState` into
-//! an N-channel `Machine` that:
+//! `Machine` is the N-channel runtime that:
 //!
 //! 1. Feeds input PCM into a [`PhaseSource`] (Internal / External
 //!    PLL / Custom).
 //! 2. Computes a single per-buffer transport byte from a
 //!    [`TransportPolicy`] and a control-thread stop flag.
-//! 3. Schedules + renders each channel's clock through Plan 12's
-//!    [`render_channel_block`], emitting the transport byte once
-//!    ahead of the per-channel clock streams (transport bytes are
-//!    global to the MIDI port, not per-channel).
+//! 3. Schedules + renders each channel's clock through
+//!    [`render_midi_channel`], emitting the transport byte once ahead
+//!    of the per-channel clock streams (transport bytes are global to
+//!    the MIDI port, not per-channel).
 //!
 //! The audio thread is the only thread that drives `on_buffer`; the
 //! control thread interacts only through the [`MachineStopHandle`]'s
@@ -98,7 +97,7 @@ pub struct Machine<R: SampleTime> {
     stop_flag: Arc<AtomicBool>,
 }
 
-/// Caller's transport policy. Plan 14 ships three:
+/// Caller's transport policy:
 ///
 /// - [`TransportPolicy::Internal`] — emit `Start` on first call to
 ///   `on_buffer`; emit `Stop` after [`MachineStopHandle::request_stop`]
@@ -276,8 +275,8 @@ impl<R: SampleTime> Machine<R> {
         }
     }
 
-    /// Mint a control-thread handle. Plan 14's CLI installs the
-    /// `ctrlc` handler with a clone of the returned handle.
+    /// Mint a control-thread handle. The CLI installs the `ctrlc`
+    /// handler with a clone of the returned handle.
     pub fn stop_handle(&self) -> MachineStopHandle {
         MachineStopHandle {
             flag: Arc::clone(&self.stop_flag),
@@ -299,7 +298,7 @@ impl<R: SampleTime> Machine<R> {
 
     /// Buffer-driven dispatch. RT-safe: no allocations, no locks
     /// (assuming the `PhaseSource` and `MidiSink` impls obey the
-    /// same contract — Plan 13's `RtProducer` does; the `LinkSession`
+    /// same contract — `RtProducer` does; the `LinkSession`
     /// adapter takes a sub-µs `Mutex` once per buffer per
     /// `LinkPhaseSource`'s docs).
     pub fn on_buffer(&mut self, io: &mut AudioIo, sink: &dyn MidiSink) {
@@ -437,11 +436,10 @@ mod tests {
         }
     }
 
-    /// Plan 14 property `machine_buffer_matches_plan13_demo`: a
-    /// single-channel Machine with `PhaseSource::Internal { 120 BPM }`
+    /// A single-channel Machine with `PhaseSource::Internal { 120 BPM }`
     /// at 48 kHz, T4 divider, 24 000 frames, no transport, emits
     /// `0xF8` clock bytes at samples `{0, 24_000, 48_000, 72_000}` —
-    /// the exact schedule Plan 13's `callback_emits_expected_clock_schedule`
+    /// the exact schedule `callback_emits_expected_clock_schedule`
     /// asserts on `CallbackState`.
     #[test]
     fn machine_buffer_matches_plan13_demo() {
@@ -468,7 +466,6 @@ mod tests {
         assert_eq!(samples, vec![0, 24_000, 48_000, 72_000]);
     }
 
-    /// Plan 14 property `transport_internal_emits_start_then_stop`:
     /// `TransportPolicy::Internal` emits exactly one `0xFA` at
     /// sample 0 of buffer 0, then exactly one `0xFC` at sample 0 of
     /// the buffer following the `request_stop()` call. No other
@@ -546,8 +543,7 @@ mod tests {
     }
 
     proptest! {
-        /// Plan 14 property `transport_link_driven_emits_on_transitions`:
-        /// for an arbitrary `is_playing[0..N]` sequence, `LinkDriven`
+        /// For an arbitrary `is_playing[0..N]` sequence, `LinkDriven`
         /// emits `0xFA` at false→true and `0xFC` at true→false
         /// transitions, no transport byte otherwise.
         #[test]
@@ -601,8 +597,7 @@ mod tests {
         }
     }
 
-    /// Plan 14 property `transport_scripted_replays_schedule`:
-    /// a manually-loaded schedule deterministically replays through
+    /// A manually-loaded schedule deterministically replays through
     /// `on_buffer`.
     #[test]
     fn transport_scripted_replays_schedule() {
@@ -646,8 +641,7 @@ mod tests {
     }
 
     proptest! {
-        /// Plan 14 property `multi_channel_independent_dispatch`: a
-        /// K-channel Machine emits the union of K independent
+        /// A K-channel Machine emits the union of K independent
         /// single-channel runs. Channel-independence invariant — no
         /// cross-talk in scheduling or rendering.
         #[test]

@@ -73,7 +73,7 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
             at_sample: r.at_sample,
             // Plan 12 only emits single-byte System Real-Time
             // messages (0xF8/0xFA/0xFB/0xFC); longer messages
-            // arrive with Plan 14's MidiCc work and the CSV
+            // arrive with MIDI CC output work and the CSV
             // schema widens then.
             byte: r.bytes[0],
         })

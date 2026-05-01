@@ -1,11 +1,11 @@
-//! `agogo run` — Plan 14's end-to-end runner.
+//! `agogo run` — end-to-end runner.
 //!
-//! Generalises Plan 13's single-channel `agogo demo run` into:
+//! Generalises the single-channel `agogo demo run` into:
 //!   - N channels via the docker-style repeatable `--ch` flag;
 //!   - All six SampleTime rates via a static `match args.sr`;
 //!   - Three sources: `internal | external | link`. `link` plugs
-//!     `LinkSession` in via `PhaseSource::Custom` (Plan 14 T2);
-//!   - Ctrl-C handling via the `ctrlc` crate (Plan 14 T4);
+//!     `LinkSession` in via `PhaseSource::Custom`;
+//!   - Ctrl-C handling via the `ctrlc` crate;
 //!   - `MidiRtByte::Start` at first buffer / `Stop` on Ctrl-C
 //!     teardown for `internal` and `external` sources;
 //!     transition-driven Start/Stop for `link`.
@@ -536,8 +536,7 @@ mod tests {
         }
     }
 
-    /// Plan 14 spot-check: empty `--ch` list errors before any
-    /// device opens.
+    /// Empty `--ch` list errors before any device opens.
     #[test]
     fn run_rejects_empty_ch_list() {
         let args = args_with(vec![], 48_000);
@@ -548,8 +547,7 @@ mod tests {
         );
     }
 
-    /// Plan 14 spot-check: `dev=audio` is reserved for v0.4 and
-    /// rejected at parse time.
+    /// `dev=audio` is reserved for v0.4 and rejected at parse time.
     #[test]
     fn run_rejects_dev_audio() {
         let args = args_with(vec!["dev=audio,grid=t32t"], 48_000);
@@ -583,8 +581,8 @@ mod tests {
         );
     }
 
-    /// Plan 14 spot-check: rates outside the SampleTime allowlist
-    /// error before any device opens, with the allowlist enumerated.
+    /// Rates outside the SampleTime allowlist error before any
+    /// device opens, with the allowlist enumerated.
     #[test]
     fn run_rejects_unsupported_rate() {
         let args = args_with(vec!["dev=midi,grid=t32t,out=default"], 22_050);
@@ -595,8 +593,8 @@ mod tests {
         );
     }
 
-    /// Plan 14 spot-check: a malformed `--ch` spec errors at parse
-    /// time with the offending key.
+    /// A malformed `--ch` spec errors at parse time with the
+    /// offending key.
     #[test]
     fn run_surfaces_channel_spec_parse_errors() {
         let args = args_with(vec!["dev=midi,grid=t32t,unknown=x"], 48_000);

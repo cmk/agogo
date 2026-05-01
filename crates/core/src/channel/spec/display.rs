@@ -315,8 +315,8 @@ mod tests {
     }
 
     proptest! {
-        /// Plan 14 property `spec_round_trip`: the `Display` impl
-        /// emits parser-stable output, so `parse(spec.to_string())`
+        /// The `Display` impl emits parser-stable output, so
+        /// `parse(spec.to_string())`
         /// recovers the same spec for every value the strategy
         /// generates. Plan 2026-04-25-03 extends the strategy with
         /// `mode=click` (note/vel/mch/accent-*) and `bars` so

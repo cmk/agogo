@@ -7,13 +7,13 @@ anti-windup, low-pass pre-filter, deadband, hard-sync threshold).
 `crates/core/src/sync/pll.rs` tracking an audio-sync pulse train.
 The PID material Gemini discusses is primarily about a *different*
 controller: the one that drags agogo's phase toward Ableton Link's
-continuous timeline (v0.5 `PhaseSource::Link`). This doc triages the
+continuous timeline (v0.3 `PhaseSource::Link`). This doc triages the
 chat into reusable principles for both loops.
 
 ## Adopt
 
 - **Start with just P and I; leave D at zero.** The PLL in
-  `sync/pll.rs` is already a PI controller. For the v0.5 Link
+  `sync/pll.rs` is already a PI controller. For the v0.3 Link
   follower, start the same way. D amplifies noise in a jittery
   timeline like Link's network-derived beat, and the existing PLL
   proves PI alone is enough to hit ±0.05 BPM at ≤200 µs input
@@ -27,7 +27,7 @@ chat into reusable principles for both loops.
 - **Deadband inside the lock region.** Below a threshold error
   (chat suggests "1/nᵗʰ of a tick"), don't update the controller at
   all. This stops "hunting" around true zero caused by quantization
-  noise in the measurement chain. Makes sense as a v0.5 addition
+  noise in the measurement chain. Makes sense as a v0.3 addition
   for the Link follower; optional for the audio-sync PLL where it
   hasn't been an observed problem yet.
 - **One-pole low-pass on the error signal, pre-controller.**
@@ -43,14 +43,14 @@ chat into reusable principles for both loops.
   FSM.
 - **Tuning procedure as doc, not code.** Keep the "zero I and D,
   find P, add I, run the jerk test" sequence in this doc as a
-  guide for whoever tunes the v0.5 Link follower. Not an automated
+  guide for whoever tunes the v0.3 Link follower. Not an automated
   autotune; just a procedure.
 
 ## Defer
 
 - **Logging sync-quality history to CSV for post-session review.**
-  Nice for tuning debugging; probably the v0.4 observation push
-  already gives the same visibility in real-time. Revisit if the
+  Nice for tuning debugging; v0.2's `agogo-state` stream and v0.4's
+  diagnostic sink may already give the same visibility. Revisit if
   telemetry lacks the resolution for offline analysis.
 - **Wrapped error calculation around the Link quantum.** Covered
   in `link.md`. It's a PID concern — the controller has to take

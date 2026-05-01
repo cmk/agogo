@@ -14,10 +14,9 @@ cpal = ["dep:agogo-host-cpal"]
 midi = ["dep:agogo-host-midi"]
 # `demo` activates the `agogo demo` subcommand: cpal audio in +
 # midir MIDI out + the SPSC drain thread + CallbackState pipeline.
-# Plan 13 T5.
 demo = ["core", "cpal", "midi"]
-# `run` activates Plan 14's `agogo run`: N-channel Machine,
-# six-rate static dispatch, Ctrl-C handling, top-level pipeline.
+# `run` activates `agogo run`: N-channel Machine, six-rate static
+# dispatch, Ctrl-C handling, top-level pipeline.
 # Includes `link` so `--source link` is wired up; without `link`
 # the handler errors cleanly on `--source link`.
 run = ["demo", "link", "dep:ctrlc"]
@@ -39,7 +38,7 @@ ctrlc = { version = "3", optional = true }
 proptest = { workspace = true }
 
 # `agogo` is the user-facing binary name (matches
-# `doc/versions/version-0.1.md` acceptance literal). The Plan 14
+# `doc/versions/version-0.1.md` acceptance literal). The
 # `agogo-cli` legacy alias was dropped in Plan 09 T4 — external
 # scripts have migrated since v0.1, and the duplicate `[[bin]]`
 # entry was generating a "found in multiple build targets" warning.
