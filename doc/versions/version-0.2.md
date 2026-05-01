@@ -1,72 +1,127 @@
-# agogo v0.2
+# agogo v0.2 - Hard-Time Steel Thread
 
-## Goal
+## Thesis
 
-Retrofit the time core from **192 PPQN** to **960 PPQN**, proving the
-`TBase` lattice and the `SampleTickConn` algebra survive the jump
-from `2^i · 3^j` tick counts to `2^i · 3^j · 5^k`. At 960 PPQN with
-48 kHz or 96 kHz sample rate the Sample↔Tick relationship is
-integer-exact for a wide band of integer BPMs, and this sprint
-nails that down as property tests.
+v0.2 pulls the hardest timing and integration risks forward. It must prove that
+agogo can accept soft agent commands, apply them through a bounded hard-time
+bridge, emit timestamped or explicitly best-effort output, and publish
+human-rate state snapshots without letting stdio-core or stdio enter the audio
+callback path.
 
-The two high-priority drivers for v0.2 are:
+This version is the agogo side of the three-repo steel thread:
 
-1. **Integer math.** 960 = 2⁶·3·5 divides `60·48_000 = 2_880_000`
-   and `60·96_000 = 5_760_000` evenly; at the sweet-spot BPMs,
-   samples-per-tick is an exact integer — no floor truncation, no
-   drift over hours of playback.
-2. **Pentuplets.** The Cirklon-style grid lattice now admits 5-factor
-   subdivisions, which v0.1's 192-PPQN set could not express.
+```
+stdio server/client
+  -> stdio-core dispatcher + policy + event log
+  -> agogo host adapter
+  -> agogo RT bridge
+  -> Machine::on_buffer
+  -> timestamped sink or declared best-effort sink
+  -> agogo-state snapshot back to stdio-core
+```
 
-## Sprint slots
+## Pull-Forward Decisions
 
-| # | Slug | Status | Scope |
-|---|------|--------|-------|
-| 01 | `plan-2026-04-2N-01` (TBD) | next | `time/` types & consts: bump `PPQN` (tick.rs:21) to 960; add pentuplet variants to `TBase::ALL` (tbase.rs); update `from_tick_count` lookup; relax the "tick counts are `2^i · 3^j`" assumption (tbase.rs:136–137) to `2^i · 3^j · 5^k` and re-prove LCM/GCD closure. |
-| 02 | `plan-2026-04-2N-02` (TBD) | next-next | Lattice & Conn laws at 960: re-prove divisibility preorder (tbase.rs:79–134), round-trip `SampleTickConn` property (conn.rs:915–932). Widen `arb::arb_integer_stc` in `crates/core/src/arb.rs` to include 5-factor tick counts and 48k/96k exact-rate BPMs. |
-| 03 | `plan-2026-04-2N-03` (TBD) | last | Integer-exactness properties at 48k / 96k: new module `time::exact_rates` with the property set below. Audit `channel/` (divider, shuffle, shift) and `sync/` PLL for regression under 960. |
+- Move the stdio-core control bridge from the old v0.3 plan into v0.2.
+- Move the snapshot seqlock and `agogo-state` observation contract from the old
+  v0.4 plan into v0.2.
+- Start the native timestamped MIDI sink work now, even if the first backend is
+  a narrow macOS CoreMIDI or JACK spike.
+- Add command admission metadata now: command id, source id, time domain,
+  deadline, coalesce key, and rejection reason.
+- Keep 960 PPQN math in scope only where it is needed for steel-thread
+  correctness. Full grid expansion can follow after bridge/output risk retires.
 
-## Properties (must pass)
+## Sprints
 
-| Property | Module | Invariant |
-|----------|--------|-----------|
-| `stc_samples_per_tick_is_exact_at_48k` | `time::exact_rates` | For `sr = 48_000`, `ppqn = 960`, and `bpm` in the integer divisors of `sr·60/ppqn = 3000`, `SampleTickConn::tick_to_sample(t)` is exact (no floor truncation) for all `t ≤ 2³²`. |
-| `stc_samples_per_tick_is_exact_at_96k` | `time::exact_rates` | Same as above for `sr = 96_000`, where the BPM set expands to divisors of `6000`. |
-| `stc_round_trip_identity_48k_96k` | `time::exact_rates` | At the exact-rate BPMs above, `sample_to_tick ∘ tick_to_sample = id` and `tick_to_sample ∘ sample_to_tick = id` on tick-aligned samples. Strengthens the existing `stc_round_trip` from a ceiling-bound to equality. |
-| `ticks_per_bar_integer_all_time_sigs` | `time::tbase` | At `PPQN = 960`, for any time signature `n/d` with `d ∈ {1,2,4,8,16,32}`, `ticks_per_bar = n · 4 · 960 / d` is a positive integer. Covers 4/4, 5/4, 7/8, 11/16, 15/32 without rationals. |
-| `pentuplet_subdiv_integer_ticks` | `time::tbase` | Each new quintuplet `TBase` variant has `tick_count` dividing 960 exactly, so channel-side subdivision never produces a fractional-tick offset. |
-| `channel_subdiv_preserves_phase_960` | `channel::divider` | At `PPQN = 960` with any `TBase` in `ALL`, dividing a master-tick stream by the base's `tick_count` yields the same phase as generating at that base directly (idempotence of `subdivide ∘ join`). |
-| `tbase_lattice_closure_960` | `time::tbase` | `TBase::ALL` under `lcm` / `gcd` is closed at `PPQN = 960` with the added 5-factor variants (extends the existing 192-era closure proof). |
+### S1 - Callback Contract And Allocation Gates
 
-## v0.2 acceptance
+- Add a test/bench harness that asserts no allocation in `Machine::on_buffer`
+  after construction.
+- Add worst-case channel/event count timing tests for the configured buffer
+  sizes.
+- Keep all logging, serialization, JSON, and stdio-core interaction outside the
+  callback.
 
-- `cargo test --workspace` green with `PPQN = 960`.
-- All v0.1 property tests that parameterize on PPQN still pass.
-- Every property in the table above passes without `#[ignore]`.
-- No regression in PLL jitter spec from Plan 02 (±0.05 BPM
-  steady-state at ≤ 200 µs input jitter).
-- `cargo run -p agogo-cli -- agogo run --audio-in <dev> --midi-out
-  <port> --bpm 120` still emits locked MIDI clock (acceptance
-  inherited from v0.1).
+Verifies: callback path remains hard-time safe before new integration code is
+allowed to land.
 
-## Deferred to v0.3 (and beyond)
+### S2 - Typed RT Command Bridge
 
-- stdio-core driver surface & lock-free control plane — v0.3.
-- Observation/telemetry push + CV pulse output — v0.4.
-- Transport FSM, Ableton Link, heterogeneous outputs, MTC — v0.5.
-- All v0.1 deferred items that carry into v0.2+ unchanged
-  (preset I/O, platform-native MIDI sinks, LFO render, rtpMIDI,
-  remote control).
+- Extend the current bridge from tempo plus ordered commands to a typed command
+  envelope.
+- Keep last-value controls as atomics and ordered controls in a bounded SPSC
+  ring.
+- Return visible errors on queue full, late command, invalid time domain, or
+  unsupported command class.
+- Add a soft-side adapter that can be driven by stdio-core without linking
+  stdio-core into the RT path.
 
-## Reference
+Verifies: every accepted soft command is either applied by a declared deadline
+or rejected before admission.
 
-- `doc/agogo.md` §6 (Cirklon mapping — verify 960 PPQN doesn't
-  break bar-length invariants), §7 (`SampleTickConn` workaround).
-- `doc/notes/note-2026-04-23-03.md` lines 226–443 (integer-math
-  rationale; the "50 samples per tick" Golden Ratio at 48k/960).
-- `doc/versions/version-0.1.md` — deferred list carried forward.
-- `crates/core/src/time/tick.rs:21` — `PPQN` const to flip.
-- `crates/core/src/time/tbase.rs:136–137` — lattice invariant to
-  extend from `2^i · 3^j` to `2^i · 3^j · 5^k`.
-- `crates/core/src/time/conn.rs:241–330` — `SampleTickConn` (already
-  PPQN-parameterized at runtime, so cheap to retarget).
+### S3 - Snapshot Slot And Observation Publisher
+
+- Publish `AgogoSnapshot` through a fixed-capacity seqlock slot.
+- Keep `SNAPSHOT_SCHEMA = "agogo.snapshot.v1"`,
+  `AGOGO_STATE_FORM_TYPE = "agogo-state"`, and
+  `AGOGO_MAIN_ID = "agogo.main"`.
+- Serialize only from the decimating soft task.
+- Include monotonic `seq`, sync source, lock/error state, audio load, and
+  per-channel status.
+
+Verifies: observation backpressure produces detectable sequence gaps, never
+callback stalls or corrupted snapshots.
+
+### S4 - Timestamped Output Backend Spike
+
+- Introduce sink classes:
+  - `BestEffortMidiSink` for current midir behavior.
+  - `TimestampedMidiSink` for a first native scheduled backend.
+  - `DiagnosticSink` for intended-vs-sent timing measurement.
+- Preserve `at_sample` through the drain path and prove whether the backend can
+  honor it.
+- Add a per-backend timing capability report.
+
+Verifies: agogo can distinguish "internally sample accurate" from "externally
+timestamped" from "best effort".
+
+### S5 - Three-Repo Steel Thread Demo
+
+- Provide the agogo adapter API consumed by stdio-core.
+- Demo path: stdio dispatches `agogo.tempo.set` and `agogo.start`, stdio-core
+  logs and observes the command, agogo applies it by the next buffer, and
+  `agogo-state` reports the new state.
+- The demo must run with no observation subscriber and still apply control.
+
+Verifies: the hard-time path survives the full product stack without timing
+control passing through a lossy telemetry channel.
+
+## Properties
+
+| Property | Invariant |
+| --- | --- |
+| `rt_callback_no_alloc` | `Machine::on_buffer` performs no allocation after construction. |
+| `command_admission_is_total` | Every command returns accepted, rejected, or late; no silent loss. |
+| `accepted_command_applies_by_deadline` | Accepted commands apply by their declared domain/deadline or report a missed-deadline fault. |
+| `control_independent_of_observation` | Control works with zero observation subscribers. |
+| `snapshot_write_no_alloc` | RT snapshot writes do not allocate, lock, serialize, or await. |
+| `snapshot_gap_detectable` | Dropped telemetry frames are visible as seq gaps. |
+| `timestamp_capability_truthful` | Backend capability reports match measured behavior under diagnostic sink tests. |
+
+## Acceptance
+
+- `cargo test --workspace` green.
+- Steel-thread demo runs against stdio-core and stdio path dependencies.
+- The demo records: command requested, command accepted, command applied,
+  snapshot observed, and no RT drop/overrun counters.
+- Documentation marks current midir output as best effort unless a native
+  timestamped backend is selected.
+
+## Deferred To v0.3
+
+- Full MIDI clock follower.
+- Full Link follower/source PID behavior.
+- Complete 960 PPQN grid expansion if it was not required by steel-thread
+  tests.
+- Multi-device latency calibration UI.
