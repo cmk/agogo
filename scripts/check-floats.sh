@@ -35,11 +35,11 @@
 #                                                 moved from fxp.rs in Plan 2026-04-28-03 T4)
 #   crates/host-cpal/src/cpal.rs                  PCM ABI (cpal stream callback)
 #   crates/host-cpal/src/cpal/callback.rs         PCM ABI (AudioIo input/output slices)
-#   crates/cli/src/main.rs                        argv parsers (`parse_bpm_to_tempo` / `parse_quantum_from_beats` / `parse_jitter_us_to_pico` / `parse_ms_to_micro`)
+#   crates/cli/src/parsers.rs                     argv parsers (`parse_bpm_to_tempo` / `parse_quantum_from_beats` / `parse_jitter_us_to_pico` / `parse_ms_to_micro`)
 #   crates/cli/src/run.rs                         argv-parser proptests + `--ch shift-ms` parsing helper
-#   crates/cli/src/sync_trace.rs                  PCM-input ABI + PI-exempt Hz spacing math (extracted from main.rs in Plan 2026-04-28-05 T1)
-#   crates/cli/src/time_sched.rs                  argv-boundary `--swing f64` + ratio → tick conversion (extracted from main.rs in T3)
-#   crates/cli/src/link_probe.rs                  test-only Q0.32 → cycles assertion in `[0, 1)` (extracted from main.rs in T5)
+#   crates/cli/src/trace/sync.rs                  PCM-input ABI + PI-exempt Hz spacing math (moved under trace/ in Plan 2026-04-30-03)
+#   crates/cli/src/time/schedule.rs               argv-boundary `--swing f64` + ratio → tick conversion (moved under time/ in Plan 2026-04-30-03)
+#   crates/cli/src/link/probe.rs                  test-only Q0.32 → cycles assertion in `[0, 1)` (moved under link/ in Plan 2026-04-30-03)
 #
 # Any `f32` / `f64` in a non-allowlisted file is a build failure.
 # To add a new allowlisted file, amend both this script and
@@ -100,15 +100,15 @@ ALLOWED=(
   "crates/host-link/src/quantum.rs"
   "crates/host-cpal/src/cpal.rs"
   "crates/host-cpal/src/cpal/callback.rs"
-  "crates/cli/src/main.rs"
+  "crates/cli/src/parsers.rs"
   "crates/cli/src/run.rs"
   # Plan 2026-04-28-05 T1/T3/T5: extracted from `cli/src/main.rs`'s
   # 1722-line kitchen sink. Each file inherits its predecessor's
   # f64-allowlist eligibility — same exception classes, same
   # boundaries, just split into sibling modules.
-  "crates/cli/src/sync_trace.rs"
-  "crates/cli/src/time_sched.rs"
-  "crates/cli/src/link_probe.rs"
+  "crates/cli/src/trace/sync.rs"
+  "crates/cli/src/time/schedule.rs"
+  "crates/cli/src/link/probe.rs"
 )
 
 REPO_ROOT=$(git rev-parse --show-toplevel)

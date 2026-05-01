@@ -7,15 +7,13 @@
 //!
 //! Plan 2026-04-28-05 T2: extracted from `cli/main.rs`.
 
-use agogo_core::channel::ChannelCommon;
 use agogo_core::conn::fixed::Micro;
 use agogo_core::conn::tempo::Tempo;
 use agogo_core::control::tick_stream;
 use agogo_core::time::conn::SampleTickConn;
-use agogo_core::time::grid::Grid;
-use agogo_core::time::swing::SwingConfig;
-use agogo_core::time::tbase::TBase;
 use agogo_core::time::tick::PPQN;
+
+use super::{checked_trace_frames, parse_grid_arg, straight_common, validate_audio_rate};
 
 #[derive(Debug, Clone)]
 pub struct TraceArgs {
@@ -37,50 +35,13 @@ pub struct TraceRow {
 /// Pure CPU scheduling trace — useful for testing without capturing
 /// stdout. Returns an error if `grid` isn't a valid `Grid` name.
 pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
-    let grid: Grid = args
-        .grid
-        .parse()
-        .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
-    // Channel pipeline requires one of the six audio sample rates
-    // supported by `agogo_core::conn::boundary::pico_to_samples` (the
-    // downstream Pico → Sample dispatch). Validate here rather than
-    // letting `micro_to_samples` panic deep inside the transform.
-    match args.sr {
-        44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => {}
-        _ => {
-            return Err(format!(
-                "--sr {} unsupported; expected one of 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000",
-                args.sr
-            ));
-        }
-    }
+    let grid = parse_grid_arg(&args.grid)?;
+    validate_audio_rate(args.sr)?;
     let stc = SampleTickConn::new(args.sr, args.bpm, PPQN);
-    // channel_trace operates only on the scheduler — it doesn't
+    // channel trace operates only on the scheduler — it doesn't
     // construct full Channel variants, just the common field set.
-    let common = ChannelCommon {
-        divider: grid,
-        shuffle: SwingConfig {
-            resolution: TBase::T16,
-            amount: 0,
-        },
-        delay: args.delay,
-        offset: Micro::ZERO,
-        bar_multiplier: None,
-    };
-    // Pre-flight: reject ranges where `buffers × frames` would
-    // overflow `u64`. Silent wrap in release builds would produce
-    // garbage sample indices.
-    let frames_u64 = u64::try_from(args.frames)
-        .map_err(|_| format!("trace range exceeds u64: --frames {}", args.frames))?;
-    let total = u64::from(args.buffers)
-        .checked_mul(frames_u64)
-        .ok_or_else(|| {
-            format!(
-                "trace range exceeds u64: --frames {} × --buffers {}",
-                args.frames, args.buffers
-            )
-        })?;
-    let _ = total; // only needed for the overflow check above
+    let common = straight_common(grid, args.delay);
+    let frames_u64 = checked_trace_frames(args.frames, args.buffers)?;
     let mut rows = Vec::new();
     for b in 0..args.buffers {
         let start = u64::from(b).checked_mul(frames_u64).expect("checked above");

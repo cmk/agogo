@@ -307,15 +307,9 @@ restore coverage across the SR ladder.
 - Sources: [plan-2026-04-24-01 §Deferred](plans/plan-2026-04-24-01.md)
 - Status: **open**.
 
-### `link_probe::tests` LAN-peer brittleness
+### `link::probe::tests` LAN-peer brittleness
 Pre-existing fragility deferred from PR #37; the test depends on LAN
 peer presence and is brittle in CI / sandboxed runs.
-- Sources: [plan-2026-04-28-06 §Deferred](plans/plan-2026-04-28-06.md)
-- Status: **open**.
-
-### `cargo build -p agogo-cli --no-default-features` build break
-Pre-existing, deferred from PR #37. The default-feature-stripped
-build doesn't compile.
 - Sources: [plan-2026-04-28-06 §Deferred](plans/plan-2026-04-28-06.md)
 - Status: **open**.
 
@@ -425,8 +419,12 @@ when a future plan grep brings up a stale promise.
   28-03 T4; lives at `crates/host-link/src/quantum.rs`.
 - **`machine/spec.rs` 1299-line split** — Plan 28-06; spec/{display,
   parser, types, validate}.rs.
-- **`cli/main.rs` 1727-line extraction** — Plan 28-05; sync_trace.rs,
-  time_sched.rs, link_probe.rs (and demo.rs, run.rs from earlier).
+- **`cli/main.rs` 1727-line extraction** — Plan 28-05; now grouped
+  under `cli/src/trace/`, `cli/src/time/`, and `cli/src/link/`
+  by Plan 2026-04-30-03.
+- **`cargo build -p agogo-cli --no-default-features` build break** —
+  Plan 2026-04-30-03 fixed the core-dependent CLI module gates and
+  feature dependencies; the no-default-features compile check passes.
 - **Per-type `arb.rs` colocation** — Plan 28-08; every type module
   under `crates/core/src/time/` now owns its `<module>/arb.rs`.
 - **`SampleTickConn` shim** — wired in Plan 03 (then renamed and

@@ -204,8 +204,8 @@ code based on it.
   justification); and Plan 2026-04-28-03 T4 moved `Quantum` +
   `f64_beats_to_quantum` to `crates/host-link/src/quantum.rs` (added
   to the allowlist as a Link-FFI parity helper). Plan 2026-04-28-05
-  T1/T3/T5 added `cli/src/sync_trace.rs`, `cli/src/time_sched.rs`,
-  and `cli/src/link_probe.rs` when those inline modules were
+  T1/T3/T5 added `cli/src/trace/sync.rs`, `cli/src/time/schedule.rs`,
+  and `cli/src/link/probe.rs` when those inline modules were
   extracted from `cli/src/main.rs`'s 1722-line kitchen sink; each
   inherits its predecessor's allowlist eligibility (same exception
   classes, same boundaries, just split into sibling modules). Plan
@@ -213,7 +213,9 @@ code based on it.
   parent: `boundary.rs` → `conn/boundary.rs`,
   `time/float.rs` → `conn/float.rs`, `time/sample.rs` →
   `conn/sample.rs` — same allowlist eligibility, new path. The
-  current allowlist is the 20 entries in
+  Plan 2026-04-30-03 moved the CLI argv parsers from
+  `cli/src/main.rs` to `cli/src/parsers.rs` and grouped trace/time/link
+  handlers under subdirectories. The current allowlist is the 20 entries in
   `scripts/check-floats.sh::ALLOWED` (Plan 2026-04-28-06 T3 swapped
   `machine/spec.rs` for `machine/spec/parser.rs` when the kitchen
   sink split — same `delay=ms` argv boundary, just lives in the

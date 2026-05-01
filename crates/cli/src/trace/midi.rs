@@ -7,16 +7,15 @@
 //!
 //! Plan 2026-04-28-05 T6: extracted from `cli/main.rs`.
 
-use agogo_core::channel::{ChannelCommon, MidiRole};
+use agogo_core::channel::MidiRole;
 use agogo_core::conn::fixed::Micro;
 use agogo_core::conn::tempo::Tempo;
 use agogo_core::control::event::tick_stream;
 use agogo_core::sink::midi::{MidiRtByte, TestSink, render_midi_channel};
 use agogo_core::time::conn::SampleTickConn;
-use agogo_core::time::grid::Grid;
-use agogo_core::time::swing::SwingConfig;
-use agogo_core::time::tbase::TBase;
 use agogo_core::time::tick::PPQN;
+
+use super::{checked_trace_frames, parse_grid_arg, straight_common, validate_audio_rate};
 
 #[derive(Debug, Clone)]
 pub struct TraceArgs {
@@ -39,49 +38,14 @@ pub struct TraceRow {
 /// a `TestSink` for `buffers` buffers of `frames` samples each
 /// and returns every emitted `(at_sample, byte)` in FIFO order.
 pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
-    let grid: Grid = args
-        .grid
-        .parse()
-        .map_err(|e| format!("invalid --grid {}: {e}", args.grid))?;
-    // Match `channel_trace`'s sr gate: the transform pipeline's
-    // `pico_to_samples` dispatch supports only these six rates and
-    // panics deep inside otherwise. Plan 12 never hits that path
-    // with zero shift/offset, but validating here surfaces bad argv
-    // as a clean error instead of depending on that internal.
-    match args.sr {
-        44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => {}
-        _ => {
-            return Err(format!(
-                "--sr {} unsupported; expected one of 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000",
-                args.sr
-            ));
-        }
-    }
+    let grid = parse_grid_arg(&args.grid)?;
+    validate_audio_rate(args.sr)?;
     let stc = SampleTickConn::new(args.sr, args.bpm, PPQN);
-    // midi_trace dispatches the MIDI clock renderer directly —
+    // MIDI trace dispatches the MIDI clock renderer directly —
     // no need to wrap in a full Channel::Midi variant.
-    let common = ChannelCommon {
-        divider: grid,
-        shuffle: SwingConfig {
-            resolution: TBase::T16,
-            amount: 0,
-        },
-        delay: Micro::ZERO,
-        offset: Micro::ZERO,
-        bar_multiplier: None,
-    };
+    let common = straight_common(grid, Micro::ZERO);
     let role = MidiRole::Clock;
-    // Overflow pre-flight matches channel_trace's shape.
-    let frames_u64 = u64::try_from(args.frames)
-        .map_err(|_| format!("trace range exceeds u64: --frames {}", args.frames))?;
-    let _ = u64::from(args.buffers)
-        .checked_mul(frames_u64)
-        .ok_or_else(|| {
-            format!(
-                "trace range exceeds u64: --frames {} × --buffers {}",
-                args.frames, args.buffers
-            )
-        })?;
+    let frames_u64 = checked_trace_frames(args.frames, args.buffers)?;
 
     let sink = TestSink::new();
     let last = args.buffers.saturating_sub(1);
