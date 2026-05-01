@@ -89,7 +89,7 @@ new top-level thread, classify it into exactly one bucket:
   GitHub suggested-change blocks, Copilot-style inline fixes, clear
   "should be X" with X spelled out, typos, missing imports, doc
   corrections.
-- **push-back** — suggestion conflicts with repo conventions (CLAUDE.md),
+- **push-back** — suggestion conflicts with repo conventions (AGENTS.md),
   plan constraints, or is factually wrong. You can explain the
   disagreement in one sentence.
 - **defer** — valid concern but out of scope for this PR (tracked as

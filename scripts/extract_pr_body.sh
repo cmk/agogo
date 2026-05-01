@@ -2,7 +2,7 @@
 # Extracts the PR body from doc/reviews/review-NNNNN.md.
 #
 # The review file's `## Summary` section is the single source of truth
-# for the PR body (see CLAUDE.md "Tier 1 — Local review"). This script
+# for the PR body (see AGENTS.md "Tier 1 — Local review"). This script
 # extracts that section so `gh pr create --body-file` can feed it
 # straight to GitHub:
 #
@@ -46,7 +46,8 @@ fi
 
 # Extract between `## Summary` (exclusive) and the first review-round
 # marker (exclusive). Review markers are `## Local review (YYYY-MM-DD)`
-# from /sprint-review and `<!-- gh-id: N -->` from pull_reviews.py.
+# from the local review transition and `<!-- gh-id: N -->` from
+# pull_reviews.py.
 # Stopping at review markers (rather than any `## ` heading) lets the
 # PR body contain sibling sections like `## Test plan` without being
 # truncated.

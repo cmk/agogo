@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# check-floats.sh — CI gate for CLAUDE.md's no-stored-float rule.
+# check-floats.sh — CI gate for AGENTS.md's no-stored-float rule.
 #
 # `f32` / `f64` may appear only in the documented exception
 # modules listed below. Each file is allowed because its contents
 # fall into one of the five enumerated exception categories
-# (CLAUDE.md §Repository conventions):
+# (AGENTS.md §Repository conventions):
 #
 #   crates/core/src/control/sync/pll.rs           PI controller state + control law
 #   crates/core/src/control/sync/detect.rs        parabolic-fit ABI-local locals
@@ -43,7 +43,7 @@
 #
 # Any `f32` / `f64` in a non-allowlisted file is a build failure.
 # To add a new allowlisted file, amend both this script and
-# CLAUDE.md so the rule and the gate stay in sync.
+# AGENTS.md so the rule and the gate stay in sync.
 #
 # Known limitation: the regex `\bf32\b|\bf64\b` matches occurrences
 # inside string literals, format strings, and inline comments after
@@ -171,7 +171,7 @@ check-floats.sh: FAIL. Fix by one of:
     and compose an existing Conn to do the conversion at the boundary.
   - If the float genuinely belongs in one of the documented exception
     classes (PI, PCM ABI, ABI-local, argv, Link FFI), add the file to
-    this script's ALLOWED list AND amend CLAUDE.md's exception list
+    this script's ALLOWED list AND amend AGENTS.md's exception list
     so the gate and the rule stay in sync.
 
 HINT
