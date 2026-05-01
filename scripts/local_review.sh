@@ -9,6 +9,8 @@ cd "$repo_root"
 if [ "${1:-}" = "--check" ]; then
   command -v codex >/dev/null
   codex review --help >/dev/null
+  command -v gh >/dev/null
+  scripts/review_path.sh >/dev/null
   scripts/workflow_state.sh
   exit 0
 fi
