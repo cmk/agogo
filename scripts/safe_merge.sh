@@ -17,7 +17,7 @@
 # tracking ref. Re-run after `git push`.
 #
 # Usage:
-#   scripts/safe_merge.sh <gh-pr-merge-args...>
+#   scripts/safe_merge.sh [<gh-pr-merge-args...>]
 #
 # Examples:
 #   scripts/safe_merge.sh 17                      # interactive
@@ -28,29 +28,58 @@
 # guard passes.
 set -euo pipefail
 
-if [ $# -lt 1 ]; then
+if [ $# -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
   cat >&2 <<'USAGE'
-usage: safe_merge.sh <gh-pr-merge-args...>
+usage: safe_merge.sh [<gh-pr-merge-args...>]
 
 Resolves the PR's head branch via `gh pr view`, then refuses to run
 if that local branch is ahead of its remote tracking ref. All
 arguments are forwarded to `gh pr merge` once the guard passes.
 USAGE
-  exit 64
+  exit 0
 fi
 
 # Resolve the PR's head ref. `gh pr view` accepts the same first-arg
 # shapes as `gh pr merge` — number, URL, branch name, or no arg
-# (defaulting to the current branch's open PR). The first arg is a
-# selector iff it doesn't start with `-`.
+# (defaulting to the current branch's open PR). To keep the guard and
+# forwarded merge command checking the same PR, require any explicit
+# selector to come before flags.
+if [ $# -ge 1 ] && [ "${1#-}" != "$1" ]; then
+  previous_takes_value=false
+  for arg in "$@"; do
+    if [ "$previous_takes_value" = true ]; then
+      previous_takes_value=false
+    elif [ "${arg#-}" = "$arg" ]; then
+      echo "safe_merge.sh: PR selector must come before merge flags: $arg" >&2
+      echo "  usage: scripts/safe_merge.sh [<pr>] [<gh-pr-merge-flags...>]" >&2
+      exit 1
+    else
+      case "$arg" in
+        -A|--author-email|-b|--body|-F|--body-file|--match-head-commit|-t|--subject|-R|--repo)
+          previous_takes_value=true
+          ;;
+      esac
+    fi
+  done
+fi
+
+declare -a pr_selector
+pr_selector_text=''
 if [ $# -ge 1 ] && [ "${1#-}" = "$1" ]; then
   pr_selector=("$1")
+  pr_selector_text="$1"
 else
   pr_selector=()
 fi
 
-if ! head_ref=$(gh pr view "${pr_selector[@]}" --json headRefName --jq .headRefName 2>/dev/null); then
-  echo "safe_merge.sh: failed to resolve PR head ref via 'gh pr view ${pr_selector[*]}'." >&2
+if [ ${#pr_selector[@]} -gt 0 ]; then
+  head_ref_cmd=(gh pr view "${pr_selector[@]}" --json headRefName --jq .headRefName)
+else
+  head_ref_cmd=(gh pr view --json headRefName --jq .headRefName)
+fi
+
+if ! head_ref=$("${head_ref_cmd[@]}" 2>/dev/null); then
+  echo "safe_merge.sh: failed to resolve PR head ref via 'gh pr view $pr_selector_text'." >&2
   echo "  is the PR specifier valid, and are you authenticated to gh?" >&2
   exit 1
 fi
@@ -91,10 +120,11 @@ $ahead
 Per doc/workflow.md, the merge transition starts from gh_review (push
 complete), not round_unpushed. Push first, then re-run:
 
-    git push origin $head_ref
-    $0 $*
-
 EOF
+  printf '    git push origin %q\n' "$head_ref" >&2
+  printf '    %q' "$0" >&2
+  printf ' %q' "$@" >&2
+  printf '\n\n' >&2
   exit 1
 fi
 
