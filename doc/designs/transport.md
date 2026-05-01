@@ -4,13 +4,13 @@
 problem, anti-windup on jump) and 1519–1631 (`PlayState` enum, the
 Stopped/Starting/Running/Realigning transitions, warm-up state).
 
-**Context**: v0.5 Sprint 01 is the Transport FSM — the concrete
-replacement for agogo.md §10's open question about NEG/POS one-bar
-forerun semantics. This doc triages Gemini's Link-centric FSM sketch
+**Context**: v0.3 owns clock-domain follower/source behavior, including
+the transport FSM that resolves agogo.md's open NEG/POS one-bar
+forerun question. This doc triages Gemini's Link-centric FSM sketch
 into agogo's shape: transport lives above the `PhaseSource` enum and
 its job is to sequence Play/Stop/Locate with forerun alignment,
 independent of whether the phase source is Internal, External
-(audio-sync PLL), or Link.
+(audio-sync PLL), MIDI clock, or Link.
 
 ## Adopt
 
@@ -40,9 +40,8 @@ independent of whether the phase source is Internal, External
   belong here, even though the chat only glances at them. On
   `Play`, compute the first downbeat and *negatively* offset the
   start time by one bar so downstream gear has a full bar of
-  clock pulses before the "real" downbeat. The v0.5 verification
-  table already names `transport_forerun_lands_on_bar` as a
-  required property.
+  clock pulses before the "real" downbeat. This is part of v0.3's
+  declared phase behavior for source switching and transport start.
 
 ## Defer
 
@@ -53,8 +52,8 @@ independent of whether the phase source is Internal, External
   demonstrated — don't pre-wire it.
 - **MMC (MIDI Machine Control) transport integration.** Send
   MMC Stop/Start/Locate to hardware that chases. Belongs alongside
-  MTC (see `mtc.md`), not in the core FSM. Park as a post-0.5
-  enhancement.
+  MTC (see `mtc.md`), not in the core FSM. Park as a later product
+  integration enhancement.
 
 ## Reject
 

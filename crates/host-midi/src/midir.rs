@@ -12,8 +12,8 @@ use thiserror::Error;
 ///
 /// `Mutex` interior wraps `MidiOutputConnection` because midir's
 /// connection type is `!Sync`. The lock is only acquired on the
-/// drain thread Plan 13 T3 will wire (`crates/host-cpal/src/cpal/
-/// control.rs`); the audio thread never touches the sink.
+/// drain thread (`crates/host-cpal/src/cpal/control.rs`); the audio
+/// thread never touches the sink.
 pub struct MidirSink {
     conn: std::sync::Mutex<::midir::MidiOutputConnection>,
     port_name: String,
@@ -74,9 +74,8 @@ impl MidiSink for MidirSink {
     /// send (typically a disconnected port) is logged via `tracing`
     /// and dropped: the alternative would be to surface the error
     /// up through `MidiSink::send_at`'s signature, which the
-    /// trait deliberately doesn't carry. Plan 13's drain thread
-    /// can poll the underlying `MidirSink` for diagnostic state if
-    /// needed.
+    /// trait deliberately doesn't carry. The drain thread can poll
+    /// the underlying `MidirSink` for diagnostic state if needed.
     fn send_at(&self, msg: &[u8], _at_sample: u64) {
         match self.conn.lock() {
             Ok(mut conn) => {
@@ -113,10 +112,9 @@ mod tests {
 
     /// `list_output_ports` should not panic. It may return an empty
     /// `Vec` on a host with no MIDI ports (typical for CI runners
-    /// without a virtual MIDI bus); that's acceptable — Plan 14's
-    /// `agogo run` acceptance path is where a real loopback
-    /// fixture lands (Plan 13 T6 is deferred per the plan's
-    /// Review section).
+    /// without a virtual MIDI bus); that's acceptable. The
+    /// hardware-backed `agogo run` acceptance path is where a real
+    /// loopback fixture belongs.
     #[test]
     fn list_output_ports_does_not_panic() {
         // Behaviour: returns Ok(...) even when empty. Surfaces

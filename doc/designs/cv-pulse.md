@@ -3,9 +3,9 @@
 **Source**: note lines 448–560 (single-sample impulse, bipolar reset)
 and 1883–1926 (the "pending reset" flag in the full audio callback).
 
-**Context**: v0.4 Sprint 03 ships `out/audio` + cpal output host and
-owns properties `cv_impulse_is_sample_accurate` and
-`cv_impulse_energy_is_one_sample`.
+**Context**: v0.4 ships CV/gate output through the heterogeneous output
+layer and owns properties `cv_impulse_sample_exact` and
+`cv_impulse_one_sample_energy`.
 
 ## Adopt
 
@@ -13,7 +13,7 @@ owns properties `cv_impulse_is_sample_accurate` and
   at full scale followed by zero. Hardware clock inputs trigger on
   the rising edge, which means the pulse's energy can be confined to
   one sample without hurting detection. This is exactly the v0.4
-  `cv_impulse_energy_is_one_sample` property.
+  `cv_impulse_one_sample_energy` property.
 - **Bipolar option (±1.0) to avoid DC creep on AC-coupled outputs.**
   Many audio interfaces have AC coupling on outputs; a monopolar
   train of 1.0 spikes drifts the DC offset and eventually the
@@ -38,7 +38,7 @@ owns properties `cv_impulse_is_sample_accurate` and
 
 - **Widening the pulse to 2–4 samples if an interface's
   anti-aliasing filter smears a 1-sample spike.** Worth having as a
-  `--pulse-width N` CLI flag but not a v0.4 concern — v0.4 proves
+  `--pulse-width N` CLI flag but not a v0.4 baseline concern — v0.4 proves
   sample-accurate alignment, which is the hard part. Extra-width
   modes are cosmetic once the timing is right.
 

@@ -59,7 +59,7 @@ impl AudioHost for CpalHost {
         cfg: Config,
         mut cb: Box<dyn FnMut(&mut AudioIo) + Send>,
     ) -> Result<Handle, AudioHostError> {
-        // Plan 13 enforces mono input. The `AudioIo::input` slice is
+        // Current cpal input support is mono. The `AudioIo::input` slice is
         // passed straight through to `PhaseSource::feed_samples`,
         // which treats it as mono PCM — interleaving it would
         // corrupt the PLL's pulse detection. Multi-channel input
@@ -73,7 +73,7 @@ impl AudioHost for CpalHost {
         // from "the audio driver blew up".
         if cfg.input_channels != 1 {
             return Err(AudioHostError::UnsupportedConfig(format!(
-                "Plan 13 supports only mono input (input_channels=1); \
+                "cpal input currently supports only mono input (input_channels=1); \
                  got input_channels={}. Multi-channel input lands in v0.4.",
                 cfg.input_channels
             )));
@@ -148,9 +148,9 @@ impl AudioHost for CpalHost {
                 // callback per stream, so a captured `u64` (no atomic)
                 // is sufficient.
                 let mut next_start: u64 = 0;
-                // Zero-length output stub — CV output is v0.4's
-                // `out/audio`. Kept as a stable empty slice so the
-                // callback closure doesn't allocate per buffer.
+                // Zero-length output stub until v0.4's CV/gate output work.
+                // Kept as a stable empty slice so the callback closure
+                // doesn't allocate per buffer.
                 let mut output_stub: [f32; 0] = [];
 
                 let data_cb = move |samples: &[f32], _info: &InputCallbackInfo| {
@@ -246,10 +246,9 @@ mod tests {
 
     /// `CpalHost::list_input_devices` never panics; it may return
     /// an empty list on a host with no input devices (typical for
-    /// CI runners without audio). That's acceptable — Plan 14's
-    /// `agogo run` acceptance path is where a real hardware
-    /// fixture lands (Plan 13 T6 is deferred per the plan's
-    /// Review section).
+    /// CI runners without audio). That's acceptable. The
+    /// hardware-backed `agogo run` acceptance path is where a real
+    /// fixture belongs.
     #[test]
     fn list_input_devices_is_infallible() {
         let _devices = CpalHost::list_input_devices();

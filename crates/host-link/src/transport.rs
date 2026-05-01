@@ -1,8 +1,8 @@
 //! Transport FSM — minimal `{Stopped, Playing}` shim around Link's
 //! `is_playing` flag with a one-shot user-publish gate.
 //!
-//! Declared via `rust-fsm 0.7`'s macro DSL so v0.5 Sprint 01's NEG/POS
-//! one-bar forerun work can **extend** this declaration (adding
+//! Declared via `rust-fsm 0.7`'s macro DSL so v0.3's NEG/POS one-bar
+//! forerun work can **extend** this declaration (adding
 //! `PreRoll` + a forerun-aware stop state) rather than rewriting a
 //! hand-rolled `match`.
 //!
@@ -48,11 +48,10 @@ state_machine! {
 
 // Re-export the generated types under stable public names so
 // downstream code doesn't have to touch the `transport_fsm::` path
-// (which will gain more states in v0.5 Sprint 01).
+// (which will gain more states in v0.3 follower/source work).
 
-/// The two transport states Plan 09 ships. Extended with `PreRoll`
-/// (and possibly a forerun-aware stop-pending state) in v0.5
-/// Sprint 01.
+/// The two current transport states. Extended with `PreRoll` (and
+/// possibly a forerun-aware stop-pending state) in v0.3.
 pub type TransportState = transport_fsm::State;
 
 /// The four input events the FSM accepts: two Link-originated mirror

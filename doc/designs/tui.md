@@ -35,7 +35,7 @@ first.
   thread writes a compact snapshot (`AgogoSnapshot`) via a wait-
   free primitive — `triple_buffer` or equivalent. The TUI thread
   polls at 30 Hz. The snapshot lives in agogo core and exists for
-  the standalone TUI first. v0.4's "push to stdio-core" work then
+  the standalone TUI first. v0.2's "publish to stdio-core" work then
   reuses the same type — the host adapter serializes it to
   `ObservationParams` and ships it through `ObservationDispatcher`
   — but the standalone read path isn't downstream of that: both
@@ -43,8 +43,8 @@ first.
 - **Monotonic `seq` on the snapshot.** Primarily for the TUI's
   flash-decay logic (flash when `seq > last_seen_seq`). Happens
   to also satisfy stdio-core's observation contract (consumer
-  detects drops), which is why v0.4's
-  `seq_monotonic_under_decimation` property reads on it.
+  detects drops), which is why v0.2's `snapshot_gap_detectable`
+  property reads on it.
 - **Fine/coarse/alt modifier ladder on nudge keys.** `←/→` = 1
   sample, `Shift+←/→` = 100 samples (~2 ms), `Alt+←/→` = 1 tick
   (50 samples @ 48 k/960). Matches hardware-clock muscle memory.
@@ -82,7 +82,7 @@ first.
   load number misses.
 - **`tui-logger` for a scrollable in-TUI log pane.** Nice-to-have
   once we have a reason to surface runtime events in the TUI.
-  v0.3's stdio-core dispatch already channels structured log
+  v0.2's stdio-core dispatch already channels structured log
   events out-of-band; don't duplicate.
 - **GPU-terminal dev guidance (Alacritty/Kitty).** Gemini lines
   2474–2476. Environmental advice; not a design decision. Park

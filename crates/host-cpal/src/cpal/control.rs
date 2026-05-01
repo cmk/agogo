@@ -1,6 +1,6 @@
 //! RT control plane — `rtrb` SPSC + drain thread.
 //!
-//! The audio callback (Plan 13 T4) cannot call
+//! The audio callback cannot call
 //! [`MidiSink::send_at`] directly: midir locks, CoreMIDI / JACK can
 //! allocate, any of those would stall the audio thread. Instead the
 //! callback enqueues a fixed-size [`MidiMessage`] into an `rtrb`
@@ -17,10 +17,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 
-/// Stack-allocated MIDI message payload. Plan 12 only emits
-/// single-byte System Real-Time messages (`0xF8` / `0xFA` / `0xFB`
-/// / `0xFC`); the 3-byte capacity leaves room for Plan 14's
-/// `MidiCc` rendering without growing the ring's element size.
+/// Stack-allocated MIDI message payload. Current System Real-Time and
+/// channel-message renderers fit in three bytes (`0xF8` / `0xFA` /
+/// `0xFB` / `0xFC`, Note On/Off, CC) without growing the ring's
+/// element size.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct MidiMessage {
     pub at_sample: u64,
@@ -31,7 +31,7 @@ pub struct MidiMessage {
 
 impl MidiMessage {
     /// Build a `MidiMessage` from a slice. Truncates to 3 bytes if
-    /// `msg` is longer (debug-asserts in development) — Plan 12's
+    /// `msg` is longer (debug-asserts in development) — current
     /// renderers always send ≤ 3 bytes, so the truncation path is
     /// reachable only via programmer error.
     pub fn from_slice(msg: &[u8], at_sample: u64) -> Self {
@@ -66,7 +66,7 @@ impl MidiMessage {
 /// Construct a paired producer / consumer with a ring buffer of
 /// `capacity` `MidiMessage` slots.
 ///
-/// Default Plan 13 sizing: 1024. At 48 kHz / 120 BPM / PPQN 192 /
+/// Default sizing: 1024. At 48 kHz / 120 BPM / PPQN 960 /
 /// `divider = T32t` (24 PPQN MIDI clock), the producer emits ~48
 /// messages per second; 1024 is ~20 s of buffered headroom. The
 /// drain thread typically processes each message in well under a
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn rt_producer_impls_midi_sink_via_try_push() {
         let (prod, mut cons) = spsc(8);
-        // Use the trait method to push, mirroring how Plan 12's
+        // Use the trait method to push, mirroring how
         // `render_clock_block` invokes the sink.
         MidiSink::send_at(&prod, &[0xF8], 24_000);
         let drained = cons.inner.pop().expect("ring should have one msg");
@@ -281,10 +281,9 @@ mod tests {
     }
 
     proptest! {
-        /// Plan 13 property `spsc_push_pop_fifo`: bounded sequences
-        /// of messages pushed into the ring emerge in FIFO order on
-        /// the consumer side, with the count preserved up to the
-        /// ring's effective capacity.
+        /// Bounded sequences of messages pushed into the ring emerge
+        /// in FIFO order on the consumer side, with the count
+        /// preserved up to the ring's effective capacity.
         #[test]
         fn spsc_push_pop_fifo(msgs in prop::collection::vec(arb_msg(), 0..32)) {
             let cap = 64;
@@ -300,8 +299,7 @@ mod tests {
             prop_assert_eq!(out, msgs);
         }
 
-        /// Plan 13 property `spsc_overrun_is_counted`: when N
-        /// items push against a ring of capacity C with no
+        /// When N items push against a ring of capacity C with no
         /// consumer activity, every rejected push bumps
         /// `dropped_count()` by exactly 1.
         ///
@@ -335,9 +333,8 @@ mod tests {
         }
     }
 
-    /// Plan 13 property `drain_thread_forwards_all_messages`: the
-    /// drain thread forwards every producer-pushed message to the
-    /// sink in FIFO order, and `DrainHandle::drop` flushes the
+    /// The drain thread forwards every producer-pushed message to
+    /// the sink in FIFO order, and `DrainHandle::drop` flushes the
     /// ring before joining.
     ///
     /// Implemented as a deterministic unit test (rather than a

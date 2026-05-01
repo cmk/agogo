@@ -28,7 +28,7 @@ pub mod spec;
 pub mod time;
 
 // `CvRole` and `DinRole` are forward-compat scaffolding for v0.4
-// (CV pulse / LFO via `sink/audio`) and v0.2 (DIN sync24) backends —
+// heterogeneous output backends —
 // neither has a renderer in v0.1. Marked `#[doc(hidden)]` so they
 // don't surface in `cargo doc` as user-facing API; the attribute
 // comes off in the plan that ships the corresponding renderer.

@@ -5,11 +5,12 @@ mapping, CPAL `playback` timestamp, start/stop), 1750–1848 (quantum
 calculation, wrapped-error PID math), 1519–1631 (Link as a
 `PhaseSource` inside the transport FSM).
 
-**Context**: v0.5 Sprint 02 is `PhaseSource::Link` — wrap `rusty_link`
-or equivalent as a new variant of agogo's `PhaseSource` enum
-(currently `Internal | External(Pll)` per agogo.md §3). This doc is
-the Link-specific half of the v0.5 work; the PID/FSM sides live in
-`pid.md` and `transport.md`.
+**Context**: v0.3 owns Link follower/source behavior. The existing
+`agogo-host-link` scaffolding wraps `rusty_link`; v0.3 turns that
+session surface into a clock-domain implementation that can follow
+or publish Link while preserving agogo's integer tick stream. This
+doc is the Link-specific half of that work; the PID/FSM sides live
+in `pid.md` and `transport.md`.
 
 ## Adopt
 
@@ -18,8 +19,8 @@ the Link-specific half of the v0.5 work; the PID/FSM sides live in
   continuous-float; agogo's phase is `Tick(u32)`. Assigning would
   produce a jump on every callback because of rounding. Running a
   PID over the error keeps agogo's tick stream internally smooth
-  while staying externally phase-locked. This is the core
-  v0.5 design.
+  while staying externally phase-locked. This is the core v0.3 Link
+  follower design.
 - **Query Link with cpal's `playback` timestamp, not `callback`.**
   `info.timestamp().playback` is the instant the first sample of
   this buffer will hit the DAC. Asking Link where the beat will be
@@ -51,8 +52,8 @@ the Link-specific half of the v0.5 work; the PID/FSM sides live in
 ## Defer
 
 - **Publishing "jump events" to the TUI as a sticky flag.** Gemini
-  lines 1388–1394. Cleaner approach: route through the v0.4
-  observation snapshot — transport state + last-sync-state become
+  lines 1388–1394. Cleaner approach: route through the `agogo-state`
+  snapshot — transport state + last-sync-state become
   fields on `AgogoSnapshot`, and the sticky-flag behavior lives in
   the TUI-side consumer (or in stdio-core's renderer for
   dispatched TUI flows).

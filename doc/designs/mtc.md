@@ -3,8 +3,9 @@
 **Source**: note lines 2199–2378 (MTC vs MIDI Clock, quarter-frame
 state machine, SMPTE frame-rate prime-factorization, non-drop advice).
 
-**Context**: v0.5 Sprint 04 is MTC quarter-frame generation. The
-v0.5 verification includes `mtc_quarter_frame_round_trips` —
+**Context**: v0.4 owns MTC quarter-frame generation as part of
+heterogeneous output dispatch. The v0.4 verification includes
+`mtc_quarter_frame_roundtrips` —
 generated MTC fed back through a reference reader must recover the
 original SMPTE timecode exactly.
 
@@ -40,11 +41,11 @@ original SMPTE timecode exactly.
 
 - **MMC (MIDI Machine Control) Stop/Start/Locate.** Natural
   companion to MTC — a hardware recorder receiving MTC + MMC can
-  chase agogo's transport. Belongs in a post-0.5 sprint; name the
-  sprint-slot `mmc-transport` and note it as a v0.5 deferred item.
+  chase agogo's transport. Belongs in a later product-integration
+  sprint, not in the v0.4 MTC generator.
 - **TUI display of the current SMPTE position.** Trivial once the
   MTC generator holds an `(hh, mm, ss, ff)` field; surfaces
-  through the v0.4 observation snapshot. Add it when agogo's TUI
+  through `agogo-state` output-health extensions. Add it when agogo's TUI
   grows a timecode widget, not before.
 
 ## Reject

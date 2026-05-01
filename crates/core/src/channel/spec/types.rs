@@ -16,8 +16,8 @@ use crate::time::swing::SwingConfig;
 /// Audit P4 (Plan 22): the spec carries no routing-target tag —
 /// every `ChannelSpec` is implicitly MIDI-targeted, because that's
 /// the only target the parser produces today (`dev=audio` is
-/// rejected at parse time as `AudioDeferred`). When v0.2/v0.4 add
-/// `dev=din` or `dev=cv` parsers, `ChannelSpec` becomes a sum type
+/// rejected at parse time as `AudioDeferred`). When later output work
+/// adds `dev=din` or `dev=cv` parsers, `ChannelSpec` becomes a sum type
 /// `enum { Midi, Din, Cv }` mirroring [`Channel`](crate::channel::Channel)'s
 /// variants from audit P3.
 #[derive(Debug, Clone, PartialEq)]

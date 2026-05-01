@@ -27,10 +27,9 @@ agogo-core = { path = "../core" }
 # gitignored `.cargo/config.toml` `[patch.crates-io]` section, see
 # `crates/host-link/README.md`.
 rusty_link = { version = "=0.4.8", optional = true }
-# Declarative transport FSM. The minimal {Stopped, Playing} FSM this
-# sprint ships is the scaffolding v0.5 Sprint 01 extends with forerun
-# states — `rust-fsm`'s macro DSL avoids a later rewrite from a
-# hand-rolled `match`.
+# Declarative transport FSM. The minimal {Stopped, Playing} FSM is
+# scaffolding that v0.3 extends with forerun states — `rust-fsm`'s
+# macro DSL avoids a later rewrite from a hand-rolled `match`.
 rust-fsm = { version = "0.7", optional = true }
 
 [dev-dependencies]

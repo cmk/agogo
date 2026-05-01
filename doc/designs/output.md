@@ -5,11 +5,11 @@ routing, heterogeneous `OutputFormat` enum, dispatcher thread,
 latency-mismatch discussion) and 687–786 (OSC sync as a peer
 protocol).
 
-**Context**: v0.5 Sprint 03 is heterogeneous output dispatch — one
+**Context**: v0.4 owns heterogeneous output dispatch — one
 channel on CV, one on MIDI, one on OSC, one on MTC, all sample-
-aligned via per-format latency compensation. v0.5 verification
-names `hetero_dispatch_preserves_tick_order` and
-`per_format_latency_compensation_is_sample_accurate`.
+aligned via per-format latency compensation. v0.4 verification names
+`hetero_dispatch_preserves_tick_order`, `latency_compensation_is_declared`,
+and `diagnostic_sink_reports_jitter`.
 
 ## Adopt
 
@@ -19,7 +19,7 @@ names `hetero_dispatch_preserves_tick_order` and
   carries its own routing specifier. Sits on `Channel` next to
   the existing `ChannelMode` (see `crates/core/src/channel/mode.rs`).
   Likely `ChannelMode` and `OutputFormat` merge into one enum in
-  v0.5 — design the naming then.
+  v0.4 — design the naming then.
 - **Two-phase dispatch: compute tick → sample index on RT,
   dispatch non-audio from a worker.** CV writes directly into the
   cpal output buffer inside the RT callback. MIDI/OSC events get
@@ -32,8 +32,8 @@ names `hetero_dispatch_preserves_tick_order` and
   rtpMIDI/network OSC is tens of ms plus jitter. Each format
   declares its compensation, and the dispatch layer subtracts it
   from the target host-time so all formats land on "the one"
-  simultaneously. This is the content of the
-  `per_format_latency_compensation_is_sample_accurate` property.
+  simultaneously. The v0.4 contract is truthful capability reporting:
+  exact, measured, estimated, or unsupported.
 - **MIDI Clock at 24 PPQN, derived from the master tick stream.**
   At agogo's 192/960 PPQN master, one MIDI tick (0xF8) every
   `PPQN/24` master ticks — integer at both 192 and 960. Send
@@ -48,7 +48,7 @@ names `hetero_dispatch_preserves_tick_order` and
 ## Defer
 
 - **OSC-based peer-to-peer sync (agogo ↔ agogo over OSC).**
-  Mentioned in the chat but not a v0.5 requirement. Ableton Link
+  Mentioned in the chat but not a v0.4 requirement. Ableton Link
   is the supported peer protocol; OSC is output-only unless a
   concrete use case surfaces.
 - **SIMD-optimized interleaving for 32+ channels.** Gemini's
@@ -57,7 +57,7 @@ names `hetero_dispatch_preserves_tick_order` and
   an open question. Until that's answered "N generic and > 16,"
   don't spend on SIMD.
 - **Auto-detection of physical interface output count.** Useful
-  polish for the CLI, but in v0.5 the user passes a flag
+  polish for the CLI, but in v0.4 the user passes a flag
   (`--cv-out-device`, `--midi-out-port`, …). Device enumeration is
   cpal-level boilerplate and belongs near the CLI arg parsing.
 

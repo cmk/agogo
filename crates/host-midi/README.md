@@ -3,8 +3,8 @@
 midir back-end for `agogo_core::sink::midi::MidiSink`. Cross-platform
 MIDI output for v0.1 (~1 ms USB-bus dispatch jitter per
 `doc/agogo.md` §4); platform-native sinks (CoreMIDI, JACK,
-ALSA-MIDI, WinMM) that tighten the precision side land post-v0.5
-as sibling crates.
+ALSA-MIDI, WinMM) that tighten the precision side land as v0.2+
+timestamped-output sibling crates.
 
 Not a workspace member by design — `cargo test --workspace` skips
 it so the default CI path doesn't pull midir + its platform
@@ -40,10 +40,9 @@ sudo apt-get install libasound2-dev
 
 ### Hardware loopback test
 
-Plan 13 T6 (the `midir_loopback_roundtrip` fixture-gated hardware
-test) is deferred — see Plan 13's Review section. Plan 14 will land
-this alongside `agogo run`'s acceptance scenario. The local set-up
-will be:
+The `midir_loopback_roundtrip` fixture-gated hardware test belongs
+with `agogo run`'s hardware-backed acceptance scenario. The local
+set-up will be:
 
 - **macOS**: enable IAC bus in Audio MIDI Setup.
 - **Linux**: load `snd-virmidi` and connect the two virtual ports.

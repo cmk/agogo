@@ -196,7 +196,8 @@ Pragmatic resolution: introduce a parallel `SampleTickConn { sr, bpm, ppqn }` st
 ## 8. Libraries
 
 - **`cpal`** — cross-platform audio baseline. Sample-accurate output buffers.
-- **`midir`** — MIDI transport for v0; replace with platform sinks behind `MidiSink` for precision work.
+- **`midir`** — best-effort MIDI transport for the v0.1 baseline; v0.2+
+  work distinguishes it from timestamped platform sinks behind `MidiSink`.
 - **`rtrb`** — lock-free SPSC (control → RT).
 - **`serde` + `ciborium`** — preset persistence.
 - **`proptest`** — per connections-repo convention.
@@ -207,9 +208,11 @@ Pragmatic resolution: introduce a parallel `SampleTickConn { sr, bpm, ppqn }` st
 - **Tempo glide**: should internal-master tempo changes apply instantly (hardware-faithful, occasional hiccup on big jumps) or through a one-pole glide filter (musically nicer)?
 - **Shift buffer budget**: negative shift requires a ring buffer of future ticks. What's the maximum forward-look we budget — 300 ms to match the hardware, or more?
 - **rtp-MIDI / network-MIDI**: worth a backend, or strictly local I/O?
-- **Ableton Link**: wrap the C++ library as a `PhaseSource` variant, or defer entirely?
+- **Ableton Link**: v0.3 owns full follower/source behavior on top of the
+  existing host-link scaffolding.
 - **Preset SR-agnosticism**: a preset saved at 48 k — the Tick-master design should make it sample-rate-agnostic. Worth testing explicitly as a proptest invariant.
-- **Transport FSM**: the NEG/POS "one-bar forerun" semantics from the manual need a concrete FSM spec before Sprint 2.
+- **Transport FSM**: v0.3 owns the NEG/POS one-bar forerun semantics and
+  source-switch phase behavior.
 - **Output channel count**: hardware is 4. Should the software version be `N` generic, or fix the count?
 
 ---

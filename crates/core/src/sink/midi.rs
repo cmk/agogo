@@ -1,11 +1,10 @@
 //! MIDI clock byte emission + the [`MidiSink`] trait.
 //!
-//! Plan 12 (v0.1 output-chain slot 1 of 3). Pure-logic: defines the
-//! back-end-agnostic sink contract and emits `0xF8` clock bytes +
-//! `0xFA`/`0xFB`/`0xFC` transport bytes. Real back-ends (midir,
-//! CoreMIDI, JACK, …) live in sibling crates and implement
-//! [`MidiSink`]. Plan 13 ships the first real back-end
-//! (`crates/host-midi`).
+//! Pure-logic MIDI output: defines the back-end-agnostic sink contract
+//! and emits `0xF8` clock bytes + `0xFA`/`0xFB`/`0xFC` transport
+//! bytes. Real back-ends (midir, CoreMIDI, JACK, …) live in sibling
+//! crates and implement [`MidiSink`]. `crates/host-midi` is the
+//! current best-effort midir back-end.
 
 // ── Status bytes (MIDI 1.0 §System Real-Time Messages) ──────────────
 
@@ -35,7 +34,7 @@ pub const MIDI_NOTE_OFF: u8 = 0x80;
 /// only ever sees monotonic sample counts.
 ///
 /// **RT safety.** Implementations may allocate or take locks
-/// (`midir` does both). Plan 13's `rt/control.rs` wires an `rtrb`
+/// (`midir` does both). `host-cpal` wires an `rtrb`
 /// drain thread so the audio callback enqueues `(bytes, at_sample)`
 /// pairs without calling `send_at` directly.
 pub trait MidiSink: Send {
@@ -52,8 +51,8 @@ pub struct TestRecord {
 }
 
 /// In-memory [`MidiSink`] for tests. Stores every `send_at` call in
-/// FIFO order. Not RT-safe (takes a `Mutex`); Plan 13's real
-/// back-ends are the production path.
+/// FIFO order. Not RT-safe (takes a `Mutex`); back-end sinks are the
+/// production path.
 #[derive(Default, Debug)]
 pub struct TestSink {
     inner: std::sync::Mutex<Vec<TestRecord>>,
@@ -108,10 +107,10 @@ pub fn render_clock_block(events: &[ScheduledEvent], sink: &dyn MidiSink) {
 
 /// Single-byte MIDI System Real-Time transport messages.
 ///
-/// Plan 12 exposes the byte-level enum only. Plan 14's transport FSM
-/// (`doc/designs/transport.md`) owns the higher-level `TransportEvent`
-/// type (`Play`, `Stop`, `Locate`, `PhaseSource*`) and maps its
-/// transitions down to these bytes per buffer.
+/// The byte-level enum stays deliberately small. The transport FSM
+/// (`doc/designs/transport.md`) owns higher-level transport events
+/// (`Play`, `Stop`, `Locate`, `PhaseSource*`) and maps its transitions
+/// down to these bytes per buffer.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MidiRtByte {
     Start,
@@ -196,7 +195,7 @@ use crate::channel::role::{ChannelCommon, MidiRole};
 /// must be `Some(_)` for `MidiRole::Click(_)`; non-`Machine`
 /// callers (the `Clock`-only render-path tests) pass `None`.
 ///
-/// `common` is unused today — v0.5's per-channel mute / mix /
+/// `common` is unused today — later per-channel mute / mix /
 /// transport-state logic threads through it. Borrowed (not
 /// copied) so the unused parameter doesn't silently grow.
 pub fn render_midi_channel(
@@ -508,8 +507,8 @@ mod tests {
         /// `TestSink.at_sample` list emitted by
         /// `render_midi_channel(..., transport: None, ...)` equals
         /// `tick_stream(...)`'s `ScheduledEvent.sample_index` list
-        /// bit-for-bit. Pins the composition contract Plan 13's RT
-        /// callback relies on.
+        /// bit-for-bit. Pins the composition contract the RT callback
+        /// relies on.
         // Bounds stay within `tick_stream`'s own tested domain
         // (`scheduler_block_equivalence` covers the same window).
         // The render path has no arithmetic on these values — this
