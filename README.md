@@ -11,7 +11,8 @@ under `.claude/`.
 Before pushing a sprint branch, run the local review transition:
 
 - Claude Code: `/sprint-review`
-- Codex or shell: `scripts/local_review.sh`
+- Codex or shell: `scripts/local_review.sh` with the `codex` CLI and
+  authenticated `gh` CLI available.
 
 Use `scripts/workflow_state.sh` to inspect the current workflow state
 before committing, reviewing, pushing, replying to review comments, or
