@@ -8,8 +8,8 @@ use bpaf::Bpaf;
 pub enum TimeOp {
     /// Print absolute tick positions for a schedule at a given TBase.
     /// On off-beat 16th-note steps the swing shift (if any) is
-    /// applied before printing, so odd steps come out earlier than
-    /// their nominal grid position.
+    /// applied before printing, so positive swing delays odd steps
+    /// relative to their nominal grid position.
     #[bpaf(command("schedule"))]
     Schedule(#[bpaf(external(schedule::schedule_args))] schedule::ScheduleArgs),
 }
