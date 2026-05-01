@@ -28,6 +28,11 @@
 # guard passes.
 set -euo pipefail
 
+if ! command -v gh >/dev/null 2>&1; then
+  echo "safe_merge.sh: gh CLI not found on PATH. Install GitHub CLI and authenticate before merging." >&2
+  exit 1
+fi
+
 if [ $# -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
   cat >&2 <<'USAGE'
 usage: safe_merge.sh [<gh-pr-merge-args...>]
@@ -63,6 +68,26 @@ if [ $# -ge 1 ] && [ "${1#-}" != "$1" ]; then
   done
 fi
 
+declare -a repo_args
+repo_args=()
+expect_repo_value=false
+for arg in "$@"; do
+  if [ "$expect_repo_value" = true ]; then
+    repo_args+=("$arg")
+    expect_repo_value=false
+    continue
+  fi
+  case "$arg" in
+    -R|--repo)
+      repo_args+=("$arg")
+      expect_repo_value=true
+      ;;
+    --repo=*)
+      repo_args+=("$arg")
+      ;;
+  esac
+done
+
 declare -a pr_selector
 pr_selector_text=''
 if [ $# -ge 1 ] && [ "${1#-}" = "$1" ]; then
@@ -73,9 +98,9 @@ else
 fi
 
 if [ ${#pr_selector[@]} -gt 0 ]; then
-  head_ref_cmd=(gh pr view "${pr_selector[@]}" --json headRefName --jq .headRefName)
+  head_ref_cmd=(gh pr view "${pr_selector[@]}" "${repo_args[@]}" --json headRefName --jq .headRefName)
 else
-  head_ref_cmd=(gh pr view --json headRefName --jq .headRefName)
+  head_ref_cmd=(gh pr view "${repo_args[@]}" --json headRefName --jq .headRefName)
 fi
 
 if ! head_ref=$("${head_ref_cmd[@]}" 2>/dev/null); then
