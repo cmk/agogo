@@ -181,7 +181,7 @@ unidirectional. To resolve:
   - If the import is a stale leftover from a refactor, delete it.
   - If the layering needs to expand (rare), add the new edge to
     the offending layer's `//! depends-on:` sentinel comment AND
-    document the rationale in CLAUDE.md.
+    document the rationale in AGENTS.md.
 
 HINT
     exit 1
