@@ -10,7 +10,47 @@ A Rust port/re-imagining of the E-RM Multiclock hardware (4-channel multi-format
 
 **Not in v1**: VST/AU plugin wrapper, hardware firmware replacement, the device UI (LEDs/encoder/menus), pitch-bend/CC remote control, DIN physical wiring (library emits the bit pattern; user provides the interface). See §11.
 
-## 2. Architecture: the Tick-master model
+## 2. Design Heuristics
+
+## Clock Source And Follower Design
+
+The clock subsystem should be explicit and central.
+
+Core types should include:
+
+- `ClockDomainId`: engine sample clock, audio device clock, Link clock, MTC, LTC, MIDI clock, DAW timeline, wall clock, and per-device clocks.
+- `ClockObservation`: source-domain observation captured with host sample time and protocol metadata.
+- `ClockEstimate`: phase, frequency ratio, jitter, confidence, and lock state.
+- `TimelineMap`: conversion between samples, seconds, bars/beats, and ticks.
+- `TransportSnapshot`: sample position, beat position, tempo, meter, loop, rolling state, and revision.
+
+For following, the engine should support:
+
+- lock acquisition and loss
+- drift smoothing
+- discontinuity detection
+- holdover when external clock packets disappear
+- manual source priority and automatic failover
+- bounded slew limits so corrections do not produce audible jumps
+
+For sourcing, the engine should support:
+
+- sample-accurate internal tempo
+- MIDI clock phase generation from sample position
+- MTC/LTC generation from sample position and frame-rate policy
+- Link beat-time publication from the transport map
+- deterministic event ordering when many outputs share the same sample
+
+Create a separate realtime contract for the engine boundary:
+
+- `SampleTime`, `FrameCount`, `SampleRate`, `TempoMapRevision`
+- `ClockDomainId`, `ClockObservation`, `ClockEstimate`
+- `TransportState`, `LocateTarget`, `LoopRegion`
+- `ScheduledEvent`, `EventDeadline`, `EventPriority`
+- `DevicePortId`, `ProtocolEndpointId`, `HardwareLatency`
+- bounded error and dropout reports
+
+### Tick-master model
 
 Time lives in layers, and only the bottom depends on runtime tempo/sample-rate:
 
@@ -26,40 +66,73 @@ Scheduling happens in Tick space. `Tick → Samples` conversion is parameterized
 
 The audio callback is the single real-time thread. It receives `AudioIo { input, output, buffer_start_sample, sample_rate, frames }`, advances the `PhaseSource`, schedules ticks per channel, and either writes samples (for CV/LFO outputs) or hands MIDI events with sample-indexed timestamps to a platform-native sink.
 
+### Realtime Contract
+
+- No network calls, model calls, JSON parsing, filesystem I/O, logging locks, heap allocation, mutex waits, subprocesses, or unbounded channels in the hard-time path.
+- Cross from soft time into hard time only through preallocated bounded queues, lock-free rings, atomics, double-buffered snapshots, or equivalent bounded primitives.
+- Express every scheduled action in an explicit time domain: sample frame, musical beat, bar/beat/tick, MIDI tick, wall clock, Link beat time, LTC/MTC timecode, or remote device clock.
+- Treat sample accuracy as an internal scheduling property, not a universal promise to external hardware. DIN MIDI, USB MIDI, network OSC, and some rack hardware add transport and device jitter. The system should model that uncertainty instead of hiding it.
+
+### Observability
+
+Realtime observability should be designed around counters and bounded events:
+
+- xrun count and last xrun sample
+- callback duration histogram
+- max scheduler occupancy
+- queue fill levels and drop counts
+- clock lock state, phase error, drift estimate, and jitter estimate
+- per-protocol send lateness and device latency estimates
+- external clock discontinuities and holdover intervals
+
+Do not call general tracing or analytics APIs from the callback. Instead, writ compact records into preallocated rings and let a soft observer convert them t logs, telemetry, UI notifications, or reports.
+
 ## 3. Module layout
 
 ```
-agogo/
-├── Cargo.toml       # features: cpal-audio, coremidi, alsa-midi, winmm, jack
-├── src/
-│   ├── lib.rs
-│   ├── time/        # port of Cirklon Time.hs (as a submodule, not a crate)
-│   │   ├── tbase.rs     # enum TBase + divisibility lattice (LCM/GCD)
-│   │   ├── tick.rs      # Tick(u32), Time { beats, base }
-│   │   ├── swing.rs     # SwingConfig, effective_tick
-│   │   ├── envelope.rs  # opening, closing, s_curve (LFO waveforms)
-│   │   └── conn.rs      # quantize_at, ticks, rat_tick
-│   ├── sync/
-│   │   ├── source.rs    # enum PhaseSource { Internal, External(Pll) }
-│   │   ├── detect.rs    # peak detector + sub-sample interp
-│   │   └── pll.rs       # Type-II loop filter
-│   ├── channel/
-│   │   ├── mod.rs       # Channel { mode, divider, shuffle, shift, offset }
-│   │   ├── mode.rs      # enum ChannelMode
-│   │   ├── transform.rs # divider ∘ shuffle ∘ shift ∘ offset pipeline
-│   │   └── lfo.rs       # renders time::envelope at sample rate
-│   ├── out/
-│   │   ├── midi.rs      # MidiSink trait + timestamped send
-│   │   └── audio.rs     # render pulses/gates/LFO into output buffer
-│   ├── machine.rs       # [Channel; N], preset I/O
-│   ├── host/
-│   │   ├── traits.rs    # AudioHost, MidiSink
-│   │   ├── cpal.rs, coremidi.rs, alsa_midi.rs, jack.rs, winmm.rs
-│   └── rt/
-│       ├── callback.rs  # audio-thread hot loop (no alloc, no locks)
-│       └── control.rs   # control-thread → SPSC → RT
-└── bin/
-    └── agogo.rs
+core/src
+├── lib.rs
+├── conn.rs
+├── conn/
+│   ├── arb.rs
+│   ├── boundary.rs
+│   ├── fixed.rs
+│   ├── float.rs
+│   ├── midi.rs
+│   ├── phase.rs
+│   ├── sample.rs
+│   └── tempo.rs
+├── time.rs
+├── time/
+│   ├── arb.rs
+│   ├── conn.rs
+│   ├── envelope.rs
+│   ├── grid.rs
+│   ├── swing.rs
+│   ├── tbase.rs
+│   └── tick.rs
+├── channel.rs
+├── channel/
+│   ├── role.rs
+│   ├── time.rs
+│   ├── dsl.rs
+│   ├── dsl/
+│   ├── spec.rs
+│   └── spec/
+├── control.rs
+├── control/
+│   ├── event.rs
+│   ├── sync.rs
+│   └── sync/
+│       ├── detect.rs
+│       ├── pll.rs
+│       ├── pulse.rs
+│       └── source.rs
+├── sink.rs
+├── sink/
+│   ├── audio.rs
+│   └── midi.rs
+└── test.rs
 ```
 
 ## 4. Precision budget
@@ -102,9 +175,7 @@ Each backend converts `at_sample` → native timebase inside `send_at` (mach tim
 
 Feature-gated backends: `cpal-audio`, `coremidi`, `alsa-midi`, `jack`, `winmm`. cpal is the portable audio baseline; platform-native MIDI sinks are where precision differs.
 
-## 6. Mapping to music-time (the Cirklon port)
-
-`src/time/` is a Rust port of `Control.Cirklon.Type.Time` from `Software/Haskell/recologic/client/src/Control/Cirklon/Type/Time.hs`. Most agogo features land directly on its primitives:
+## 6. Mapping to music-time 
 
 | agogo feature | time module |
 |---|---|
@@ -124,31 +195,14 @@ Pragmatic resolution: introduce a parallel `SampleTickConn { sr, bpm, ppqn }` st
 
 ## 8. Libraries
 
-### 8a. Depend
 - **`cpal`** — cross-platform audio baseline. Sample-accurate output buffers.
 - **`midir`** — MIDI transport for v0; replace with platform sinks behind `MidiSink` for precision work.
 - **`rtrb`** — lock-free SPSC (control → RT).
 - **`serde` + `ciborium`** — preset persistence.
 - **`proptest`** — per connections-repo convention.
-- **`connections`** — path dep on `../connections/connections` for `Conn` + `Ple`.
+- **`connections`** — Galois connections for principled numerical casting
 
-### 8b. Emulate
-- **`hertz`** (`ext/hertz`) — optional, for BPM/sample-rate conversion helpers.
-- **`clocked`** (`ext/clocked`) — borrow `PidSettings` patterns for the PLL loop filter.
-- **`embedded-time`** (`ext/embedded-time`)
-
-## 9. Proposed first sprint
-
-Plan 01 inside the agogo crate delivers the **pure-logic core**, no audio I/O:
-
-- `time/` — full port of Cirklon Time.hs: TBase lattice, Time/Tick, `quantize_at`, SwingConfig, envelopes. Proptests for lattice laws (LCM/GCD absorption, Heyting) and Galois-connection adjointness.
-- `channel/transform.rs` — pure divider/shuffle/shift/offset composition. Proptests: tick monotonicity, divider rate preservation, shuffle zero-mean over a beat, shift clamping.
-- `sync/pll.rs` + `sync/detect.rs` — tested against synthetic pulse trains with injected Gaussian timing noise. Proptest: PLL BPM estimate converges within a known error bound.
-- CLI binary: reads a WAV of audio-sync, runs the PLL offline, prints BPM+phase trace. No CoreAudio / MIDI yet.
-
-Cargo.toml includes feature gates for future backends; none enabled. Zero platform code touched.
-
-## 10. Open questions
+## 9. Open questions
 
 - **Tempo glide**: should internal-master tempo changes apply instantly (hardware-faithful, occasional hiccup on big jumps) or through a one-pole glide filter (musically nicer)?
 - **Shift buffer budget**: negative shift requires a ring buffer of future ticks. What's the maximum forward-look we budget — 300 ms to match the hardware, or more?
@@ -157,14 +211,6 @@ Cargo.toml includes feature gates for future backends; none enabled. Zero platfo
 - **Preset SR-agnosticism**: a preset saved at 48 k — the Tick-master design should make it sample-rate-agnostic. Worth testing explicitly as a proptest invariant.
 - **Transport FSM**: the NEG/POS "one-bar forerun" semantics from the manual need a concrete FSM spec before Sprint 2.
 - **Output channel count**: hardware is 4. Should the software version be `N` generic, or fix the count?
-
-## 11. Out of scope (v1)
-
-- VST / AU plugin wrapper
-- Hardware firmware replacement
-- The device UI (status LEDs, encoder, menus) — this is a library + CLI first
-- Remote control via pitch-bend / CC (deferred to a later sprint)
-- DIN sync24 physical wiring — the library emits the bit pattern; the user provides the hardware interface
 
 ---
 
