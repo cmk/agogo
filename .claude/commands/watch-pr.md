@@ -102,6 +102,13 @@ new top-level thread, classify it into exactly one bucket:
 wrong code; a miscategorized ask only delays a round by one loop tick
 until the user resolves it.
 
+Track two counters for the commit step:
+
+```
+auto_fix_count=<number of auto-fix threads>
+reply_count=<number of auto-fix + push-back + defer threads that will receive replies>
+```
+
 ## Step 3: Apply the auto-fix items (no commit yet)
 
 For each **auto-fix** item:
@@ -138,19 +145,28 @@ for each thread: scripts/reply_review.py <N> <in_reply_to_id> "<body>"
 # Mirror replies back into the review doc
 scripts/pull_reviews.py <N>
 
-# Single atomic commit: code edits (if any) + mirrored doc.
-# Conditional on having staged changes — an all-`ask` round with no
-# doc delta produces nothing to commit.
-git add -A
-if git diff --cached --quiet; then
-    # Nothing staged — branch stays at gh_review. Step 5's
-    # "no commit" report branch fires.
+# Single atomic commit: code edits (if any) + mirrored replies.
+# If every new item was `ask`, do not stage the pull-only review doc
+# delta from Step 1; leave it for a later substantive round.
+if [ "$auto_fix_count" -eq 0 ] && [ "$reply_count" -eq 0 ]; then
     :
 else
-    # Pick prefix based on staged content:
-    #   fix:  any code edit (most common when there are auto-fixes)
-    #   doc:  only doc/reviews/<file>.md changed (replies-only round)
-    git commit -m "fix: Address review feedback on PR #<N>"
+    git add -A
+    if git diff --cached --quiet; then
+        # Nothing staged — branch stays at gh_review. Step 5's
+        # "no commit" report branch fires.
+        :
+    else
+        # Pick prefix based on staged content:
+        #   fix:  any staged change outside doc/reviews/*.md
+        #   doc:  only doc/reviews/<file>.md changed (replies-only round)
+        if git diff --cached --name-only | grep -Eqv '^doc/reviews/.*\.md$'; then
+            commit_prefix=fix
+        else
+            commit_prefix=doc
+        fi
+        git commit -m "$commit_prefix: Address review feedback on PR #<N>"
+    fi
 fi
 ```
 
