@@ -148,9 +148,14 @@ code based on it.
 
 ## Repository conventions
 
-- **Each commit must leave the repo in a state where `cargo test` passes.**
-  Do not commit a library module without the tests that cover it in the
-  same commit. Never commit a red test suite.
+- **Each pushed commit must leave the repo green** (`cargo test --workspace`
+  + `cargo clippy --all-targets -- -D warnings`). Don't commit a library
+  module without the tests that cover it in the same commit. Intra-branch
+  commits can be transiently red between `git commit` and `git push` — the
+  pre-push hook (`.githooks/pre-push`) is the gate, and the autosquash
+  workflow already accommodates fixup commits that weren't green at the
+  moment of recording. What matters for `origin/main`'s bisect property is
+  the pushed state, which is what CI verifies.
 - **No merge commits.** Always rebase onto main — never `git merge`. The
   history must be linear.
 - **CI-repair commits must be fixups.** If a commit on this branch broke
@@ -621,34 +626,34 @@ One slug, three places.
 10. Clean up: `git worktree remove ../<repo>.plan-YYYY-MM-DD-NN`
     (worktree case only), then `git branch -d plan/YYYY-MM-DD-NN`.
 
-### Pre-commit hooks
+### Pre-commit and pre-push hooks
 
-Two complementary layers guard every commit:
-
-**Layer 1 — Agent `PreToolUse`** (`.claude/settings.json`):
-fires on agent-invoked shell calls matching `git commit*`. Catches
-issues during agent iteration without invoking git for real.
-Limitation: `PreToolUse` runs *before* the matched Bash call's body
-executes, so a chained command like `git add file && git commit -m
-"..."` sees an empty pre-add staged diff at hook time and slips
-through `check-pii.sh` / `check-floats.sh`. Use separate `git add`
-and `git commit` calls to keep this layer effective.
-
-**Layer 2 — Git `pre-commit`** (`.githooks/pre-commit`): fires at
-git's standard hook point (after staging, before commit object
-creation). Sees the actual staged content regardless of how the
-commit was invoked — chained Bash, terminal, IDE, anything. This is
-the unbypassable safety net.
-
-Activate Layer 2 on a fresh clone:
+The git-side hook chain is split by cost across two events. Cheap
+deterministic checks (sub-second combined) fire on every commit;
+the expensive `cargo test --workspace` + `cargo clippy
+--all-targets` (~50s combined) fire once per push. Both are
+activated by the same line:
 
 ```
 git config core.hooksPath .githooks
 ```
 
-Both layers run the same check chain in order. **Every step is
-blocking** — the chain short-circuits on first failure and the
-commit is aborted:
+**Layer 1 — Agent `PreToolUse`** (`.claude/settings.json`):
+fires on agent-invoked shell calls matching `git commit*`. Catches
+PII / float-discipline issues during agent iteration without
+invoking git for real. Limitation: `PreToolUse` runs *before* the
+matched Bash call's body executes, so a chained command like `git
+add file && git commit -m "..."` sees an empty pre-add staged diff
+at hook time and slips through `check-pii.sh` / `check-floats.sh`.
+Use separate `git add` and `git commit` calls to keep this layer
+effective.
+
+**Layer 2 — Git `pre-commit`** (`.githooks/pre-commit`): fires at
+git's standard hook point (after staging, before commit object
+creation). Sees the actual staged content regardless of how the
+commit was invoked — chained Bash, terminal, IDE, anything. This
+is the unbypassable safety net at commit time. Runs the cheap
+chain:
 
 1. `cargo fmt --all -- --check` — fmt drift aborts the commit.
    Run `cargo fmt --all` to fix. (Was warn-only previously; flipped
@@ -662,12 +667,29 @@ commit is aborted:
    any match. Allow-list exceptions go in `.pii-allow`.
 3. `scripts/check-floats.sh` — fail if naked `f32`/`f64` appears
    in a non-allowlisted file. See "no stored f32/f64" rule above.
-4. `cargo test --workspace` — all tests must pass.
-5. `cargo clippy --all-targets -- -D warnings` — matches CI.
+4. `scripts/check-layers.sh` — fail if any `use crate::<top>` /
+   `use agogo_core::<top>` (column-0 imports) violates the partial
+   order in each module-root's `//! depends-on:` sentinel. See
+   the layering rule above.
+
+**Layer 3 — Git `pre-push`** (`.githooks/pre-push`): fires once
+per `git push`, regardless of intra-branch commit count. Runs the
+expensive chain:
+
+1. `cargo test --workspace` — all tests must pass.
+2. `cargo clippy --all-targets -- -D warnings` — matches CI.
+
+This is what enforces the "every pushed commit is green"
+invariant from the conventions list above. Intra-branch commits
+can be transiently red between `git commit` and `git push` — the
+autosquash workflow expects this for `fixup!` commits. The
+pre-push hook short-circuits with `exit 0` if no refs are being
+pushed (delete-only / no-op pushes don't pay the cost).
 
 This is the automated quality gate; `/sprint-review` and
-`scripts/local_review.sh` are the manual local-review gates. Bypass with
-`--no-verify` only when explicitly authorized.
+`scripts/local_review.sh` are the manual local-review gates. Bypass
+with `--no-verify` (or `git push --no-verify`) only when explicitly
+authorized.
 
 CI adds a `gitleaks` job (`.github/workflows/ci.yml`) that scans the
 full history on every PR as defense-in-depth against anything that
