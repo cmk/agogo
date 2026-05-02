@@ -9,6 +9,12 @@
 //! bridge independent preserves `cargo test --workspace` on agogo's
 //! pinned toolchain while giving the adapter a tested core.
 
+extern crate self as agogo;
+
+pub(crate) mod core {
+    pub(crate) use core_impl::*;
+}
+
 pub mod bridge;
 pub mod driver;
 pub mod snapshot;

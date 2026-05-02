@@ -5,7 +5,7 @@ pub mod control;
 
 use ::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ::cpal::{BufferSize, InputCallbackInfo, SampleFormat, SampleRate, StreamConfig, StreamError};
-use agogo_core::sink::audio::{AudioHost, AudioHostError, AudioIo, Config, Handle};
+use agogo::core::sink::audio::{AudioHost, AudioHostError, AudioIo, Config, Handle};
 use std::sync::mpsc::Sender;
 use std::thread;
 

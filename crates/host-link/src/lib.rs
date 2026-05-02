@@ -3,7 +3,7 @@
 //! Ableton Link host-side integration for `agogo`.
 //!
 //! Wraps [`rusty_link`] (thin FFI over Ableton's C wrapper) and exposes
-//! a `LinkClock` that implements `agogo_core::control::sync::PhaseSourceImpl`.
+//! a `LinkClock` that implements `agogo::core::control::sync::PhaseSourceImpl`.
 //! Ships the lifecycle surface (enable / tempo / num_peers) plus the
 //! host-time bridge (`phase_at_sample` via `HostTimeAnchor`) as of
 //! Plan 08; bidirectional (tempo push, transport, quantum snap) is
@@ -14,6 +14,12 @@
 //! crate so `cargo test --workspace` can resolve the dep graph
 //! without `ext/rusty_link` being present — CI relies on this.
 //! `agogo-cli --features link` activates `rusty-link` transitively.
+
+extern crate self as agogo;
+
+pub(crate) mod core {
+    pub(crate) use core_impl::*;
+}
 
 pub mod quantum;
 

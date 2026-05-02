@@ -1,7 +1,7 @@
 //! Audio callback hot loop — `CallbackState::on_buffer`.
 //!
 //! This is a thin wrapper around an N-channel
-//! [`agogo_core::control::Machine`] plus the [`RtProducer`] that
+//! [`agogo::core::control::Machine`] plus the [`RtProducer`] that
 //! pushes onto the SPSC ring. All scheduling +
 //! rendering logic now lives inside `Machine::on_buffer`; the
 //! callback is left with `feed → schedule → render → enqueue`
@@ -11,9 +11,9 @@
 //! integer arithmetic and one ring-buffer push per emitted event.
 
 use crate::cpal::control::RtProducer;
-use agogo_core::conn::sample::SampleTime;
-use agogo_core::control::Machine;
-use agogo_core::sink::audio::AudioIo;
+use agogo::core::conn::sample::SampleTime;
+use agogo::core::control::Machine;
+use agogo::core::sink::audio::AudioIo;
 
 /// State the audio thread owns by-value across the stream's
 /// lifetime. Built on the control thread, moved into the cpal
@@ -46,26 +46,26 @@ impl<R: SampleTime> CallbackState<R> {
 }
 
 /// Re-export of the canonical helper. The implementation moved to
-/// [`agogo_core::control::event::max_events_for_buffer`] in
-/// [`agogo_core::control::Machine`] can size its pool without
+/// [`agogo::core::control::event::max_events_for_buffer`] in
+/// [`agogo::core::control::Machine`] can size its pool without
 /// depending on `host-cpal`. Kept here so existing call
 /// sites (the demo CLI handler) compile unchanged.
-pub use agogo_core::control::event::max_events_for_buffer;
+pub use agogo::core::control::event::max_events_for_buffer;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cpal::control::spsc;
-    use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
-    use agogo_core::conn::fixed::Micro;
-    use agogo_core::conn::sample::S048;
-    use agogo_core::conn::tempo::Tempo;
-    use agogo_core::control::TransportPolicy;
-    use agogo_core::control::sync::PhaseSource;
-    use agogo_core::time::grid::Grid;
-    use agogo_core::time::swing::SwingConfig;
-    use agogo_core::time::tbase::TBase;
-    use agogo_core::time::tick::PPQN;
+    use agogo::core::channel::{Channel, ChannelCommon, MidiRole};
+    use agogo::core::conn::fixed::Micro;
+    use agogo::core::conn::sample::S048;
+    use agogo::core::conn::tempo::Tempo;
+    use agogo::core::control::TransportPolicy;
+    use agogo::core::control::sync::PhaseSource;
+    use agogo::core::time::grid::Grid;
+    use agogo::core::time::swing::SwingConfig;
+    use agogo::core::time::tbase::TBase;
+    use agogo::core::time::tick::PPQN;
     use std::collections::VecDeque;
 
     fn build_state(

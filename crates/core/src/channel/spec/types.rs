@@ -58,7 +58,7 @@ pub struct ChannelSpec {
 impl ChannelSpec {
     /// Parsed `snap-quantum-us=N` intent, if present. Returns the raw
     /// microbeat count as `Option<Micro>`; the orchestrator wraps it
-    /// in `agogo_host_link::Quantum` at the host-link boundary.
+    /// in `agogo::host::link::Quantum` at the host-link boundary.
     ///
     /// Plan 2026-04-28-03 T4 changed the return type from
     /// `Option<Quantum>` to `Option<Micro>`: `Quantum` is a

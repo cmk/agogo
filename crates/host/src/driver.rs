@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use agogo_core::conn::tempo::Tempo;
+use agogo::core::conn::tempo::Tempo;
 use serde_json::{Value, json};
 
 use crate::bridge::{BridgeError, ControlCommand, ControlProducer, spsc};

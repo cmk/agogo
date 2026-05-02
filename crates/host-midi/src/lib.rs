@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! midir back-end for `agogo_core::sink::midi::MidiSink`.
+//! midir back-end for `agogo::core::sink::midi::MidiSink`.
 //!
 //! `MidirSink` opens a midir output connection by port name and
 //! forwards every `send_at` call to the underlying
@@ -13,6 +13,12 @@
 //! WinMM, ALSA-MIDI) live in their own sibling crates. v0.2 starts
 //! the timestamped-sink proof and keeps this midir path explicitly
 //! best-effort.
+
+extern crate self as agogo;
+
+pub(crate) mod core {
+    pub(crate) use core_impl::*;
+}
 
 pub mod midir;
 

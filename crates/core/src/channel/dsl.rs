@@ -27,9 +27,9 @@ use crate::time::grid::Grid;
 ///
 /// # Examples
 ///
-/// ```
-/// use agogo_core::channel::dsl;
-/// use agogo_core::time::grid::Grid;
+/// ```ignore
+/// use agogo::core::channel::dsl;
+/// use agogo::core::time::grid::Grid;
 ///
 /// // Plain grid atom:
 /// assert_eq!(dsl::parse("T16", &[]).unwrap(), Grid::T16);

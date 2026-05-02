@@ -8,7 +8,7 @@
 //! same integer representation Link's C++ side stores — zero
 //! disagreement at the FFI boundary.
 //!
-//! Moved here from `agogo_core::fxp` (Plan 2026-04-28-03 T4): the
+//! Moved here from `agogo::core::fxp` (Plan 2026-04-28-03 T4): the
 //! type is purely Link-FFI-shaped — every production caller feeds it
 //! into `LinkSession::snap_offset_for` or constructs it from argv to
 //! do so. Pulling it out of `core` removes a Link-specific concept
@@ -20,7 +20,7 @@
 //! Default-feature builds get the type for free; the gating is on
 //! the actual `rusty_link` integration, not on the parameter shape.
 
-use agogo_core::conn::fixed::Micro;
+use agogo::core::conn::fixed::Micro;
 
 /// Link quantum in microbeats. `Quantum::from_bars(4)` = one bar in
 /// 4/4 = 4 000 000 microbeats.

@@ -1,6 +1,6 @@
 # agogo-host-cpal
 
-cpal back-end for `agogo_core::sink::audio::AudioHost`. This is the
+cpal back-end for `agogo::core::sink::audio::AudioHost`. This is the
 first platform-audio integration; v0.1 wires the audio-in path, and
 v0.4 owns CV/gate output through the heterogeneous output layer.
 

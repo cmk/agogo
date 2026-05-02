@@ -8,15 +8,15 @@ publish = false
 
 [features]
 default = ["core", "host"]
-core = ["dep:agogo-core"]
-host = ["dep:agogo-host"]
-cpal = ["core", "host", "dep:agogo-host-cpal"]
-link = ["core", "host", "dep:agogo-host-link", "agogo-host-link/rusty-link"]
-midi = ["core", "host", "dep:agogo-host-midi"]
+core = ["dep:core_impl"]
+host = ["dep:host_impl"]
+cpal = ["core", "host", "dep:cpal_impl"]
+link = ["core", "host", "dep:link_impl", "link_impl/rusty-link"]
+midi = ["core", "host", "dep:midi_impl"]
 
 [dependencies]
-agogo-core = { workspace = true, optional = true }
-agogo-host = { path = "../host", optional = true }
-agogo-host-cpal = { path = "../host-cpal", optional = true }
-agogo-host-link = { path = "../host-link", optional = true }
-agogo-host-midi = { path = "../host-midi", optional = true }
+core_impl = { package = "agogo-core", path = "../core", optional = true }
+host_impl = { package = "agogo-host", path = "../host", optional = true }
+cpal_impl = { package = "agogo-host-cpal", path = "../host-cpal", optional = true }
+link_impl = { package = "agogo-host-link", path = "../host-link", optional = true }
+midi_impl = { package = "agogo-host-midi", path = "../host-midi", optional = true }

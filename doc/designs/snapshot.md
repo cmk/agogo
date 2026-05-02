@@ -60,7 +60,7 @@ numbers from fixed-point storage:
 
 | Field | Stored Unit | Meaning |
 |-------|-------------|---------|
-| `bpm` | micro-BPM | Tempo, matching `agogo_core::conn::tempo::Tempo`. |
+| `bpm` | micro-BPM | Tempo, matching `agogo::core::conn::tempo::Tempo`. |
 | `sync.error_ticks` | micro-ticks | Signed PLL error in ticks. |
 | `audio.load` | parts per million | Fraction of buffer budget used. |
 | `channels[*].phase` | parts per million | Channel phase in `[0, 1]`. |
