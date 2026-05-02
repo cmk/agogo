@@ -129,10 +129,10 @@ authorised_layer() {
 }
 
 # Emit each top-level module name imported by a single column-zero
-# use line. Handles three shapes:
+# use line. Handles two shapes (with either `crate` or
+# `agogo_core` as the anchor):
 #   use crate::<top>::...;
-#   use agogo_core::<top>::...;
-#   use {crate,agogo_core}::{<top>::..., <top>::..., ...};
+#   use crate::{<top>::..., <top>::..., ...};
 # `pub use` (with optional visibility qualifier) is matched by the
 # caller's grep — this function only inspects the body after `use`.
 emit_import_tops() {
