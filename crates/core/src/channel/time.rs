@@ -22,6 +22,7 @@ use crate::conn::fixed::{FD12FD06, Micro};
 use crate::time::conn::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
+use connections::fixed::u64::I064U064;
 
 /// Maximum positive delay before saturation: 300 ms = 300 000 µs.
 pub const MAX_DELAY: Micro = Micro(300_000);
@@ -120,7 +121,7 @@ pub fn transform(
 ) -> Vec<ScheduledEvent> {
     let divisor = u64::from(common.divider.tick_count());
     let delay_clamped = Micro(common.delay.0.clamp(0, MAX_DELAY.0));
-    let delay_samples = micro_to_samples(delay_clamped, stc.sr()).max(0) as u64;
+    let delay_samples = I064U064.ceil(micro_to_samples(delay_clamped, stc.sr()));
     let offset_samples = micro_to_samples(common.offset, stc.sr());
 
     master_ticks
@@ -131,7 +132,7 @@ pub fn transform(
             let base = stc.inner(swung);
             let with_delay = base.saturating_add(delay_samples);
             let final_sample = if offset_samples >= 0 {
-                with_delay.saturating_add(offset_samples as u64)
+                with_delay.saturating_add(I064U064.ceil(offset_samples))
             } else {
                 with_delay.saturating_sub(offset_samples.unsigned_abs())
             };

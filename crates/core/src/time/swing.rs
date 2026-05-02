@@ -19,6 +19,7 @@
 use crate::time::grid::Grid;
 use crate::time::tbase::TBase;
 use crate::time::tick::Tick;
+use connections::fixed::u64::I128U064;
 
 /// Swing configuration: signed `i8` tick offset on a binary
 /// subdivision grid.
@@ -57,9 +58,9 @@ pub fn effective_tick(cfg: &SwingConfig, t: Tick) -> Tick {
         return t;
     }
     // Tick is u64; widen to i128 so `t.0 + amount` can't overflow in
-    // either direction. Clamp back into the non-negative u64 range.
+    // either direction. Snap back through the saturating i128→u64 Conn.
     let shifted = i128::from(t.0) + i128::from(cfg.amount);
-    Tick(shifted.clamp(0, i128::from(u64::MAX)) as u64)
+    Tick(I128U064.ceil(shifted))
 }
 
 /// Is the tick aligned to the `g` grid? Works for any `Grid` element
@@ -207,7 +208,7 @@ mod tests {
     //
     // `arb_tick()` is capped at `u32::MAX × Grid::T1.tick_count()`
     // (the `from_ticks` horizon) — well below `u64::MAX`, where the
-    // `clamp(0, u64::MAX)` in `effective_tick` lives. The swing
+    // saturating i128→u64 Conn in `effective_tick` lives. The swing
     // proptests further bound `t` away from that upper edge so
     // saturation arithmetic is otherwise unexercised by sampled
     // inputs. These #[test]s pin the saturation behavior at both

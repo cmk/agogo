@@ -17,6 +17,7 @@
 //! `s_curve`, 0 for `closing`).
 
 use crate::time::tick::Tick;
+use connections::fixed::u8::U128U008;
 
 // ────────────────────────────────────────────────────────────────────
 // Integer ramp + smoothstep primitives.
@@ -40,7 +41,7 @@ pub fn linear_u8(t: u64, n: u64) -> u8 {
     // round-nearest: (t * 255 + n/2) / n. Widen to u128 so `t * 255`
     // can't overflow at the top of `Tick`'s u64 range.
     let num = u128::from(t) * 255 + u128::from(n) / 2;
-    (num / u128::from(n)) as u8
+    U128U008.ceil(num / u128::from(n))
 }
 
 /// Hermite smoothstep `3x² − 2x³` rendered as `u8` with
@@ -72,7 +73,7 @@ pub fn smoothstep_u8(t: u64, n: u64) -> u8 {
     let y: u128 = term_a - term_b; // Q0.48, always ≤ 2^48
     // scale to u8: (y * 255 + 2^47) >> 48
     let scaled = (y * 255u128 + (1u128 << 47)) >> 48;
-    scaled.min(255) as u8
+    U128U008.ceil(scaled)
 }
 
 // ────────────────────────────────────────────────────────────────────

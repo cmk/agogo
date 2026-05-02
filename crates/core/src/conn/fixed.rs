@@ -31,7 +31,7 @@
 //! intentional different convention. (Haskell `ratfix`'s `h` is a
 //! plain `div`, matching this port.)
 
-use connections::conn::Conn;
+use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
 
 macro_rules! def_fixed {
     ($name:ident, $prec:expr) => {
@@ -97,24 +97,52 @@ pub use FD12 as Pico;
 
 macro_rules! fix_fix {
     ($const_name:ident, $Fine:ident, $Coarse:ident, $prec:expr) => {
-        pub const $const_name: Conn<$Fine, $Coarse> = {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone, Debug, Default)]
+        pub struct $const_name;
+
+        impl $const_name {
             const PREC: i64 = $prec;
-            fn ceil(x: $Fine) -> $Coarse {
-                let q = x.0.div_euclid(PREC);
-                if x.0.rem_euclid(PREC) != 0 {
+            const L: ConnL<$Fine, $Coarse> = Conn::new_l(Self::ceil_fn, Self::inner_fn);
+            const R: ConnR<$Fine, $Coarse> = Conn::new_r(Self::inner_fn, Self::floor_fn);
+
+            fn ceil_fn(x: $Fine) -> $Coarse {
+                let q = x.0.div_euclid(Self::PREC);
+                if x.0.rem_euclid(Self::PREC) != 0 {
                     $Coarse(q + 1)
                 } else {
                     $Coarse(q)
                 }
             }
-            fn inner(x: $Coarse) -> $Fine {
-                $Fine(x.0 * PREC)
+
+            fn inner_fn(x: $Coarse) -> $Fine {
+                $Fine(x.0 * Self::PREC)
             }
-            fn floor(x: $Fine) -> $Coarse {
-                $Coarse(x.0.div_euclid(PREC))
+
+            fn floor_fn(x: $Fine) -> $Coarse {
+                $Coarse(x.0.div_euclid(Self::PREC))
             }
-            Conn::new(ceil, inner, floor)
-        };
+
+            pub fn ceil(self, x: $Fine) -> $Coarse {
+                Self::L.ceil(x)
+            }
+
+            pub fn inner(self, x: $Coarse) -> $Fine {
+                Self::L.inner(x)
+            }
+
+            pub fn floor(self, x: $Fine) -> $Coarse {
+                Self::R.floor(x)
+            }
+        }
+
+        impl ViewL<$Fine, $Coarse> for $const_name {
+            const L: ConnL<$Fine, $Coarse> = Self::L;
+        }
+
+        impl ViewR<$Fine, $Coarse> for $const_name {
+            const R: ConnR<$Fine, $Coarse> = Self::R;
+        }
     };
 }
 
@@ -201,25 +229,25 @@ mod tests {
                 proptest! {
                     #[test]
                     fn roundtrip_ceil(c in fixed_coarse($prec)) {
-                        prop_assert!(laws::conn_roundtrip_ceil(&$conn, $Coarse(c)));
+                        prop_assert!(laws::roundtrip_ceil(&<$conn as ViewL<$Fine, $Coarse>>::L, $Coarse(c)));
                     }
 
                     #[test]
                     fn roundtrip_floor(c in fixed_coarse($prec)) {
-                        prop_assert!(laws::conn_roundtrip_floor(&$conn, $Coarse(c)));
+                        prop_assert!(laws::roundtrip_floor(&<$conn as ViewR<$Fine, $Coarse>>::R, $Coarse(c)));
                     }
 
                     #[test]
                     fn monotone_l(x in fixed_fine($prec), y in fixed_fine($prec)) {
-                        prop_assert!(laws::conn_monotone_l(&$conn, $Fine(x), $Fine(y)));
+                        prop_assert!(laws::monotone_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x), $Fine(y)));
                     }
 
                     #[test]
                     fn floor_le_ceil(x in fixed_fine($prec)) {
                         let a = $Fine(x);
-                        prop_assert!(laws::conn_floor_le_ceil(&$conn, a));
+                        prop_assert!(laws::floor_le_ceil(&$conn, a));
                         // Stronger: fixed-ladder ULP bound (ceil − floor ≤ 1).
-                        prop_assert!(laws::conn_ulp_bound(&$conn, a, |b| b.0));
+                        prop_assert!(laws::ulp_bound(&$conn, a, |b| b.0));
                     }
 
                     #[test]
@@ -227,7 +255,7 @@ mod tests {
                         x in fixed_fine($prec),
                         c in fixed_coarse($prec),
                     ) {
-                        prop_assert!(laws::conn_galois_l(&$conn, $Fine(x), $Coarse(c)));
+                        prop_assert!(laws::galois_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x), $Coarse(c)));
                     }
 
                     #[test]
@@ -235,7 +263,7 @@ mod tests {
                         x in fixed_fine($prec),
                         c in fixed_coarse($prec),
                     ) {
-                        prop_assert!(laws::conn_galois_r(&$conn, $Fine(x), $Coarse(c)));
+                        prop_assert!(laws::galois_r(&<$conn as ViewR<$Fine, $Coarse>>::R, $Fine(x), $Coarse(c)));
                     }
 
                     // Closure laws use fixed_safe_fine because the
@@ -244,17 +272,17 @@ mod tests {
                     // crate::conn::arb.
                     #[test]
                     fn closure_l(x in fixed_safe_fine($prec)) {
-                        prop_assert!(laws::conn_closure_l(&$conn, $Fine(x)));
+                        prop_assert!(laws::closure_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x)));
                     }
 
                     #[test]
                     fn closure_r(x in fixed_safe_fine($prec)) {
-                        prop_assert!(laws::conn_closure_r(&$conn, $Fine(x)));
+                        prop_assert!(laws::closure_r(&<$conn as ViewR<$Fine, $Coarse>>::R, $Fine(x)));
                     }
 
                     #[test]
                     fn idempotent(x in fixed_safe_fine($prec)) {
-                        prop_assert!(laws::conn_idempotent(&$conn, $Fine(x)));
+                        prop_assert!(laws::idempotent_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x)));
                     }
                 }
             }

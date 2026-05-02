@@ -18,12 +18,12 @@
 //! exempt from the 8-char rule, since each instance is named by the
 //! parameter `g: Grid`.
 //!
-//! All use bare `fn` pointers from [`connections::conn::Conn`] — no
-//! closure capture, tempo-independent. `Conn::new` is `const fn`
-//! upstream, so the four single-type-side Conns are exposed as
-//! `pub const` constants matching the convention used by upstream's
-//! `F032F016` / `F064FD12` / similar. `quantize_at` stays a function
-//! because its inner / ceil / floor pointers vary per `Grid` value.
+//! All use bare `fn` pointers through kind-tagged
+//! [`connections::conn::ConnL`] / [`connections::conn::ConnR`] views —
+//! no closure capture, tempo-independent. Static connections are
+//! zero-sized marker values matching upstream's triple API.
+//! `quantize_at` stays a function because its inner / ceil / floor
+//! pointers vary per `Grid` value.
 //!
 //! **Orientation of `timetime` and `gridgrid`.** These are lattice
 //! connections: the pair side carries the divisibility product order,
@@ -35,7 +35,8 @@
 //! give a non-adjoint structure. The tests below build ad-hoc
 //! `*_refine_le` helpers for that reason.
 
-use connections::conn::Conn;
+use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
+use connections::fixed::u64::{I064U064, U128U064};
 use num_rational::Rational64;
 
 use crate::conn::tempo::Tempo;
@@ -48,6 +49,69 @@ pub type Whole = Rational64;
 
 /// Ticks per whole note at 960 PPQN. `4 * PPQN`.
 const TPW: i64 = (4 * PPQN) as i64;
+
+macro_rules! def_conn_marker {
+    ($name:ident, $A:ty, $B:ty, $ceil:path, $inner:path, $floor:path) => {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone, Debug, Default)]
+        pub struct $name;
+
+        impl $name {
+            const L: ConnL<$A, $B> = Conn::new_l($ceil, $inner);
+            const R: ConnR<$A, $B> = Conn::new_r($inner, $floor);
+
+            pub fn ceil(self, x: $A) -> $B {
+                Self::L.ceil(x)
+            }
+
+            pub fn inner(self, x: $B) -> $A {
+                Self::L.inner(x)
+            }
+
+            pub fn floor(self, x: $A) -> $B {
+                Self::R.floor(x)
+            }
+        }
+
+        impl ViewL<$A, $B> for $name {
+            const L: ConnL<$A, $B> = Self::L;
+        }
+
+        impl ViewR<$A, $B> for $name {
+            const R: ConnR<$A, $B> = Self::R;
+        }
+    };
+}
+
+/// Runtime-selected triple for parametric connection families.
+#[derive(Copy, Clone)]
+pub struct RuntimeConn<A, B> {
+    l: ConnL<A, B>,
+    r: ConnR<A, B>,
+}
+
+impl<A, B> RuntimeConn<A, B> {
+    const fn new(ceil: fn(A) -> B, inner: fn(B) -> A, floor: fn(A) -> B) -> Self {
+        Self {
+            l: Conn::new_l(ceil, inner),
+            r: Conn::new_r(inner, floor),
+        }
+    }
+}
+
+impl<A: Copy, B: Copy> RuntimeConn<A, B> {
+    pub fn ceil(self, x: A) -> B {
+        self.l.ceil(x)
+    }
+
+    pub fn inner(self, x: B) -> A {
+        self.l.inner(x)
+    }
+
+    pub fn floor(self, x: A) -> B {
+        self.r.floor(x)
+    }
+}
 
 // ── ticktime: Conn<Tick, Time> ───────────────────────────────────
 
@@ -69,11 +133,18 @@ fn ticktime_floor(n: Tick) -> Time {
     from_ticks_floor(n).expect("ticktime Conn requires n ≤ u32::MAX × Grid::T1.tick_count()")
 }
 
-/// Master `Tick ↔ Time` connection. Ceiling rounds up to the
-/// `Grid::T512P` grid (= 1 tick at 960 PPQN, so every tick is
-/// already aligned) then canonicalises; floor rounds down; embed is
-/// exact.
-pub const TICKTIME: Conn<Tick, Time> = Conn::new(ticktime_ceil, ticktime_inner, ticktime_floor);
+// Master `Tick ↔ Time` connection. Ceiling rounds up to the
+// `Grid::T512P` grid (= 1 tick at 960 PPQN, so every tick is
+// already aligned) then canonicalises; floor rounds down; embed is
+// exact.
+def_conn_marker!(
+    TICKTIME,
+    Tick,
+    Time,
+    ticktime_ceil,
+    ticktime_inner,
+    ticktime_floor
+);
 
 // ── wholtick: Conn<Whole, Tick> ──────────────────────────────────
 
@@ -86,7 +157,7 @@ fn tpw_rational() -> Rational64 {
 // `i64::MAX` maps to `Tick(i64::MAX as u64)`, well inside Tick's u64
 // horizon.
 fn i64_to_tick(n: i64) -> Tick {
-    Tick(n.max(0) as u64)
+    Tick(I064U064.ceil(n))
 }
 
 fn wholtick_ceil(r: Whole) -> Tick {
@@ -108,10 +179,17 @@ fn wholtick_floor(r: Whole) -> Tick {
     i64_to_tick(floor)
 }
 
-/// Galois connection between rational whole-note durations and ticks.
-/// Floor rounds down, ceiling rounds up, embed is exact:
-/// `wholtick_inner(Tick(n)) = n / 3840` at 960 PPQN.
-pub const WHOLTICK: Conn<Whole, Tick> = Conn::new(wholtick_ceil, wholtick_inner, wholtick_floor);
+// Galois connection between rational whole-note durations and ticks.
+// Floor rounds down, ceiling rounds up, embed is exact:
+// `wholtick_inner(Tick(n)) = n / 3840` at 960 PPQN.
+def_conn_marker!(
+    WHOLTICK,
+    Whole,
+    Tick,
+    wholtick_ceil,
+    wholtick_inner,
+    wholtick_floor
+);
 
 // ── quantize_at: Conn<Tick, Time> per Grid ───────────────────────
 
@@ -189,79 +267,79 @@ qa_variant!(T512P, qa_t512p_ceil, qa_t512p_floor);
 /// the result on that grid (no further nicest-coarsening, unlike
 /// [`ticktime`]). `fn` pointers can't close over `g`, so dispatch is a
 /// per-const `match`.
-pub fn quantize_at(g: Grid) -> Conn<Tick, Time> {
+pub fn quantize_at(g: Grid) -> RuntimeConn<Tick, Time> {
     if g == Grid::T1 {
-        Conn::new(qa_t1_ceil, qa_inner, qa_t1_floor)
+        RuntimeConn::new(qa_t1_ceil, qa_inner, qa_t1_floor)
     } else if g == Grid::T2 {
-        Conn::new(qa_t2_ceil, qa_inner, qa_t2_floor)
+        RuntimeConn::new(qa_t2_ceil, qa_inner, qa_t2_floor)
     } else if g == Grid::T4 {
-        Conn::new(qa_t4_ceil, qa_inner, qa_t4_floor)
+        RuntimeConn::new(qa_t4_ceil, qa_inner, qa_t4_floor)
     } else if g == Grid::T8 {
-        Conn::new(qa_t8_ceil, qa_inner, qa_t8_floor)
+        RuntimeConn::new(qa_t8_ceil, qa_inner, qa_t8_floor)
     } else if g == Grid::T16 {
-        Conn::new(qa_t16_ceil, qa_inner, qa_t16_floor)
+        RuntimeConn::new(qa_t16_ceil, qa_inner, qa_t16_floor)
     } else if g == Grid::T32 {
-        Conn::new(qa_t32_ceil, qa_inner, qa_t32_floor)
+        RuntimeConn::new(qa_t32_ceil, qa_inner, qa_t32_floor)
     } else if g == Grid::T64 {
-        Conn::new(qa_t64_ceil, qa_inner, qa_t64_floor)
+        RuntimeConn::new(qa_t64_ceil, qa_inner, qa_t64_floor)
     } else if g == Grid::T128 {
-        Conn::new(qa_t128_ceil, qa_inner, qa_t128_floor)
+        RuntimeConn::new(qa_t128_ceil, qa_inner, qa_t128_floor)
     } else if g == Grid::T256 {
-        Conn::new(qa_t256_ceil, qa_inner, qa_t256_floor)
+        RuntimeConn::new(qa_t256_ceil, qa_inner, qa_t256_floor)
     } else if g == Grid::T2T {
-        Conn::new(qa_t2t_ceil, qa_inner, qa_t2t_floor)
+        RuntimeConn::new(qa_t2t_ceil, qa_inner, qa_t2t_floor)
     } else if g == Grid::T4T {
-        Conn::new(qa_t4t_ceil, qa_inner, qa_t4t_floor)
+        RuntimeConn::new(qa_t4t_ceil, qa_inner, qa_t4t_floor)
     } else if g == Grid::T8T {
-        Conn::new(qa_t8t_ceil, qa_inner, qa_t8t_floor)
+        RuntimeConn::new(qa_t8t_ceil, qa_inner, qa_t8t_floor)
     } else if g == Grid::T16T {
-        Conn::new(qa_t16t_ceil, qa_inner, qa_t16t_floor)
+        RuntimeConn::new(qa_t16t_ceil, qa_inner, qa_t16t_floor)
     } else if g == Grid::T32T {
-        Conn::new(qa_t32t_ceil, qa_inner, qa_t32t_floor)
+        RuntimeConn::new(qa_t32t_ceil, qa_inner, qa_t32t_floor)
     } else if g == Grid::T64T {
-        Conn::new(qa_t64t_ceil, qa_inner, qa_t64t_floor)
+        RuntimeConn::new(qa_t64t_ceil, qa_inner, qa_t64t_floor)
     } else if g == Grid::T128T {
-        Conn::new(qa_t128t_ceil, qa_inner, qa_t128t_floor)
+        RuntimeConn::new(qa_t128t_ceil, qa_inner, qa_t128t_floor)
     } else if g == Grid::T256T {
-        Conn::new(qa_t256t_ceil, qa_inner, qa_t256t_floor)
+        RuntimeConn::new(qa_t256t_ceil, qa_inner, qa_t256t_floor)
     } else if g == Grid::T512T {
-        Conn::new(qa_t512t_ceil, qa_inner, qa_t512t_floor)
+        RuntimeConn::new(qa_t512t_ceil, qa_inner, qa_t512t_floor)
     } else if g == Grid::T2Q {
-        Conn::new(qa_t2q_ceil, qa_inner, qa_t2q_floor)
+        RuntimeConn::new(qa_t2q_ceil, qa_inner, qa_t2q_floor)
     } else if g == Grid::T4Q {
-        Conn::new(qa_t4q_ceil, qa_inner, qa_t4q_floor)
+        RuntimeConn::new(qa_t4q_ceil, qa_inner, qa_t4q_floor)
     } else if g == Grid::T8Q {
-        Conn::new(qa_t8q_ceil, qa_inner, qa_t8q_floor)
+        RuntimeConn::new(qa_t8q_ceil, qa_inner, qa_t8q_floor)
     } else if g == Grid::T16Q {
-        Conn::new(qa_t16q_ceil, qa_inner, qa_t16q_floor)
+        RuntimeConn::new(qa_t16q_ceil, qa_inner, qa_t16q_floor)
     } else if g == Grid::T32Q {
-        Conn::new(qa_t32q_ceil, qa_inner, qa_t32q_floor)
+        RuntimeConn::new(qa_t32q_ceil, qa_inner, qa_t32q_floor)
     } else if g == Grid::T64Q {
-        Conn::new(qa_t64q_ceil, qa_inner, qa_t64q_floor)
+        RuntimeConn::new(qa_t64q_ceil, qa_inner, qa_t64q_floor)
     } else if g == Grid::T128Q {
-        Conn::new(qa_t128q_ceil, qa_inner, qa_t128q_floor)
+        RuntimeConn::new(qa_t128q_ceil, qa_inner, qa_t128q_floor)
     } else if g == Grid::T256Q {
-        Conn::new(qa_t256q_ceil, qa_inner, qa_t256q_floor)
+        RuntimeConn::new(qa_t256q_ceil, qa_inner, qa_t256q_floor)
     } else if g == Grid::T512Q {
-        Conn::new(qa_t512q_ceil, qa_inner, qa_t512q_floor)
+        RuntimeConn::new(qa_t512q_ceil, qa_inner, qa_t512q_floor)
     } else if g == Grid::T2P {
-        Conn::new(qa_t2p_ceil, qa_inner, qa_t2p_floor)
+        RuntimeConn::new(qa_t2p_ceil, qa_inner, qa_t2p_floor)
     } else if g == Grid::T4P {
-        Conn::new(qa_t4p_ceil, qa_inner, qa_t4p_floor)
+        RuntimeConn::new(qa_t4p_ceil, qa_inner, qa_t4p_floor)
     } else if g == Grid::T8P {
-        Conn::new(qa_t8p_ceil, qa_inner, qa_t8p_floor)
+        RuntimeConn::new(qa_t8p_ceil, qa_inner, qa_t8p_floor)
     } else if g == Grid::T16P {
-        Conn::new(qa_t16p_ceil, qa_inner, qa_t16p_floor)
+        RuntimeConn::new(qa_t16p_ceil, qa_inner, qa_t16p_floor)
     } else if g == Grid::T32P {
-        Conn::new(qa_t32p_ceil, qa_inner, qa_t32p_floor)
+        RuntimeConn::new(qa_t32p_ceil, qa_inner, qa_t32p_floor)
     } else if g == Grid::T64P {
-        Conn::new(qa_t64p_ceil, qa_inner, qa_t64p_floor)
+        RuntimeConn::new(qa_t64p_ceil, qa_inner, qa_t64p_floor)
     } else if g == Grid::T128P {
-        Conn::new(qa_t128p_ceil, qa_inner, qa_t128p_floor)
+        RuntimeConn::new(qa_t128p_ceil, qa_inner, qa_t128p_floor)
     } else if g == Grid::T256P {
-        Conn::new(qa_t256p_ceil, qa_inner, qa_t256p_floor)
+        RuntimeConn::new(qa_t256p_ceil, qa_inner, qa_t256p_floor)
     } else if g == Grid::T512P {
-        Conn::new(qa_t512p_ceil, qa_inner, qa_t512p_floor)
+        RuntimeConn::new(qa_t512p_ceil, qa_inner, qa_t512p_floor)
     } else {
         unreachable!("Grid::ALL is exhaustive — every Grid value matched above")
     }
@@ -306,21 +384,25 @@ fn timetime_floor(ab: (Time, Time)) -> Time {
     from_ticks(Tick(l)).expect("timetime_floor: LCM exceeds the from_ticks horizon")
 }
 
-/// Divisibility-lattice connection on `Time`.
-///
-/// `ceil = meet (GCD)`, `floor = join (LCM)`, `inner = diagonal`.
-/// Following Haskell convention — the relevant order here is
-/// divisibility of tick counts, not magnitude.
-///
-/// # Panics
-///
-/// `floor` panics if the LCM of the two input tick counts exceeds
-/// the `from_ticks` horizon (`u32::MAX × Grid::T1.tick_count()`).
-/// For musically-bounded `Time` values this is unreachable; tests
-/// use `arb_small_time` (tick counts ≤ 192_000) to stay safely
-/// bounded.
-pub const TIMETIME: Conn<(Time, Time), Time> =
-    Conn::new(timetime_ceil, timetime_inner, timetime_floor);
+// Divisibility-lattice connection on `Time`.
+//
+// `ceil = meet (GCD)`, `floor = join (LCM)`, `inner = diagonal`.
+// Following Haskell convention — the relevant order here is
+// divisibility of tick counts, not magnitude.
+//
+// `floor` panics if the LCM of the two input tick counts exceeds
+// the `from_ticks` horizon (`u32::MAX × Grid::T1.tick_count()`).
+// For musically-bounded `Time` values this is unreachable; tests
+// use `arb_small_time` (tick counts ≤ 192_000) to stay safely
+// bounded.
+def_conn_marker!(
+    TIMETIME,
+    (Time, Time),
+    Time,
+    timetime_ceil,
+    timetime_inner,
+    timetime_floor
+);
 
 // ── gridgrid: Conn<(Grid, Grid), Grid> ───────────────────────────
 
@@ -338,10 +420,16 @@ fn gridgrid_floor(ab: (Grid, Grid)) -> Grid {
     a.join(&b)
 }
 
-/// Divisibility-lattice connection on `Grid`. `ceil = meet (GCD of
-/// tick counts)`, `floor = join (LCM)`, `inner = diagonal`.
-pub const GRIDGRID: Conn<(Grid, Grid), Grid> =
-    Conn::new(gridgrid_ceil, gridgrid_inner, gridgrid_floor);
+// Divisibility-lattice connection on `Grid`. `ceil = meet (GCD of
+// tick counts)`, `floor = join (LCM)`, `inner = diagonal`.
+def_conn_marker!(
+    GRIDGRID,
+    (Grid, Grid),
+    Grid,
+    gridgrid_ceil,
+    gridgrid_inner,
+    gridgrid_floor
+);
 
 // ── SampleTickConn: Sample ↔ Tick bridge ─────────────────────────
 //
@@ -360,7 +448,7 @@ pub const GRIDGRID: Conn<(Grid, Grid), Grid> =
 
 /// Sample ↔ Tick bridge parameterised by sample rate, tempo, and PPQN.
 ///
-/// Mirrors `connections::Conn<Sample, Tick>`'s `(ceil, inner, floor)`
+/// Mirrors the Galois `(ceil, inner, floor)` shape for `Sample`/`Tick`
 /// triple. The laws — round-trip on aligned inputs, monotonicity — are
 /// verified by proptest. Not a real `Conn` because its conversion
 /// depends on runtime `(sr, bpm, ppqn)` — would require a closure-
@@ -413,7 +501,7 @@ impl SampleTickConn {
         // Round to nearest: (num + denom/2) / denom. Half-up because
         // both num and denom are non-negative.
         let q = (num + denom / 2) / denom;
-        q.min(u128::from(u64::MAX)) as u64
+        U128U064.ceil(q)
     }
 
     /// Sample → Tick, rounding down (latest tick at-or-before `sample`).
@@ -432,7 +520,7 @@ impl SampleTickConn {
     }
 
     fn to_tick(x: u128) -> Tick {
-        Tick(x.min(u128::from(u64::MAX)) as u64)
+        Tick(U128U064.ceil(x))
     }
 }
 

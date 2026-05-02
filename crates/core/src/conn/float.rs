@@ -9,7 +9,7 @@
 //! qualitatively different (correction loops, NaN/saturation handling,
 //! float-domain proof obligations), so they live in separate files.
 
-use connections::conn::Conn;
+use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
 
 // Re-export the float-boundary primitive types so downstream crates
 // that don't depend on `connections` directly (cli, host-link) can
@@ -53,9 +53,17 @@ use super::fixed::{FD00, FD01, FD02, FD03, FD06, FD09, FD12};
 // source's ±∞.
 macro_rules! float_conn {
     ($const_name:ident, $float:ty, $Rung:ident, $prec:expr) => {
-        pub const $const_name: Conn<ExtendedFloat<$float>, Extended<$Rung>> = {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone, Debug, Default)]
+        pub struct $const_name;
+
+        impl $const_name {
             const PREC: i64 = $prec;
-            const PREC_F: f64 = PREC as f64;
+            const PREC_F: f64 = Self::PREC as f64;
+            const L: ConnL<ExtendedFloat<$float>, Extended<$Rung>> =
+                Conn::new_l(Self::ceil_fn, Self::inner_fn);
+            const R: ConnR<ExtendedFloat<$float>, Extended<$Rung>> =
+                Conn::new_r(Self::inner_fn, Self::floor_fn);
 
             // `inner(Rung)` reinterpreted as f64 for the correction-loop
             // comparisons. The `as $float as f64` round-trip is a no-op
@@ -65,10 +73,10 @@ macro_rules! float_conn {
             // collapse classes that turn the correction loops into
             // O(plateau) walks. See §Deferred in plan-2026-04-24-01.
             fn inner_as_f64(c: i64) -> f64 {
-                ((c as f64) / PREC_F) as $float as f64
+                ((c as f64) / Self::PREC_F) as $float as f64
             }
 
-            fn ceil(x: ExtendedFloat<$float>) -> Extended<$Rung> {
+            fn ceil_fn(x: ExtendedFloat<$float>) -> Extended<$Rung> {
                 let f = match x {
                     ExtendedFloat::Bot => return Extended::NegInf,
                     ExtendedFloat::Top => return Extended::PosInf,
@@ -84,7 +92,7 @@ macro_rules! float_conn {
                     return Extended::Finite($Rung(i64::MIN));
                 }
                 let xf = f as f64;
-                let scaled = xf * PREC_F;
+                let scaled = xf * Self::PREC_F;
                 // `i64::MAX as f64` rounds to 2^63 (i64::MAX itself isn't
                 // representable); the guard is therefore `scaled > 2^63`.
                 // Values equal to 2^63 fall through to the correction
@@ -102,7 +110,7 @@ macro_rules! float_conn {
                 // (bounded by ±1 ULP of the scaled product) so the
                 // Galois law holds exactly.
                 let mut c = scaled.ceil() as i64;
-                while c < i64::MAX && inner_as_f64(c) < xf {
+                while c < i64::MAX && Self::inner_as_f64(c) < xf {
                     c += 1;
                 }
                 // `c > i64::MIN + 1` (not `> i64::MIN`) because the
@@ -110,21 +118,23 @@ macro_rules! float_conn {
                 // that would legitimately round to `c = i64::MIN` was
                 // already caught by the `scaled < i64::MIN as f64`
                 // early return above.
-                while c > i64::MIN + 1 && inner_as_f64(c - 1) >= xf {
+                while c > i64::MIN + 1 && Self::inner_as_f64(c - 1) >= xf {
                     c -= 1;
                 }
                 Extended::Finite($Rung(c))
             }
 
-            fn inner(b: Extended<$Rung>) -> ExtendedFloat<$float> {
+            fn inner_fn(b: Extended<$Rung>) -> ExtendedFloat<$float> {
                 match b {
                     Extended::NegInf => ExtendedFloat::Bot,
                     Extended::PosInf => ExtendedFloat::Top,
-                    Extended::Finite(r) => ExtendedFloat::Extend(((r.0 as f64) / PREC_F) as $float),
+                    Extended::Finite(r) => {
+                        ExtendedFloat::Extend(((r.0 as f64) / Self::PREC_F) as $float)
+                    }
                 }
             }
 
-            fn floor(x: ExtendedFloat<$float>) -> Extended<$Rung> {
+            fn floor_fn(x: ExtendedFloat<$float>) -> Extended<$Rung> {
                 let f = match x {
                     ExtendedFloat::Bot => return Extended::NegInf,
                     ExtendedFloat::Top => return Extended::PosInf,
@@ -140,7 +150,7 @@ macro_rules! float_conn {
                     return Extended::NegInf;
                 }
                 let xf = f as f64;
-                let scaled = xf * PREC_F;
+                let scaled = xf * Self::PREC_F;
                 // Saturation bounds mirror `ceil` — see that function
                 // for why `i64::MAX as f64` is +2^63 (not exact) but
                 // `i64::MIN as f64` is exact.
@@ -151,17 +161,35 @@ macro_rules! float_conn {
                     return Extended::NegInf;
                 }
                 let mut c = scaled.floor() as i64;
-                while c > i64::MIN + 1 && inner_as_f64(c) > xf {
+                while c > i64::MIN + 1 && Self::inner_as_f64(c) > xf {
                     c -= 1;
                 }
-                while c < i64::MAX && inner_as_f64(c + 1) <= xf {
+                while c < i64::MAX && Self::inner_as_f64(c + 1) <= xf {
                     c += 1;
                 }
                 Extended::Finite($Rung(c))
             }
 
-            Conn::new(ceil, inner, floor)
-        };
+            pub fn ceil(self, x: ExtendedFloat<$float>) -> Extended<$Rung> {
+                Self::L.ceil(x)
+            }
+
+            pub fn inner(self, x: Extended<$Rung>) -> ExtendedFloat<$float> {
+                Self::L.inner(x)
+            }
+
+            pub fn floor(self, x: ExtendedFloat<$float>) -> Extended<$Rung> {
+                Self::R.floor(x)
+            }
+        }
+
+        impl ViewL<ExtendedFloat<$float>, Extended<$Rung>> for $const_name {
+            const L: ConnL<ExtendedFloat<$float>, Extended<$Rung>> = Self::L;
+        }
+
+        impl ViewR<ExtendedFloat<$float>, Extended<$Rung>> for $const_name {
+            const R: ConnR<ExtendedFloat<$float>, Extended<$Rung>> = Self::R;
+        }
     };
 }
 
@@ -341,47 +369,47 @@ mod tests {
 
                     #[test]
                     fn galois_l(a in $arb_src(), b in $arb_tgt()) {
-                        prop_assert!(laws::conn_galois_l(&$conn, a, b));
+                        prop_assert!(laws::galois_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, a, b));
                     }
 
                     #[test]
                     fn galois_r(a in $arb_src(), b in $arb_tgt()) {
-                        prop_assert!(laws::conn_galois_r(&$conn, a, b));
+                        prop_assert!(laws::galois_r(&<$conn as ViewR<ExtendedFloat<f64>, Extended<$Rung>>>::R, a, b));
                     }
 
                     #[test]
                     fn closure_l(a in $arb_src()) {
-                        prop_assert!(laws::conn_closure_l(&$conn, a));
+                        prop_assert!(laws::closure_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, a));
                     }
 
                     #[test]
                     fn closure_r(a in $arb_src()) {
-                        prop_assert!(laws::conn_closure_r(&$conn, a));
+                        prop_assert!(laws::closure_r(&<$conn as ViewR<ExtendedFloat<f64>, Extended<$Rung>>>::R, a));
                     }
 
                     #[test]
                     fn kernel_l(b in $arb_tgt()) {
-                        prop_assert!(laws::conn_kernel_l(&$conn, b));
+                        prop_assert!(laws::kernel_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, b));
                     }
 
                     #[test]
                     fn kernel_r(b in $arb_tgt()) {
-                        prop_assert!(laws::conn_kernel_r(&$conn, b));
+                        prop_assert!(laws::kernel_r(&<$conn as ViewR<ExtendedFloat<f64>, Extended<$Rung>>>::R, b));
                     }
 
                     #[test]
                     fn monotone_l(a1 in $arb_src(), a2 in $arb_src()) {
-                        prop_assert!(laws::conn_monotone_l(&$conn, a1, a2));
+                        prop_assert!(laws::monotone_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, a1, a2));
                     }
 
                     // Idempotence: inner∘ceil is idempotent on its
                     // image. ExtendedFloat<f64>'s PartialEq treats
                     // Extend(NaN) == Extend(NaN) as true, so the
-                    // Eq-bound `conn_idempotent` predicate is the
+                    // Eq-bound `idempotent_l` predicate is the
                     // right comparison here.
                     #[test]
                     fn idempotent(a in $arb_src()) {
-                        prop_assert!(laws::conn_idempotent(&$conn, a));
+                        prop_assert!(laws::idempotent_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, a));
                     }
                 }
 
@@ -390,7 +418,7 @@ mod tests {
                 // target.
                 #[allow(dead_code)]
                 fn _type_assert(x: Extended<$Rung>) -> Extended<$Rung> {
-                    let _: Conn<_, Extended<$Rung>> = $conn;
+                    let _: Extended<$Rung> = $conn.ceil(ExtendedFloat::Extend(0.0));
                     x
                 }
             }

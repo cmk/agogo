@@ -15,7 +15,7 @@
 //! `ceil` is the exact embedding into `u8`, and `inner` saturates a
 //! `u8` to the newtype's `MAX`.
 
-use connections::conn::Conn;
+use connections::conn::{Conn, ConnL};
 
 // ── U7 — 7-bit unsigned (0..=127). ──
 
@@ -79,27 +79,27 @@ impl core::fmt::Display for U4 {
 // - `ceil:  Narrow → u8` is the exact embedding (the narrow type's
 //   domain is a subset of u8's, so no rounding is needed).
 // - `inner: u8 → Narrow` saturates to `Narrow::MAX`.
-// - `Conn::new_left` sets `floor = ceil`, matching the Haskell
-//   one-sided `'L` shape.
+// - `Conn::new_l` builds the one-sided `'L` shape; no `floor`
+//   operation is exposed because there is no right adjoint.
 
-pub const U007U008: Conn<U7, u8> = {
+pub const U007U008: ConnL<U7, u8> = {
     fn ceil(x: U7) -> u8 {
         x.0
     }
     fn inner(x: u8) -> U7 {
         U7(if x <= U7::MAX { x } else { U7::MAX })
     }
-    Conn::new_left(ceil, inner)
+    Conn::new_l(ceil, inner)
 };
 
-pub const U004U008: Conn<U4, u8> = {
+pub const U004U008: ConnL<U4, u8> = {
     fn ceil(x: U4) -> u8 {
         x.0
     }
     fn inner(x: u8) -> U4 {
         U4(if x <= U4::MAX { x } else { U4::MAX })
     }
-    Conn::new_left(ceil, inner)
+    Conn::new_l(ceil, inner)
 };
 
 #[cfg(test)]
@@ -139,15 +139,6 @@ mod tests {
     #[test]
     fn u7u8_ceil_zero() {
         assert_eq!(U007U008.ceil(U7(0)), 0);
-    }
-
-    #[test]
-    fn u7u8_floor_equals_ceil() {
-        // Conn::new_left sets floor = ceil; verify the contract.
-        for x in 0..=U7::MAX {
-            let u = U7(x);
-            assert_eq!(U007U008.floor(u), U007U008.ceil(u));
-        }
     }
 
     #[test]
