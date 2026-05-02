@@ -12,8 +12,6 @@ pub enum ChannelSpecError {
     MissingKey(&'static str),
     #[error("channel spec: bad value for `{0}`: {1}")]
     BadValue(&'static str, String),
-    #[error("channel spec: dev=audio requires v0.4 (out/audio)")]
-    AudioDeferred,
     #[error("channel spec: malformed (expected `key=val,...`): {0}")]
     Malformed(String),
 }

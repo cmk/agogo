@@ -38,6 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use agogo::core::channel::Channel;
+use agogo::core::channel::spec::ChannelSpecRole;
 use agogo::core::conn::boundary::tempo_to_f64_bpm;
 use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
 use agogo::core::conn::tempo::Tempo;
@@ -140,18 +141,15 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
         }
     };
 
-    // Extract the first MIDI port name before consuming specs.
-    // Audit P4 (Plan 22): every spec is implicitly MIDI-targeted —
-    // `dev=audio` is rejected at parse time, so by here the only
-    // routing target is MIDI. The pre-P4 dev-filter collapses to
-    // "first spec's `out`." Returns `Err` if `named` is somehow empty
-    // (the `args.ch.is_empty()` guard at line 95 makes this
-    // structurally unreachable today, but `?` keeps the function
-    // graceful if a future caller path bypasses that guard).
+    // Extract target-specific device requests before consuming specs.
     let midi_port_request = named
-        .first()
-        .ok_or_else(|| "at least one --ch spec is required".to_string())
-        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()))?;
+        .iter()
+        .find(|(_, spec)| matches!(spec.role, ChannelSpecRole::Midi(_)))
+        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()));
+    let audio_output_request = named
+        .iter()
+        .find(|(_, spec)| matches!(spec.role, ChannelSpecRole::Audio(_)))
+        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()));
 
     // Keep specs alongside channels so the link branch in
     // `run_with_rate` can call `apply_snap_offsets` after constructing
@@ -170,24 +168,54 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     // Static rate dispatch.
     match args.sr {
-        rate if rate == S044::HZ => {
-            run_with_rate::<S044>(args, bpm, specs, channels, midi_port_request)
-        }
-        rate if rate == S048::HZ => {
-            run_with_rate::<S048>(args, bpm, specs, channels, midi_port_request)
-        }
-        rate if rate == S088::HZ => {
-            run_with_rate::<S088>(args, bpm, specs, channels, midi_port_request)
-        }
-        rate if rate == S096::HZ => {
-            run_with_rate::<S096>(args, bpm, specs, channels, midi_port_request)
-        }
-        rate if rate == S176::HZ => {
-            run_with_rate::<S176>(args, bpm, specs, channels, midi_port_request)
-        }
-        rate if rate == S192::HZ => {
-            run_with_rate::<S192>(args, bpm, specs, channels, midi_port_request)
-        }
+        rate if rate == S044::HZ => run_with_rate::<S044>(
+            args,
+            bpm,
+            specs,
+            channels,
+            midi_port_request,
+            audio_output_request,
+        ),
+        rate if rate == S048::HZ => run_with_rate::<S048>(
+            args,
+            bpm,
+            specs,
+            channels,
+            midi_port_request,
+            audio_output_request,
+        ),
+        rate if rate == S088::HZ => run_with_rate::<S088>(
+            args,
+            bpm,
+            specs,
+            channels,
+            midi_port_request,
+            audio_output_request,
+        ),
+        rate if rate == S096::HZ => run_with_rate::<S096>(
+            args,
+            bpm,
+            specs,
+            channels,
+            midi_port_request,
+            audio_output_request,
+        ),
+        rate if rate == S176::HZ => run_with_rate::<S176>(
+            args,
+            bpm,
+            specs,
+            channels,
+            midi_port_request,
+            audio_output_request,
+        ),
+        rate if rate == S192::HZ => run_with_rate::<S192>(
+            args,
+            bpm,
+            specs,
+            channels,
+            midi_port_request,
+            audio_output_request,
+        ),
         other => Err(format!(
             "--sr {other} not supported (allowed: 44100, 48000, 88200, 96000, \
              176400, 192000)"
@@ -200,36 +228,70 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 /// audio callback never branches on rate at runtime. The
 /// `Send + 'static` bound is what cpal's `data_callback` requires
 /// of the moved closure.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct ChannelMix {
+    has_midi: bool,
+    has_audio: bool,
+}
+
+fn channel_mix(channels: &[Channel]) -> ChannelMix {
+    ChannelMix {
+        has_midi: channels.iter().any(|ch| matches!(ch, Channel::Midi { .. })),
+        has_audio: channels
+            .iter()
+            .any(|ch| matches!(ch, Channel::Audio { .. })),
+    }
+}
+
 fn run_with_rate<R: SampleTime + Send + 'static>(
     args: &RunArgs,
     bpm: Tempo,
     specs: Vec<agogo::core::channel::spec::ChannelSpec>,
     mut channels: Vec<Channel>,
-    midi_port_request: String,
+    midi_port_request: Option<String>,
+    audio_output_request: Option<String>,
 ) -> Result<(), String> {
-    let midi_port_name = if midi_port_request == "default" {
-        MidirSink::list_output_ports()
-            .map_err(|e| format!("midi enumeration: {e}"))?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                "no MIDI output ports available (try `agogo demo \
-                 list-midi-outputs`)"
-                    .to_string()
-            })?
-    } else {
-        midi_port_request.clone()
-    };
-    let sink = Arc::new(
-        MidirSink::open(&midi_port_name)
-            .map_err(|e| format!("midi open `{midi_port_name}`: {e}"))?,
-    );
+    let mix = channel_mix(&channels);
+    debug_assert_eq!(mix.has_midi, midi_port_request.is_some());
+    debug_assert_eq!(mix.has_audio, audio_output_request.is_some());
+    if args.source == "external" && mix.has_audio {
+        return Err(
+            "--source external with dev=audio output is not wired yet; use --source internal for \
+             the audio metronome test feature"
+                .to_string(),
+        );
+    }
 
-    // SPSC + drain thread.
+    // SPSC + optional MIDI drain thread.
     let (producer, consumer) = spsc(1024);
     let dropped_handle = producer.dropped_handle();
-    let drain_sink: Arc<dyn agogo::core::sink::midi::MidiSink + Send + Sync> = sink;
-    let drain = consumer.spawn_drain(drain_sink);
+    let (midi_port_name, drain, undrained_consumer) = if let Some(request) = midi_port_request {
+        let midi_port_name = if request == "default" {
+            MidirSink::list_output_ports()
+                .map_err(|e| format!("midi enumeration: {e}"))?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    "no MIDI output ports available (try `agogo demo \
+                     list-midi-outputs`)"
+                        .to_string()
+                })?
+        } else {
+            request
+        };
+        let sink = Arc::new(
+            MidirSink::open(&midi_port_name)
+                .map_err(|e| format!("midi open `{midi_port_name}`: {e}"))?,
+        );
+        let drain_sink: Arc<dyn agogo::core::sink::midi::MidiSink + Send + Sync> = sink;
+        (
+            Some(midi_port_name),
+            Some(consumer.spawn_drain(drain_sink)),
+            None,
+        )
+    } else {
+        (None, None, Some(consumer))
+    };
 
     // Build PhaseSource per --source. Link case mints a
     // LinkSessionHandle for the control thread.
@@ -311,20 +373,48 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     let stop_handle = playhead.stop_handle();
     let mut state = CallbackState::<R> { playhead, producer };
 
-    // Open audio host.
-    let host = if args.audio_in == "default" {
-        CpalHost::default_input()
+    // Open audio host. MIDI-only runs preserve the existing input
+    // stream timing source; audio-click runs use output-only cpal so
+    // `--source internal` works without an audio input device.
+    let (host, cfg, audio_device_label) = if mix.has_audio {
+        let request = audio_output_request.unwrap_or_else(|| "default".to_string());
+        let host = if request == "default" {
+            CpalHost::default_output()
+        } else {
+            CpalHost::with_output_name(&request)
+        }
+        .map_err(|e| format!("cpal output open: {e}"))?;
+        (
+            host,
+            Config {
+                input_device: None,
+                output_device: Some(request.clone()),
+                sample_rate: args.sr,
+                buffer_frames: args.buffer_frames,
+                input_channels: 0,
+                output_channels: 1,
+            },
+            format!("audio out: {request}"),
+        )
     } else {
-        CpalHost::with_input_name(&args.audio_in)
-    }
-    .map_err(|e| format!("cpal open: {e}"))?;
-    let cfg = Config {
-        input_device: None,
-        output_device: None,
-        sample_rate: args.sr,
-        buffer_frames: args.buffer_frames,
-        input_channels: 1,
-        output_channels: 0,
+        let host = if args.audio_in == "default" {
+            CpalHost::default_input()
+        } else {
+            CpalHost::with_input_name(&args.audio_in)
+        }
+        .map_err(|e| format!("cpal open: {e}"))?;
+        (
+            host,
+            Config {
+                input_device: Some(args.audio_in.clone()),
+                output_device: None,
+                sample_rate: args.sr,
+                buffer_frames: args.buffer_frames,
+                input_channels: 1,
+                output_channels: 0,
+            },
+            format!("audio in: {}", args.audio_in),
+        )
     };
 
     // Move state into the data callback.
@@ -334,12 +424,12 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     let stream_handle = host.run(cfg, cb).map_err(|e| format!("cpal run: {e}"))?;
 
     eprintln!(
-        "agogo run: --bpm {} --sr {} --source {} --audio-in {} (midi port: {}) ({} channel{}{})",
+        "agogo run: --bpm {} --sr {} --source {} ({}) (midi port: {}) ({} channel{}{})",
         tempo_to_f64_bpm(args.bpm),
         args.sr,
         args.source,
-        args.audio_in,
-        midi_port_name,
+        audio_device_label,
+        midi_port_name.as_deref().unwrap_or("none"),
         args.ch.len(),
         if args.ch.len() == 1 { "" } else { "s" },
         if args.max_duration_ms.is_some() {
@@ -383,7 +473,8 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     std::thread::sleep(Duration::from_millis(50));
 
     drop(stream_handle); // pause cpal stream
-    drop(drain); // flush ring + join drain thread
+    drop(drain); // flush ring + join optional MIDI drain thread
+    drop(undrained_consumer);
 
     let dropped = dropped_handle.load(Ordering::Acquire);
     if dropped > 0 {
@@ -547,14 +638,45 @@ mod tests {
         );
     }
 
-    /// `dev=audio` is reserved for v0.4 and rejected at parse time.
+    /// `dev=audio` now accepts only the generated click test
+    /// feature, so a bare audio target still errors before any
+    /// device opens.
     #[test]
-    fn run_rejects_dev_audio() {
+    fn run_rejects_dev_audio_without_click_mode() {
         let args = args_with(vec!["dev=audio,grid=t32t"], 48_000);
         let err = run(&args).unwrap_err();
         assert!(
-            err.contains("dev=audio") && err.contains("v0.4"),
-            "expected dev=audio v0.4 message, got: {err}"
+            err.contains("mode") && err.contains("click"),
+            "expected dev=audio mode=click message, got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_accepts_audio_click_internal_spec() {
+        let args = args_with(vec!["dev=audio,mode=click,grid=t4,out=default"], 22_050);
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("22050") && !err.contains("--ch"),
+            "expected --sr rate error (audio spec parsed OK), got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_audio_only_does_not_require_midi_port() {
+        let named =
+            agogo::core::channel::spec::parse_channels(&["dev=audio,mode=click,grid=t4".into()])
+                .unwrap();
+        let channels: Vec<Channel> = named
+            .into_iter()
+            .map(|(_, spec)| spec.into_channel().unwrap())
+            .collect();
+
+        assert_eq!(
+            channel_mix(&channels),
+            ChannelMix {
+                has_midi: false,
+                has_audio: true,
+            }
         );
     }
 

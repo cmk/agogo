@@ -16,6 +16,16 @@
 
 use thiserror::Error;
 
+use crate::channel::{AudioRole, ScheduledEvent};
+
+const AUDIO_CLICK_ACCENT_EVERY: u32 = 4;
+const AUDIO_CLICK_NORMAL_FREQ_HZ: u32 = 1_200;
+const AUDIO_CLICK_ACCENT_FREQ_HZ: u32 = 1_800;
+const AUDIO_CLICK_NORMAL_AMP_Q15: i32 = 14_000;
+const AUDIO_CLICK_ACCENT_AMP_Q15: i32 = 24_000;
+const AUDIO_CLICK_MIN_FRAMES: usize = 24;
+const AUDIO_CLICK_MAX_FRAMES: usize = 960;
+
 /// Cross-platform audio-host trait. Concrete back-ends live in
 /// sibling crates (`host-cpal`, future `host-jack`, ...) and
 /// implement this trait against their native audio stream API.
@@ -151,6 +161,8 @@ impl std::fmt::Debug for Handle {
 pub enum AudioHostError {
     #[error("no default input device")]
     NoInputDevice,
+    #[error("no default output device")]
+    NoOutputDevice,
     #[error("device not found: {0}")]
     DeviceNotFound(String),
     /// The requested `Config::sample_rate` isn't in any of the
@@ -172,9 +184,86 @@ pub enum AudioHostError {
     Backend(Box<dyn std::error::Error + Send + Sync>),
 }
 
+/// Render generated audio clicks into the current output buffer.
+///
+/// Test-feature renderer: click shape is intentionally fixed in
+/// code rather than exposed through `--ch` parameters. The output
+/// buffer is mono in this feature slice, matching [`AudioIo`]'s
+/// current v0.1/v0.4 transition shape.
+pub fn render_audio_click_block(
+    events: &[ScheduledEvent],
+    role: &AudioRole,
+    click_counter: &mut u32,
+    io: &mut AudioIo<'_>,
+) {
+    if io.output.is_empty() {
+        return;
+    }
+
+    match role {
+        AudioRole::Click => {
+            let writable = io.output.len().min(io.frames);
+            for ev in events {
+                let Some(offset) = ev.sample_index.checked_sub(io.buffer_start_sample) else {
+                    continue;
+                };
+                let offset = offset as usize;
+                if offset >= writable {
+                    continue;
+                }
+                let accent = *click_counter % AUDIO_CLICK_ACCENT_EVERY == 0;
+                *click_counter = click_counter.wrapping_add(1);
+                render_one_click(offset, accent, io.sample_rate, &mut io.output[..writable]);
+            }
+        }
+    }
+}
+
+fn render_one_click(start: usize, accent: bool, sample_rate: u32, output: &mut [f32]) {
+    let len = click_len(sample_rate);
+    let freq = if accent {
+        AUDIO_CLICK_ACCENT_FREQ_HZ
+    } else {
+        AUDIO_CLICK_NORMAL_FREQ_HZ
+    };
+    let amp = if accent {
+        AUDIO_CLICK_ACCENT_AMP_Q15
+    } else {
+        AUDIO_CLICK_NORMAL_AMP_Q15
+    };
+    let half_period = (sample_rate / freq.saturating_mul(2)).max(1) as usize;
+
+    for i in 0..len {
+        let Some(dst) = output.get_mut(start + i) else {
+            break;
+        };
+        let envelope = (len - i) as i32;
+        let signed = if (i / half_period) % 2 == 0 {
+            amp
+        } else {
+            -amp
+        };
+        let sample_q15 = signed * envelope / len as i32;
+        mix_q15(dst, sample_q15);
+    }
+}
+
+fn click_len(sample_rate: u32) -> usize {
+    (sample_rate as usize / 250).clamp(AUDIO_CLICK_MIN_FRAMES, AUDIO_CLICK_MAX_FRAMES)
+}
+
+fn mix_q15(dst: &mut f32, sample_q15: i32) {
+    // PCM ABI: convert the generated fixed-point sample at the
+    // output boundary and clamp the mixed output to the f32 PCM
+    // range cpal expects.
+    let sample = sample_q15 as f32 / 32_768.0_f32; // PCM ABI
+    *dst = (*dst + sample).clamp(-1.0_f32, 1.0_f32); // PCM ABI
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time::tick::Tick;
 
     /// `Handle` drops its payload, which is how back-ends signal
     /// stream teardown. Uses an `Arc<AtomicBool>` witness: the
@@ -212,6 +301,90 @@ mod tests {
         fn _accepts_dyn_audio_host(_h: Box<dyn AudioHost>) {}
     }
 
+    fn event(sample_index: u64) -> ScheduledEvent {
+        ScheduledEvent {
+            sample_index,
+            tick: Tick(0),
+        }
+    }
+
+    #[test]
+    fn audio_click_events_write_nonzero_samples() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 128]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 1_000, 48_000, 128);
+        let mut counter = 0;
+
+        render_audio_click_block(&[event(1_010)], &AudioRole::Click, &mut counter, &mut io);
+
+        assert!(io.output.iter().any(|&s| s != 0.0));
+        assert_eq!(counter, 1);
+    }
+
+    #[test]
+    fn audio_click_ignores_out_of_buffer_events() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 64]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 1_000, 48_000, 64);
+        let mut counter = 0;
+
+        render_audio_click_block(
+            &[event(999), event(1_064)],
+            &AudioRole::Click,
+            &mut counter,
+            &mut io,
+        );
+
+        assert!(io.output.iter().all(|&s| s == 0.0));
+        assert_eq!(counter, 0);
+    }
+
+    #[test]
+    fn audio_accent_lands_every_n_emitted_clicks_from_zero() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut accent_output = vec![0.0_f32; 64]; // PCM ABI
+        let mut normal_output = vec![0.0_f32; 64]; // PCM ABI
+        let mut counter = 0;
+
+        {
+            let mut io = AudioIo::new(&input, &mut accent_output, 0, 48_000, 64);
+            render_audio_click_block(&[event(0)], &AudioRole::Click, &mut counter, &mut io);
+        }
+        {
+            let mut io = AudioIo::new(&input, &mut normal_output, 0, 48_000, 64);
+            render_audio_click_block(&[event(0)], &AudioRole::Click, &mut counter, &mut io);
+        }
+
+        assert_eq!(counter, 2);
+        assert!(accent_output[0].abs() > normal_output[0].abs());
+    }
+
+    #[test]
+    fn audio_click_counter_advances_across_buffer_boundaries() {
+        let input: [f32; 0] = []; // PCM ABI
+        let events = [event(10), event(250)];
+        let mut combined = vec![0.0_f32; 500]; // PCM ABI
+        let mut split = vec![0.0_f32; 500]; // PCM ABI
+
+        let mut combined_counter = 0;
+        {
+            let mut io = AudioIo::new(&input, &mut combined, 0, 48_000, 500);
+            render_audio_click_block(&events, &AudioRole::Click, &mut combined_counter, &mut io);
+        }
+
+        let mut split_counter = 0;
+        {
+            let (left, right) = split.split_at_mut(240);
+            let mut io = AudioIo::new(&input, left, 0, 48_000, 240);
+            render_audio_click_block(&events, &AudioRole::Click, &mut split_counter, &mut io);
+            let mut io = AudioIo::new(&input, right, 240, 48_000, 260);
+            render_audio_click_block(&events, &AudioRole::Click, &mut split_counter, &mut io);
+        }
+
+        assert_eq!(combined_counter, split_counter);
+        assert_eq!(combined, split);
+    }
+
     /// Sanity match over every `AudioHostError` variant.
     ///
     /// Inside `agogo-core` (the defining crate), `#[non_exhaustive]`
@@ -226,6 +399,7 @@ mod tests {
     fn audio_host_error_variants_constructible() {
         let errs = [
             AudioHostError::NoInputDevice,
+            AudioHostError::NoOutputDevice,
             AudioHostError::DeviceNotFound("x".into()),
             AudioHostError::UnsupportedSampleRate(12_345),
             AudioHostError::UnsupportedConfig("no f32 at 48 kHz".into()),
@@ -234,6 +408,7 @@ mod tests {
         for e in errs {
             match e {
                 AudioHostError::NoInputDevice
+                | AudioHostError::NoOutputDevice
                 | AudioHostError::DeviceNotFound(_)
                 | AudioHostError::UnsupportedSampleRate(_)
                 | AudioHostError::UnsupportedConfig(_)

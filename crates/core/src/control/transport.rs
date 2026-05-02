@@ -29,7 +29,7 @@ use crate::conn::sample::SampleTime;
 use crate::conn::tempo::Tempo;
 use crate::control::event::tick_stream_into;
 use crate::control::sync::PhaseSource;
-use crate::sink::audio::AudioIo;
+use crate::sink::audio::{AudioIo, render_audio_click_block};
 use crate::sink::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::time::conn::SampleTickConn;
 
@@ -77,6 +77,10 @@ pub struct Playhead<R: SampleTime> {
     /// counter parameter; advanced once per emitted Note On. Reset
     /// to 0 when transport stops.
     click_counters: Vec<u32>,
+    /// Per-channel emitted-click counter for fixed audio-click
+    /// accents. Index parallels `channels`; meaningful only for
+    /// `Channel::Audio { role: AudioRole::Click }` channels.
+    audio_click_counters: Vec<u32>,
     /// Cross-thread stop signal. `PlayheadStopHandle::request_stop`
     /// flips this; the next [`Playhead::on_buffer`] reads it and
     /// emits [`MidiRtByte::Stop`].
@@ -257,6 +261,7 @@ impl<R: SampleTime> Playhead<R> {
             events_pool: Vec::with_capacity(cap),
             bar_counters: vec![0; n],
             click_counters: vec![0; n],
+            audio_click_counters: vec![0; n],
             stop_flag: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -288,6 +293,11 @@ impl<R: SampleTime> Playhead<R> {
     /// adapter takes a sub-µs `Mutex` once per buffer per
     /// `LinkPhaseSource`'s docs).
     pub fn on_buffer(&mut self, io: &mut AudioIo, sink: &dyn MidiSink) {
+        // Output buffers arrive with undefined content; when a host
+        // opens output for audio-click rendering, write silence before
+        // mixing scheduled clicks.
+        io.output.fill(0.0_f32); // PCM ABI
+
         // 1. Feed PCM into the PhaseSource.
         self.phase_source
             .feed_samples(io.input, io.buffer_start_sample);
@@ -316,6 +326,7 @@ impl<R: SampleTime> Playhead<R> {
         if !self.transport.running {
             self.bar_counters.iter_mut().for_each(|c| *c = 0);
             self.click_counters.iter_mut().for_each(|c| *c = 0);
+            self.audio_click_counters.iter_mut().for_each(|c| *c = 0);
             return;
         }
 
@@ -369,6 +380,14 @@ impl<R: SampleTime> Playhead<R> {
                         sink,
                     );
                 }
+                Channel::Audio { role, .. } => {
+                    render_audio_click_block(
+                        &self.events_pool,
+                        role,
+                        &mut self.audio_click_counters[idx],
+                        io,
+                    );
+                }
                 Channel::Din { .. } | Channel::Cv { .. } => {
                     // No renderer for these targets in v0.1; the
                     // sink is MIDI-only.
@@ -381,7 +400,7 @@ impl<R: SampleTime> Playhead<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channel::{ChannelCommon, MidiRole};
+    use crate::channel::{AudioRole, ChannelCommon, MidiRole};
     use crate::conn::fixed::Micro;
     use crate::conn::sample::S048;
     use crate::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
@@ -734,6 +753,22 @@ mod tests {
         }
     }
 
+    fn audio_click_channel(divider: Grid, bar_multiplier: Option<NonZeroU16>) -> Channel {
+        Channel::Audio {
+            common: ChannelCommon {
+                divider,
+                shuffle: SwingConfig {
+                    resolution: TBase::T16,
+                    amount: 0,
+                },
+                delay: Micro::ZERO,
+                offset: Micro::ZERO,
+                bar_multiplier,
+            },
+            role: AudioRole::Click,
+        }
+    }
+
     /// Plan 2026-04-25-03 spot check: a click channel with no
     /// `bar_multiplier` emits Note On at every scheduled tick
     /// produced by the divider. At T4 / 120 BPM / 48 kHz, that's
@@ -767,6 +802,31 @@ mod tests {
             .map(|r| r.at_sample)
             .collect();
         assert_eq!(on_samples, vec![0, 24_000, 48_000, 72_000]);
+    }
+
+    #[test]
+    fn audio_click_channel_writes_pcm_per_divider_tick() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let mut playhead = Playhead::<S048>::new(
+            vec![audio_click_channel(Grid::T4, None)],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            PPQN,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+            24_000,
+        );
+        let sink = TestSink::new();
+        let input = vec![0.0_f32; 24_000]; // PCM ABI
+        let mut output = vec![0.0_f32; 24_000]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 24_000);
+
+        playhead.on_buffer(&mut io, &sink);
+
+        assert!(io.output.iter().any(|&s| s != 0.0));
+        assert_eq!(playhead.audio_click_counters[0], 1);
     }
 
     /// Helper for the bars-filter proptest + spot check: extract a
@@ -970,6 +1030,34 @@ mod tests {
             prop_assert_eq!(playhead.bar_counters[0], 0);
             prop_assert_eq!(playhead.click_counters[0], 0);
         }
+    }
+
+    #[test]
+    fn audio_click_counter_resets_on_transport_stop() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let mut playhead = Playhead::<S048>::new(
+            vec![audio_click_channel(Grid::T4, None)],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            PPQN,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+            24_000,
+        );
+        let sink = TestSink::new();
+        let input = vec![0.0_f32; 24_000]; // PCM ABI
+        let mut output = vec![0.0_f32; 24_000]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 24_000);
+        playhead.on_buffer(&mut io, &sink);
+        assert!(playhead.audio_click_counters[0] > 0);
+
+        playhead.stop_handle().request_stop();
+        let mut io = AudioIo::new(&input, &mut output, 24_000, 48_000, 24_000);
+        playhead.on_buffer(&mut io, &sink);
+
+        assert_eq!(playhead.audio_click_counters[0], 0);
     }
 
     /// Plan 2026-04-25-03 spot check: `bar_multiplier` interacts

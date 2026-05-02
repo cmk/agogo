@@ -16,7 +16,7 @@
 //! 5. **Offset** — same composition chain for the signed calibration
 //!    offset.
 
-use crate::channel::role::{ChannelCommon, CvRole, DinRole, MidiRole};
+use crate::channel::role::{AudioRole, ChannelCommon, CvRole, DinRole, MidiRole};
 use crate::conn::boundary::pico_to_samples;
 use crate::conn::fixed::{FD12FD06, Micro};
 use crate::time::conn::SampleTickConn;
@@ -35,14 +35,18 @@ pub const MAX_DELAY: Micro = Micro(300_000);
 /// the outer variant: a non-MIDI `Channel` doesn't type-check as
 /// input to `render_midi_channel`. Plan 21 (audit P3).
 ///
-/// `Channel::Audio` is **not** a variant in v0.1 — an empty
-/// `AudioRole` would make the variant uninhabited; v0.4's
-/// audio-click renderer is the natural slot to introduce both.
+/// `Channel::Audio` starts as a narrow test-feature target: only
+/// generated click output is constructible, with fixed renderer-side
+/// sound constants.
 #[derive(Copy, Clone, Debug)]
 pub enum Channel {
     Midi {
         common: ChannelCommon,
         role: MidiRole,
+    },
+    Audio {
+        common: ChannelCommon,
+        role: AudioRole,
     },
     Din {
         common: ChannelCommon,
@@ -60,6 +64,7 @@ impl Channel {
     pub fn common(&self) -> &ChannelCommon {
         match self {
             Channel::Midi { common, .. } => common,
+            Channel::Audio { common, .. } => common,
             Channel::Din { common, .. } => common,
             Channel::Cv { common, .. } => common,
         }
@@ -69,6 +74,7 @@ impl Channel {
     pub fn common_mut(&mut self) -> &mut ChannelCommon {
         match self {
             Channel::Midi { common, .. } => common,
+            Channel::Audio { common, .. } => common,
             Channel::Din { common, .. } => common,
             Channel::Cv { common, .. } => common,
         }
@@ -207,6 +213,14 @@ mod tests {
         let _ = Channel::Din {
             common: zero_common(Grid::T4),
             role: DinRole::Sync24,
+        };
+    }
+
+    #[test]
+    fn channel_audio_click_constructible() {
+        let _ = Channel::Audio {
+            common: zero_common(Grid::T4),
+            role: AudioRole::Click,
         };
     }
 

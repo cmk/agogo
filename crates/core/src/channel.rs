@@ -6,7 +6,7 @@
 //!
 //! Submodules:
 //! - [`role`]      — per-routing-target role enums (`MidiRole`,
-//!   `DinRole`, `CvRole`) + the shared [`role::ChannelCommon`]
+//!   `AudioRole`, `DinRole`, `CvRole`) + the shared [`role::ChannelCommon`]
 //!   field set.
 //! - [`time`]      — sum-typed [`time::Channel`] enum + the
 //!   per-buffer transform pipeline (was `channel/transform.rs`
@@ -33,7 +33,9 @@ pub mod time;
 // don't surface in `cargo doc` as user-facing API; the attribute
 // comes off in the plan that ships the corresponding renderer.
 // Plan 09 T6.
-pub use role::{ChannelCommon, MidiCcConfig, MidiClickAccent, MidiClickConfig, MidiRole};
+pub use role::{
+    AudioRole, ChannelCommon, MidiCcConfig, MidiClickAccent, MidiClickConfig, MidiRole,
+};
 #[doc(hidden)]
 pub use role::{CvRole, DinRole};
 pub use time::{Channel, MAX_DELAY, ScheduledEvent, transform};
