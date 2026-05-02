@@ -182,8 +182,11 @@ code based on it.
 
   `scripts/check-layers.sh` parses these headers and fails on any
   `use crate::<top>` or `use agogo_core::<top>` in production code
-  (column-0 imports) that names a module the current layer's
-  `depends-on:` list does not authorise. Test-block imports
+  (column-0 imports — including `pub use` re-exports and
+  `use crate::{a, b}` grouped forms) that names a module the
+  current layer's `depends-on:` list does not authorise. The gate
+  also checks that each `//! layer:` sentinel matches its filename
+  so a stale rename can't go unnoticed. Test-block imports
   (indented inside `#[cfg(test)] mod tests { … }`) are allowed to
   cross layers — integration tests legitimately need to wire
   pieces together. Adding a new edge requires updating both the
