@@ -37,10 +37,10 @@ pieces together.
   `time/arb.rs` and `conn/arb.rs`. CLAUDE.md's
   "Strategies are colocated with the type" rule relaxed to
   "one arb file per top-level module".
-- **T5** — `dsl/`, `dsl.rs`, `channel/spec/`, `channel/spec.rs`
+- **T5** — `dsl/`, `dsl.rs`, `machine/spec/`, `machine/spec.rs`
   all move under `channel/`. `channel/transform.rs` renames to
   `channel/time.rs`.
-- **T6** — `control/transport.rs` → `control.rs`, `sync.rs` →
+- **T6** — `machine.rs` → `control.rs`, `sync.rs` →
   `control/sync.rs`, `sync/` → `control/sync/`,
   `pulse_train.rs` → `pulse.rs`, `host.rs` → `sink/audio.rs`,
   `out/midi.rs` → `sink/midi.rs`, `channel/scheduler.rs` →
@@ -172,7 +172,7 @@ T8's stated scope was `doc/plans/plan-2026-04-28-*.md`, `CLAUDE.md`, and `script
 | T2 — `conn/` extraction | ✓ | All seven files moved; `CLAUDE.md` path refs updated; `check-floats.sh` ALLOWED updated |
 | T3 — `sample_tick` merge | ✓ | Content appended to `time/conn.rs`; regression seed migrated; old file deleted |
 | T4 — arb consolidation | ✓ | `conn/arb.rs` and `time/arb.rs` contain all consolidated strategies; old `pub mod arb` declarations removed |
-| T5 — `channel/` growth | ✓ | `dsl/` and `channel/spec/` moved; `transform.rs` → `time.rs`; proptest-regressions renamed |
+| T5 — `channel/` growth | ✓ | `dsl/` and `machine/spec/` moved; `transform.rs` → `time.rs`; proptest-regressions renamed |
 | T6 — `control/` + `sink/` | ✓ | All renames complete; `tick_stream` re-exported from `control`; `pulse_train.rs` → `pulse.rs` |
 | T7 — layer enforcement | ✓ | Sentinels in all six module roots; `check-layers.sh` added; wired into pre-commit and CI |
 | T8 — doc sweep | ✓ with gaps | `doc/plans/plan-2026-04-28-*.md` clean; crate READMEs not swept (outside stated scope) |
