@@ -24,7 +24,7 @@ to the MIDI renderer and produce zero output without warning.
 Post-P3, the renderer is `render_midi_channel(&ChannelCommon,
 &MidiRole, ...)`. A `Channel::Cv` variant **literally cannot** be
 passed to it — it's a compile error, not a silent no-op. The
-`Machine`-level dispatch matches on the outer `Channel` variant
+`Playhead`-level dispatch matches on the outer `Channel` variant
 once at the top of the per-channel loop; non-MIDI targets land in a
 `Channel::Din { .. } | Channel::Cv { .. } => {}` arm that's
 explicitly the no-renderer case (instead of being buried in a
@@ -50,7 +50,7 @@ catch-all inside the renderer itself).
   `non_clock_modes_are_noop` proptest is deleted (structurally
   unrepresentable now); replaced by `cc_role_is_noop_until_v02`
   for the one remaining no-op MIDI role (`Cc(_)` v0.2+ stub).
-- **`crates/core/src/control.rs`**: `Machine::on_buffer` per-channel
+- **`crates/core/src/control.rs`**: `Playhead::on_buffer` per-channel
   loop now `match`es on the outer `Channel` variant. The
   `Channel::Midi { common, role }` arm calls `render_midi_channel`;
   `Din` / `Cv` arms are explicit no-renderer.
@@ -90,7 +90,7 @@ catch-all inside the renderer itself).
   type system *couldn't* say no — it was codifying a runtime
   workaround as a contract. P3 turns the workaround into a
   compile-time guarantee.
-- **Locality of change at renderer dispatch.** The Machine-level
+- **Locality of change at renderer dispatch.** The Playhead-level
   match is one site; renderer narrowing happens once per target,
   not once per `(target × role)` pair like the old flat enum.
 - **Migration path for v0.4 audio.** Adding `Channel::Audio { common,
@@ -183,7 +183,7 @@ The deletion of `crates/core/src/channel/mode.rs` is the compiler-enforced verif
 - **T1** (`role.rs` with `ChannelCommon`, `MidiRole`, `DinRole`, `CvRole`, `MidiClickConfig`, `MidiClickAccent`, `MidiCcConfig`): Present. File is 162 lines with full field docs.
 - **T1b** (`channel/mod.rs` re-exports, `Channel` enum in `transform.rs` with `common()`/`common_mut()`): Present.
 - **T2** (`transform()` and `tick_stream*` take `&ChannelCommon`): Present. Both functions updated; callers use `ch.common()`.
-- **T3** (render dispatch split — `render_midi_channel` + Machine dispatch): Present. `render_channel_block` is deleted; `Machine::on_buffer` has the three-arm match.
+- **T3** (render dispatch split — `render_midi_channel` + Playhead dispatch): Present. `render_channel_block` is deleted; `Playhead::on_buffer` has the three-arm match.
 - **T4** (`spec.rs` `into_channel` returns `Channel::Midi`, `ChannelSpec.mode: MidiRole`): Present and correct.
 - **T5** (67-reference sweep): The deletion of `mode.rs` confirms all references were cleared. 10 files touched.
 - **T6** (`mode.rs` deleted): Present.
@@ -194,7 +194,7 @@ All six documented design deviations match actual code. All four verification-ta
 
 **`MidiRole` is not `#[non_exhaustive]` — but that's correct.** The current `render_midi_channel` match is exhaustive over three arms (`Clock`, `Click`, `Cc`). Adding a new variant to `MidiRole` in a future sprint would be a compile error in `render_midi_channel` — the match would be non-exhaustive and rustc would catch it. This is the right design for a library-internal enum.
 
-The `Channel::Din { .. } | Channel::Cv { .. } => {}` arm in `Machine::on_buffer` is similarly safe: adding `Channel::Audio` later would be a compile error at that match, forcing the dispatch to handle it. Good.
+The `Channel::Din { .. } | Channel::Cv { .. } => {}` arm in `Playhead::on_buffer` is similarly safe: adding `Channel::Audio` later would be a compile error at that match, forcing the dispatch to handle it. Good.
 
 **No `Cargo.lock` changes** are present in the diff. The diff contains no `Cargo.lock` hunk — the `connections` git dep SHA was not re-canonicalized in this branch. Clean.
 
@@ -210,7 +210,7 @@ The `Channel::Din { .. } | Channel::Cv { .. } => {}` arm in `Machine::on_buffer`
 
 - The plan's Verification table names `into_channel_clock_returns_midi_variant` and `into_channel_click_returns_midi_variant` as spot checks. Neither exists by that name. The coverage is real but the test names don't match the spec. This creates a minor audit-trail gap: a future reviewer checking "was this spot check implemented?" would not find it by name. Consider either adding two targeted tests with the plan-spec names or updating the plan doc to use the actual test names. Low priority — the compiler enforces what these tests would assert, so this is documentation hygiene, not a correctness gap.
 
-- `ChannelCommon` does not derive `PartialEq`. The role enums (`MidiRole`, `DinRole`, `CvRole`) and their payload types do. This means `Channel` itself can't derive `PartialEq`, which is fine for now since `Machine` holds channels in a `Vec` and equality is never compared. If a future test needs to assert `ch_a == ch_b`, the missing derive will be a build error rather than a silent surprise. Acceptable for v0.1; worth noting for P4.
+- `ChannelCommon` does not derive `PartialEq`. The role enums (`MidiRole`, `DinRole`, `CvRole`) and their payload types do. This means `Channel` itself can't derive `PartialEq`, which is fine for now since `Playhead` holds channels in a `Vec` and equality is never compared. If a future test needs to assert `ch_a == ch_b`, the missing derive will be a build error rather than a silent surprise. Acceptable for v0.1; worth noting for P4.
 
 <!-- gh-id: 3143358873 -->
 ### Copilot on [`doc/plans/plan-2026-04-26-02.md:94`](https://github.com/cmk/agogo/pull/26#discussion_r3143358873) (2026-04-26 10:45 UTC)
@@ -247,7 +247,7 @@ Copilot reviewed 12 out of 13 changed files in this pull request and generated 3
 | crates/core/src/channel/time.rs | Makes `Channel` sum-typed and shifts transform pipeline to `&ChannelCommon`. |
 | crates/core/src/control/event.rs | Updates tick scheduling APIs to consume `&ChannelCommon`. |
 | crates/core/src/sink/midi.rs | Deletes `render_channel_block`; adds `render_midi_channel` and updates tests accordingly. |
-| crates/core/src/control.rs | Moves per-channel dispatch to `Machine::on_buffer` via `match Channel::{Midi,Din,Cv}`. |
+| crates/core/src/control.rs | Moves per-channel dispatch to `Playhead::on_buffer` via `match Channel::{Midi,Din,Cv}`. |
 | crates/core/src/channel/spec.rs | Changes `ChannelSpec.mode` to `MidiRole` and emits `Channel::Midi` from `into_channel`. |
 | crates/core/src/channel.rs | Removes `mode` module export; re-exports role/common types. |
 | crates/cli/src/main.rs | Updates trace/demo code to use `ChannelCommon` + `MidiRole` where appropriate. |

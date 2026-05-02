@@ -1,4 +1,4 @@
-# PR #16 — Plan 14: Machine + agogo run + bin/agogo
+# PR #16 — Plan 14: Playhead + agogo run + bin/agogo
 
 ## Summary
 
@@ -9,7 +9,7 @@ end-to-end.
 
 ### What changed
 
-- **`agogo_core::control`** (new module): N-channel `Machine<R>`
+- **`agogo_core::control`** (new module): N-channel `Playhead<R>`
   orchestrator. Owns `Vec<Channel>`, shared `PhaseSource<R>` /
   `SampleTickConn`, transport state, and a reused per-channel
   scratch buffer. `on_buffer` is the single buffer-driven entry the
@@ -17,7 +17,7 @@ end-to-end.
   per-buffer transport byte, then iterates channels through Plan 12's
   `render_channel_block`.
 - **`TransportPolicy`** enum (`Internal | LinkDriven | Scripted`) +
-  `MachineStopHandle` (cross-thread `AtomicBool` for Ctrl-C
+  `PlayheadStopHandle` (cross-thread `AtomicBool` for Ctrl-C
   signalling). Internal emits `Start` at first buffer / `Stop` after
   `request_stop`. LinkDriven reads `LinkSession::is_playing()`
   through a closure and emits on transitions. Scripted is a test
@@ -37,9 +37,9 @@ end-to-end.
   pace on the control thread. v0.5 Sprint 02 swaps to seqlock when
   precision matters.
 - **`crates/host-cpal/src/cpal/callback.rs`**: `CallbackState<R>`
-  shrinks to a 2-field wrapper around `Machine<R>` + `RtProducer`.
+  shrinks to a 2-field wrapper around `Playhead<R>` + `RtProducer`.
   `on_buffer` is one delegating call. The transport
-  `Option<MidiRtByte>` parameter goes away — Machine drives that
+  `Option<MidiRtByte>` parameter goes away — Playhead drives that
   internally.
 - **`crates/cli/src/run.rs`** (new): `agogo run` handler. Six-rate
   static dispatch (`S44 | S48 | S88 | S96 | S176 | S192`). Three
@@ -54,11 +54,11 @@ end-to-end.
   `agogo-cli`. Adds `ctrlc = "3"` as the only new dep
   (small, MIT, cross-platform).
 - **`max_events_for_buffer`** moved from `host-cpal` to
-  `agogo_core::control::event` so `Machine` can size its pool
+  `agogo_core::control::event` so `Playhead` can size its pool
   without depending on `host-cpal`. host-cpal re-exports for
   back-compat.
 - **`scripts/check-floats.sh` + `CLAUDE.md`** allowlist gains four
-  files (machine.rs, machine/spec.rs, host-link/source.rs,
+  files (control/transport.rs, channel/spec.rs, host-link/source.rs,
   cli/run.rs); count goes from ten → fourteen exception modules,
   documented inline.
 - **`doc/versions/version-0.1.md`** updated: status table reflects
@@ -68,14 +68,14 @@ end-to-end.
 ### Tests
 
 - 8 spec parser unit tests + `spec_round_trip` proptest.
-- 4 Machine tests + 2 Machine proptests (`multi_channel_independent
+- 4 Playhead tests + 2 Playhead proptests (`multi_channel_independent
   _dispatch`, `transport_link_driven_emits_on_transitions`).
 - 1 host-link `LinkPhaseSource` round-trip + 1 no-deadlock
   contention proptest.
 - 4 CLI `run::tests` smoke tests covering the no-device error paths
   (empty `--ch`, `dev=audio`, unsupported rate, malformed key).
 - Existing host-cpal `callback_emits_expected_clock_schedule`
-  re-pinned against the Machine-backed callback for byte-equivalence
+  re-pinned against the Playhead-backed callback for byte-equivalence
   with Plan 13's original.
 
 234 → 255 workspace tests; clippy clean across all features;
@@ -97,8 +97,8 @@ boundary, cpal stream paused, drain thread joined, exit 0 within
 
 ### MR split
 
-One PR. Plan 14's task graph is tightly coupled — Machine needs the
-spec parser to be useful, the CLI needs Machine, the binary entry
+One PR. Plan 14's task graph is tightly coupled — Playhead needs the
+spec parser to be useful, the CLI needs Playhead, the binary entry
 needs the CLI shape. Splitting fragments review.
 
 ### What's deferred
@@ -109,7 +109,7 @@ needs the CLI shape. Splitting fragments review.
 - PID-smoothed Link follower + forerun transport → v0.5.
 - Preset I/O (`--config presets/foo.toml`) → post-v0.5.
 - `agogo-cli` binary alias removal → v0.2 cleanup.
-- `machine_alloc_free_per_buffer` (alloc_tracker fixture) → v0.5
+- `playhead_alloc_free_per_buffer` (alloc_tracker fixture) → v0.5
   if RT-allocation regressions surface; existing
   `callback_does_not_realloc_events` covers the contract for v0.1.
 - Hardware-fixture loopback tests → v0.5 acceptance suite.
@@ -149,14 +149,14 @@ No merge commits; history is linear.
 
 ### Code Quality
 
-**Module layout:** `machine.rs` + `machine/spec.rs` follows the modern
+**Module layout:** `control/transport.rs` + `channel/spec.rs` follows the modern
 layout correctly. No `mod.rs`.
 
 **`unsafe`:** All crate roots have `#![forbid(unsafe_code)]`. No
 `unsafe` in the diff.
 
-**Float discipline:** Four files added to the allowlist: `machine.rs`
-(empty `[f32; 0]` in tests — PCM ABI), `machine/spec.rs`
+**Float discipline:** Four files added to the allowlist: `control/transport.rs`
+(empty `[f32; 0]` in tests — PCM ABI), `channel/spec.rs`
 (argv-boundary `f64` fields), `host-link/source.rs`
 (`PhaseSourceImpl::feed_samples` signature), `cli/run.rs` (argv
 parsers). Compliant with CLAUDE.md.
@@ -195,11 +195,11 @@ comment is misleading.
 | Property | Present? | Notes |
 |---|---|---|
 | `spec_round_trip` | Yes | proptest in `spec::tests` |
-| `machine_buffer_matches_plan13_demo` | Yes | spot-check |
+| `playhead_buffer_matches_plan13_demo` | Yes | spot-check |
 | `multi_channel_independent_dispatch` | Yes | proptest |
 | `transport_internal_emits_start_then_stop` | Yes | |
 | `transport_link_driven_emits_on_transitions` | Yes | proptest |
-| `machine_alloc_free_per_buffer` | Deferred | documented |
+| `playhead_alloc_free_per_buffer` | Deferred | documented |
 | `link_phase_source_no_deadlock` | Yes | |
 | `run_help_lists_all_six_rates` | **Missing — not documented as deferred** | |
 
@@ -224,9 +224,9 @@ identifiers.
 
 ### Plan Conformance — T0 through T7
 
-- **T0 (core::machine):** Implemented. `Machine<R>`,
-  `TransportPolicy`, `TransportState`, `MachineStopHandle`. Plan's
-  `stop_requested: AtomicBool` factored to `Machine::stop_flag`
+- **T0 (core::control::transport):** Implemented. `Playhead<R>`,
+  `TransportPolicy`, `TransportState`, `PlayheadStopHandle`. Plan's
+  `stop_requested: AtomicBool` factored to `Playhead::stop_flag`
   (clean deviation per Review §2).
 - **T1 (ChannelSpec parser):** Implemented. `micro_from_ms` uses
   `F64F06` correctly.
@@ -297,14 +297,14 @@ pub struct TransportState {
 <!-- gh-id: 3141397340 -->
 ### Copilot on [`crates/core/src/control.rs:169`](https://github.com/cmk/agogo/pull/16#discussion_r3141397340) (2026-04-25 04:07 UTC)
 
-`MachineStopHandle`’s docs claim that after `request_stop()` the callback “falls silent — clock and transport bytes alike”, but `Machine::on_buffer` still schedules/renders per-channel clock events after emitting `MidiRtByte::Stop` (and `TransportState` docs earlier even say the stream becomes clock-only). Please reconcile the documentation with the intended behavior (either update the docs, or gate clock emission after a stop request if silence is required).
+`PlayheadStopHandle`’s docs claim that after `request_stop()` the callback “falls silent — clock and transport bytes alike”, but `Playhead::on_buffer` still schedules/renders per-channel clock events after emitting `MidiRtByte::Stop` (and `TransportState` docs earlier even say the stream becomes clock-only). Please reconcile the documentation with the intended behavior (either update the docs, or gate clock emission after a stop request if silence is required).
 
 <!-- gh-id: 3141397365 -->
 ### Copilot on [`doc/versions/version-0.1.md:19`](https://github.com/cmk/agogo/pull/16#discussion_r3141397365) (2026-04-25 04:07 UTC)
 
 This status summary contradicts the rest of the page: it says “All v0.1 sprints have shipped” and that the acceptance scenario is already reachable end-to-end, but Plan 14 is still listed under “In flight” below. Please reword to reflect whether Plan 14 is shipped or still pending (and keep the acceptance claim consistent with that).
 ```suggestion
-Most v0.1 sprints have shipped. Plan 14 (Machine + `agogo run` +
+Most v0.1 sprints have shipped. Plan 14 (Playhead + `agogo run` +
 `bin/agogo`) is still the final in-flight piece; once it lands, the
 v0.1 acceptance scenario below will be reachable end-to-end.
 ```
@@ -335,11 +335,11 @@ In `phase_at_sample`'s comment, “Lock contention is uncontested” looks like 
 
 ## Pull request overview
 
-Implements Plan 14’s v0.1 “end-to-end runner” by introducing an N-channel `Machine` orchestrator, wiring Ableton Link as a `PhaseSource`, and adding a user-facing `agogo run` command plus a top-level `agogo` binary entry.
+Implements Plan 14’s v0.1 “end-to-end runner” by introducing an N-channel `Playhead` orchestrator, wiring Ableton Link as a `PhaseSource`, and adding a user-facing `agogo run` command plus a top-level `agogo` binary entry.
 
 **Changes:**
-- Add `agogo_core::control::{Machine, TransportPolicy, ChannelSpec}` and move `max_events_for_buffer` into core for shared sizing.
-- Add Link adapter (`LinkPhaseSource`) and refactor the cpal callback to delegate to `Machine::on_buffer`.
+- Add `agogo_core::control::{Playhead, TransportPolicy, ChannelSpec}` and move `max_events_for_buffer` into core for shared sizing.
+- Add Link adapter (`LinkPhaseSource`) and refactor the cpal callback to delegate to `Playhead::on_buffer`.
 - Add CLI `agogo run` (six-rate static dispatch, internal/external/link sources, Ctrl-C stop) and update docs / float-allowlist accordingly.
 
 ### Reviewed changes
@@ -358,13 +358,13 @@ Copilot reviewed 16 out of 17 changed files in this pull request and generated 7
 | crates/host-link/src/source.rs | New `LinkPhaseSource` adapter + contention/no-deadlock tests. |
 | crates/host-link/src/session.rs | Expose `phase_at_sample` shim on `LinkSession` for the adapter. |
 | crates/host-link/src/lib.rs | Export the new `source` module types under `rusty-link`. |
-| crates/host-cpal/src/cpal/callback.rs | Shrink callback state and delegate buffer work to `Machine`. |
+| crates/host-cpal/src/cpal/callback.rs | Shrink callback state and delegate buffer work to `Playhead`. |
 | crates/core/src/channel/spec.rs | Implement the docker-style `--ch key=val,...` spec parser + Display round-trip. |
-| crates/core/src/control.rs | Implement the N-channel `Machine` orchestrator + transport policy + tests/proptests. |
+| crates/core/src/control.rs | Implement the N-channel `Playhead` orchestrator + transport policy + tests/proptests. |
 | crates/core/src/lib.rs | Export the new `machine` module. |
 | crates/core/src/control/event.rs | Move `max_events_for_buffer` into core scheduler for reuse. |
 | crates/cli/src/run.rs | New `agogo run` handler (rate dispatch, sources, Ctrl-C teardown, smoke tests). |
-| crates/cli/src/main.rs | Add `run` subcommand behind the `run` feature; adapt demo to `Machine`. |
+| crates/cli/src/main.rs | Add `run` subcommand behind the `run` feature; adapt demo to `Playhead`. |
 | crates/cli/Cargo.toml | Add `run` feature, `ctrlc` dep, and explicit `agogo` + `agogo-cli` bin targets. |
 | Cargo.lock | Lock `ctrlc` and its transitive dependencies. |
 | CLAUDE.md | Update float-allowlist documentation to include the new Plan 14 exception files. |
@@ -432,12 +432,12 @@ Copilot reviewed 16 out of 17 changed files in this pull request and generated 4
 <!-- gh-id: 3141517926 -->
 #### ↳ cmk ([2026-04-25 05:32 UTC](https://github.com/cmk/agogo/pull/16#discussion_r3141517926))
 
-Fixed in fd54435 — `request_stop()` now short-circuits the clock-render path as well as transport bytes. `TransportState.running` doc rewritten as a "local stop/teardown latch": flips to false *only* via `request_stop()` (the `stop_pending` arm), and `Machine::on_buffer` emits no transport bytes **and** no clock events while it's false. Policy-driven Stop bytes (LinkDriven/Scripted) do NOT clear the latch.
+Fixed in fd54435 — `request_stop()` now short-circuits the clock-render path as well as transport bytes. `TransportState.running` doc rewritten as a "local stop/teardown latch": flips to false *only* via `request_stop()` (the `stop_pending` arm), and `Playhead::on_buffer` emits no transport bytes **and** no clock events while it's false. Policy-driven Stop bytes (LinkDriven/Scripted) do NOT clear the latch.
 
 <!-- gh-id: 3141517973 -->
 #### ↳ cmk ([2026-04-25 05:32 UTC](https://github.com/cmk/agogo/pull/16#discussion_r3141517973))
 
-Fixed in fd54435 — kept the docs as written and made the code match: `Machine::on_buffer` now early-returns before the per-channel render loop when `transport.running` is false. The `transport_internal_emits_start_then_stop` test gained a clock-suppression assertion pinning the contract: at T4/120 BPM/48 kHz, only the buffer-0 clock survives — the natural clock at sample 24,000 (inside the stop-buffer) is now suppressed.
+Fixed in fd54435 — kept the docs as written and made the code match: `Playhead::on_buffer` now early-returns before the per-channel render loop when `transport.running` is false. The `transport_internal_emits_start_then_stop` test gained a clock-suppression assertion pinning the contract: at T4/120 BPM/48 kHz, only the buffer-0 clock survives — the natural clock at sample 24,000 (inside the stop-buffer) is now suppressed.
 
 <!-- gh-id: 3141518095 -->
 #### ↳ cmk ([2026-04-25 05:32 UTC](https://github.com/cmk/agogo/pull/16#discussion_r3141518095))

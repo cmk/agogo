@@ -78,7 +78,7 @@ here:
 - T6 `LpfPid` (clocked-style controller wrapper for v0.5 Link follower)
 - T7 `TransportState<S>` typestate skeleton
 - T8 `RelativeClock` calibration helper
-- T9 `machine/spec.rs` 1299-line split
+- T9 `channel/spec.rs` 1299-line split
 - T11 `cli/main.rs` 1727-line extraction
 - `compose!` / `ceiling1` body cleanups
 - host-link 4-layer wrapping cleanup

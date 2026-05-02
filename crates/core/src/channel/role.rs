@@ -41,7 +41,7 @@ pub struct ChannelCommon {
     pub offset: Micro,
     /// Period multiplier on the channel's grid output. When
     /// `Some(N)`, the channel emits every `N`-th `tick_stream` event
-    /// (applied as a pre-renderer filter in `Machine::on_buffer`
+    /// (applied as a pre-renderer filter in `Playhead::on_buffer`
     /// against the per-channel `bar_counters` slot).
     /// `NonZeroU16` caps `N` at 65,535 — worst-case multiplied
     /// period `65,535 × Grid::T1.tick_count() (3840) ≈ 251M` ticks

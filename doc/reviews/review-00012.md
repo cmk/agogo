@@ -29,7 +29,7 @@ build on. Three new capabilities plus the scaffolding for a fourth:
 - **Scaffolding.** `Quantum(Micro)` newtype + `f64_beats_to_quantum`
   matching Link's `Beats(double)` constructor bit-exactly.
   `LinkWriteConfig` + thin `LinkSession` orchestrator (Plan 06's
-  Machine absorbs it later). Three new CLI subcommands under
+  Playhead absorbs it later). Three new CLI subcommands under
   `agogo link`: `push-tempo`, `transport`, `diag`.
 
 Also pulled forward from the in-flight post-fxp enforcement sprint

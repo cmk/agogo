@@ -60,7 +60,7 @@ impl Default for LinkWriteConfig {
 }
 
 /// Thin orchestrator — owns a `LinkClock`, the transport FSM, and
-/// the write-path config. Plan 06's `Machine` eventually absorbs
+/// the write-path config. Plan 06's `Playhead` eventually absorbs
 /// this.
 pub struct LinkSession {
     clock: LinkClock,

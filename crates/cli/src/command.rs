@@ -62,7 +62,7 @@ enum Command {
         #[bpaf(external(crate::demo::demo_sub))]
         sub: crate::demo::DemoSub,
     },
-    /// End-to-end runner. N-channel Machine, six-rate dispatch,
+    /// End-to-end runner. N-channel Playhead, six-rate dispatch,
     /// internal/external/link sources, Ctrl-C teardown.
     #[cfg(feature = "run")]
     #[bpaf(command("run"))]

@@ -16,7 +16,7 @@ from a CLI. The adapted roadmap changes the interpretation of v0.1:
 - Keep the existing time, channel, sync, sink, host-cpal, host-midi, host-link,
   and CLI baseline intact.
 - Document the callback contract in one place:
-  - `Machine::on_buffer` is the only hard-time entry point.
+  - `Playhead::on_buffer` is the only hard-time entry point.
   - Control threads communicate through atomics or bounded SPSC queues.
   - MIDI drain threads may block, but the audio callback may not.
 - Keep the current fixed-point/Conn discipline as a permanent invariant.

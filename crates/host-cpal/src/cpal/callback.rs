@@ -1,9 +1,9 @@
 //! Audio callback hot loop — `CallbackState::on_buffer`.
 //!
 //! This is a thin wrapper around an N-channel
-//! [`agogo::core::control::Machine`] plus the [`RtProducer`] that
+//! [`agogo::core::control::Playhead`] plus the [`RtProducer`] that
 //! pushes onto the SPSC ring. All scheduling +
-//! rendering logic now lives inside `Machine::on_buffer`; the
+//! rendering logic now lives inside `Playhead::on_buffer`; the
 //! callback is left with `feed → schedule → render → enqueue`
 //! reduced to one delegating call.
 //!
@@ -12,22 +12,22 @@
 
 use crate::cpal::control::RtProducer;
 use agogo::core::conn::sample::SampleTime;
-use agogo::core::control::Machine;
+use agogo::core::control::Playhead;
 use agogo::core::sink::audio::AudioIo;
 
 /// State the audio thread owns by-value across the stream's
 /// lifetime. Built on the control thread, moved into the cpal
 /// callback closure, never touched from the control thread again
-/// except via [`Machine::stop_handle`].
+/// except via [`Playhead::stop_handle`].
 ///
-/// The `R: SampleTime` parameter binds the [`Machine`]'s rate at
+/// The `R: SampleTime` parameter binds the [`Playhead`]'s rate at
 /// compile time. The CLI dispatches it via a static match on
 /// `--sr` (`S044 | S048 | S088 | S096 | S176 | S192`).
 pub struct CallbackState<R: SampleTime> {
     /// N-channel orchestrator. Owns channels, phase source,
     /// transport policy, and the per-channel scratch buffer.
-    pub machine: Machine<R>,
-    /// SPSC producer onto the drain thread's ring. `Machine`
+    pub playhead: Playhead<R>,
+    /// SPSC producer onto the drain thread's ring. `Playhead`
     /// renders via this sink (`RtProducer: MidiSink`).
     pub producer: RtProducer,
 }
@@ -36,18 +36,18 @@ impl<R: SampleTime> CallbackState<R> {
     /// Per-buffer entry point. Called by `CpalHost`'s data callback
     /// once per audio buffer. No allocation, no locks.
     ///
-    /// Transport bytes are policy-driven inside [`Machine`]; the
+    /// Transport bytes are policy-driven inside [`Playhead`]; the
     /// callback no longer takes a `transport: Option<MidiRtByte>`
     /// parameter. `TransportPolicy` (Internal / LinkDriven / Scripted)
     /// decides what byte (if any) to emit each buffer.
     pub fn on_buffer(&mut self, io: &mut AudioIo) {
-        self.machine.on_buffer(io, &self.producer);
+        self.playhead.on_buffer(io, &self.producer);
     }
 }
 
 /// Re-export of the canonical helper. The implementation moved to
 /// [`agogo::core::control::event::max_events_for_buffer`] in
-/// [`agogo::core::control::Machine`] can size its pool without
+/// [`agogo::core::control::Playhead`] can size its pool without
 /// depending on `host-cpal`. Kept here so existing call
 /// sites (the demo CLI handler) compile unchanged.
 pub use agogo::core::control::event::max_events_for_buffer;
@@ -87,7 +87,7 @@ mod tests {
             },
             role: MidiRole::Clock,
         };
-        let machine = Machine::<S048>::new(
+        let playhead = Playhead::<S048>::new(
             vec![channel],
             PhaseSource::Internal { bpm },
             48_000,
@@ -99,12 +99,12 @@ mod tests {
             },
             frames,
         );
-        let state = CallbackState::<S048> { machine, producer };
+        let state = CallbackState::<S048> { playhead, producer };
         (state, consumer)
     }
 
     /// Regression for `callback_emits_expected_clock_schedule`,
-    /// pinned against the Machine-backed callback. Driving
+    /// pinned against the Playhead-backed callback. Driving
     /// `on_buffer` with `PhaseSource::Internal` at `(120 BPM,
     /// 48 kHz, T4 divider, 24_000 frames)` for 4 contiguous
     /// buffers produces SPSC messages at samples `{0, 24_000,
@@ -137,22 +137,22 @@ mod tests {
         assert_eq!(max_events_for_buffer(0), 16);
     }
 
-    /// Callback alloc-free contract. The Machine's `events_pool` is
+    /// Callback alloc-free contract. The Playhead's `events_pool` is
     /// pre-sized in its constructor; this test checks the callback
     /// path doesn't grow it. Pins the allocation-free contract
     /// end-to-end.
     #[test]
     fn callback_does_not_realloc_events() {
         let (mut state, _cons) = build_state(Tempo::from_bpm_integer(120), Grid::T4, 24_000);
-        let cap_before = state.machine.max_events_per_buffer();
+        let cap_before = state.playhead.max_events_per_buffer();
         let input = vec![0.0_f32; 24_000];
         let mut output: [f32; 0] = []; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 24_000);
         state.on_buffer(&mut io);
         assert_eq!(
-            state.machine.max_events_per_buffer(),
+            state.playhead.max_events_per_buffer(),
             cap_before,
-            "Machine grew events pool capacity — `max_events_for_buffer` undersized?"
+            "Playhead grew events pool capacity — `max_events_for_buffer` undersized?"
         );
     }
 }

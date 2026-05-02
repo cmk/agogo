@@ -37,7 +37,7 @@ the parser:
     `delay=0.116` input.
 
 The auto-saved proptest regression seed for `Micro(116)` is checked
-in at `proptest-regressions/machine/spec/display.txt`.
+in at `proptest-regressions/channel/spec/display.txt`.
 
 ### Verification
 
@@ -119,7 +119,7 @@ Copilot reviewed 5 out of 5 changed files in this pull request and generated 4 c
 | doc/plans/plan-2026-04-28-07.md | New plan doc for a separate “three-mess cleanup” effort in `crates/core/`. |
 | crates/core/src/channel/spec/parser.rs | Introduces exact decimal-ms parsing path and adds parser-focused tests. |
 | crates/core/src/channel/spec/display.rs | Adds fractional-µs round-trip regression test and widens proptest delay generation. |
-| crates/core/proptest-regressions/machine/spec/display.txt | Adds regression seed capturing the original failing case. |
+| crates/core/proptest-regressions/channel/spec/display.txt | Adds regression seed capturing the original failing case. |
 </details>
 
 
