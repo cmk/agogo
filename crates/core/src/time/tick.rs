@@ -59,7 +59,7 @@ pub fn time_to_tick(t: Time) -> Tick {
 /// `n > u32::MAX × Grid::T1.tick_count() = ~1.65×10¹³` or, at fine
 /// bases (`tick_count` = 1), `n > u32::MAX`. Runtime callers (e.g.
 /// transport) are free to interpret `None` as "wrap to 0:00.00";
-/// the [`ticktime`](crate::time::conn::ticktime) Conn unwraps under
+/// the [`TICKTIME`](crate::time::conn::TICKTIME) Conn unwraps under
 /// a documented precondition.
 pub fn from_ticks(n: Tick) -> Option<Time> {
     let prec = u64::from(Grid::T512P.tick_count()); // = 1 at 960 PPQN

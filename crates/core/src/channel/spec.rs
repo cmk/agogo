@@ -23,7 +23,7 @@
 //! a sequence of specs in order, building the environment as it goes.
 //!
 //! [`ChannelSpec`] holds the parsed form; [`ChannelSpec::into_channel`]
-//! converts to a [`Channel`] at the CLI argv boundary, where the only
+//! converts to a [`crate::channel::Channel`] at the CLI argv boundary, where the only
 //! `f64` field (`delay_ms`) crosses via the `F064FD06` Conn per CLAUDE.md
 //! float exception 4.
 
