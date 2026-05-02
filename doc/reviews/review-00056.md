@@ -22,3 +22,13 @@ Validation:
 - `cargo test --workspace --quiet`
 - `cargo clippy --all-targets --quiet -- -D warnings`
 - `cargo test -p agogo-cli --no-default-features --no-run`
+
+## Local review (2026-05-01)
+
+**Branch:** plan-2026-05-02-01
+**Commits:** 3 (origin/main..plan-2026-05-02-01)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+No actionable correctness issues were found; the workspace tests, warning-denied clippy, and the no-default-features CLI check pass for the reviewed diff.
