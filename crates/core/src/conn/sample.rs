@@ -64,7 +64,7 @@
 //! ratios (`DEN = 1`) it collapses to the familiar `floor_div(x, NUM)`.
 
 use crate::conn::fixed::FD12;
-use connections::conn::Conn;
+use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
 use fixed::FixedI64;
 use fixed::types::extra::U16;
 
@@ -143,35 +143,59 @@ def_rate!(S192, 192_000);
 
 macro_rules! rate_conn {
     ($CONN:ident, $Fine:ident, $Coarse:ident, $num:expr, $den:expr) => {
-        pub const $CONN: Conn<$Fine, $Coarse> = {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone, Debug, Default)]
+        pub struct $CONN;
+
+        impl $CONN {
             const NUM: i128 = $num;
             const DEN: i128 = $den;
+            const L: ConnL<$Fine, $Coarse> = Conn::new_l(Self::ceil_fn, Self::inner_fn);
+            const R: ConnR<$Fine, $Coarse> = Conn::new_r(Self::inner_fn, Self::floor_fn);
 
-            fn ceil(x: $Fine) -> $Coarse {
+            fn ceil_fn(x: $Fine) -> $Coarse {
                 // ceil(x) = ceil_div(x · DEN, NUM)
-                let n: i128 = x.0.to_bits() as i128 * DEN;
-                let q = n.div_euclid(NUM);
-                let r = n.rem_euclid(NUM);
+                let n: i128 = x.0.to_bits() as i128 * Self::DEN;
+                let q = n.div_euclid(Self::NUM);
+                let r = n.rem_euclid(Self::NUM);
                 let bits = if r != 0 { q + 1 } else { q };
                 $Coarse(Q48_16::from_bits(bits as i64))
             }
 
-            fn inner(c: $Coarse) -> $Fine {
+            fn inner_fn(c: $Coarse) -> $Fine {
                 // inner(c) = floor_div(c · NUM, DEN)
-                let n: i128 = c.0.to_bits() as i128 * NUM;
-                $Fine(Q48_16::from_bits(n.div_euclid(DEN) as i64))
+                let n: i128 = c.0.to_bits() as i128 * Self::NUM;
+                $Fine(Q48_16::from_bits(n.div_euclid(Self::DEN) as i64))
             }
 
-            fn floor(x: $Fine) -> $Coarse {
+            fn floor_fn(x: $Fine) -> $Coarse {
                 // Upper adjoint of a lossy inner:
                 //   floor(x) = floor_div(x · DEN + DEN − 1, NUM)
                 // Equivalent to floor_div(x, NUM) when DEN = 1.
-                let n: i128 = x.0.to_bits() as i128 * DEN + (DEN - 1);
-                $Coarse(Q48_16::from_bits(n.div_euclid(NUM) as i64))
+                let n: i128 = x.0.to_bits() as i128 * Self::DEN + (Self::DEN - 1);
+                $Coarse(Q48_16::from_bits(n.div_euclid(Self::NUM) as i64))
             }
 
-            Conn::new(ceil, inner, floor)
-        };
+            pub fn ceil(self, x: $Fine) -> $Coarse {
+                Self::L.ceil(x)
+            }
+
+            pub fn inner(self, x: $Coarse) -> $Fine {
+                Self::L.inner(x)
+            }
+
+            pub fn floor(self, x: $Fine) -> $Coarse {
+                Self::R.floor(x)
+            }
+        }
+
+        impl ViewL<$Fine, $Coarse> for $CONN {
+            const L: ConnL<$Fine, $Coarse> = Self::L;
+        }
+
+        impl ViewR<$Fine, $Coarse> for $CONN {
+            const R: ConnR<$Fine, $Coarse> = Self::R;
+        }
     };
 }
 
@@ -222,7 +246,11 @@ rate_conn!(S192S176, S192, S176, 160, 147);
 
 macro_rules! pico_conn {
     ($CONN:ident, $Rate:ident, $num:expr, $den:expr) => {
-        pub const $CONN: Conn<FD12, $Rate> = {
+        #[allow(non_camel_case_types)]
+        #[derive(Copy, Clone, Debug, Default)]
+        pub struct $CONN;
+
+        impl $CONN {
             // Conn<Fine=FD12, Coarse=Sxx>:
             //   inner: Coarse → Fine. inner(s: Sxx) = floor_div(s_bits · NUM, DEN) picoseconds
             //   ceil:  Fine → Coarse. ceil(p: FD12)  = ceil_div(p · DEN, NUM) Sxx-bits
@@ -233,27 +261,47 @@ macro_rules! pico_conn {
             // when `DEN = 1`.
             const NUM: i128 = $num;
             const DEN: i128 = $den;
+            const L: ConnL<FD12, $Rate> = Conn::new_l(Self::ceil_fn, Self::inner_fn);
+            const R: ConnR<FD12, $Rate> = Conn::new_r(Self::inner_fn, Self::floor_fn);
 
-            fn ceil(p: FD12) -> $Rate {
-                let n: i128 = p.0 as i128 * DEN;
-                let q = n.div_euclid(NUM);
-                let r = n.rem_euclid(NUM);
+            fn ceil_fn(p: FD12) -> $Rate {
+                let n: i128 = p.0 as i128 * Self::DEN;
+                let q = n.div_euclid(Self::NUM);
+                let r = n.rem_euclid(Self::NUM);
                 let bits = if r != 0 { q + 1 } else { q };
                 $Rate(Q48_16::from_bits(bits as i64))
             }
 
-            fn inner(s: $Rate) -> FD12 {
-                let n: i128 = s.0.to_bits() as i128 * NUM;
-                FD12(n.div_euclid(DEN) as i64)
+            fn inner_fn(s: $Rate) -> FD12 {
+                let n: i128 = s.0.to_bits() as i128 * Self::NUM;
+                FD12(n.div_euclid(Self::DEN) as i64)
             }
 
-            fn floor(p: FD12) -> $Rate {
-                let n: i128 = p.0 as i128 * DEN + (DEN - 1);
-                $Rate(Q48_16::from_bits(n.div_euclid(NUM) as i64))
+            fn floor_fn(p: FD12) -> $Rate {
+                let n: i128 = p.0 as i128 * Self::DEN + (Self::DEN - 1);
+                $Rate(Q48_16::from_bits(n.div_euclid(Self::NUM) as i64))
             }
 
-            Conn::new(ceil, inner, floor)
-        };
+            pub fn ceil(self, x: FD12) -> $Rate {
+                Self::L.ceil(x)
+            }
+
+            pub fn inner(self, x: $Rate) -> FD12 {
+                Self::L.inner(x)
+            }
+
+            pub fn floor(self, x: FD12) -> $Rate {
+                Self::R.floor(x)
+            }
+        }
+
+        impl ViewL<FD12, $Rate> for $CONN {
+            const L: ConnL<FD12, $Rate> = Self::L;
+        }
+
+        impl ViewR<FD12, $Rate> for $CONN {
+            const R: ConnR<FD12, $Rate> = Self::R;
+        }
     };
 }
 
@@ -440,8 +488,8 @@ mod tests {
                         x in rate_fine($den, $num),
                         y in rate_fine($den, $num),
                     ) {
-                        prop_assert!(laws::conn_monotone_l(
-                            &$conn,
+                        prop_assert!(laws::monotone_l(
+                            &<$conn as ViewL<$Fine, $Coarse>>::L,
                             $Fine::from_bits(x),
                             $Fine::from_bits(y),
                         ));
@@ -452,8 +500,8 @@ mod tests {
                         a in rate_coarse($num),
                         b in rate_coarse($num),
                     ) {
-                        prop_assert!(laws::conn_monotone_r(
-                            &$conn,
+                        prop_assert!(laws::monotone_r(
+                            &<$conn as ViewR<$Fine, $Coarse>>::R,
                             $Coarse::from_bits(a),
                             $Coarse::from_bits(b),
                         ));
@@ -461,7 +509,7 @@ mod tests {
 
                     #[test]
                     fn floor_le_ceil(x in rate_fine($den, $num)) {
-                        prop_assert!(laws::conn_floor_le_ceil(&$conn, $Fine::from_bits(x)));
+                        prop_assert!(laws::floor_le_ceil(&$conn, $Fine::from_bits(x)));
                     }
 
                     #[test]
@@ -469,8 +517,8 @@ mod tests {
                         x in rate_fine($den, $num),
                         b in rate_coarse($num),
                     ) {
-                        prop_assert!(laws::conn_galois_l(
-                            &$conn,
+                        prop_assert!(laws::galois_l(
+                            &<$conn as ViewL<$Fine, $Coarse>>::L,
                             $Fine::from_bits(x),
                             $Coarse::from_bits(b),
                         ));
@@ -481,8 +529,8 @@ mod tests {
                         x in rate_fine($den, $num),
                         b in rate_coarse($num),
                     ) {
-                        prop_assert!(laws::conn_galois_r(
-                            &$conn,
+                        prop_assert!(laws::galois_r(
+                            &<$conn as ViewR<$Fine, $Coarse>>::R,
                             $Fine::from_bits(x),
                             $Coarse::from_bits(b),
                         ));
@@ -495,8 +543,8 @@ mod tests {
                     #[test]
                     fn roundtrip_ceil_integer_ratio(b in rate_coarse($num)) {
                         if $den == 1 {
-                            prop_assert!(laws::conn_roundtrip_ceil(
-                                &$conn,
+                            prop_assert!(laws::roundtrip_ceil(
+                                &<$conn as ViewL<$Fine, $Coarse>>::L,
                                 $Coarse::from_bits(b),
                             ));
                         }
@@ -505,8 +553,8 @@ mod tests {
                     #[test]
                     fn roundtrip_floor_integer_ratio(b in rate_coarse($num)) {
                         if $den == 1 {
-                            prop_assert!(laws::conn_roundtrip_floor(
-                                &$conn,
+                            prop_assert!(laws::roundtrip_floor(
+                                &<$conn as ViewR<$Fine, $Coarse>>::R,
                                 $Coarse::from_bits(b),
                             ));
                         }
@@ -516,17 +564,17 @@ mod tests {
                     // round-trip can grow by up to num/den < num units.
                     #[test]
                     fn closure_l(x in rate_safe_fine($num)) {
-                        prop_assert!(laws::conn_closure_l(&$conn, $Fine::from_bits(x)));
+                        prop_assert!(laws::closure_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine::from_bits(x)));
                     }
 
                     #[test]
                     fn closure_r(x in rate_safe_fine($num)) {
-                        prop_assert!(laws::conn_closure_r(&$conn, $Fine::from_bits(x)));
+                        prop_assert!(laws::closure_r(&<$conn as ViewR<$Fine, $Coarse>>::R, $Fine::from_bits(x)));
                     }
 
                     #[test]
                     fn idempotent(x in rate_safe_fine($num)) {
-                        prop_assert!(laws::conn_idempotent(&$conn, $Fine::from_bits(x)));
+                        prop_assert!(laws::idempotent_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine::from_bits(x)));
                     }
                 }
             }
@@ -567,7 +615,7 @@ mod tests {
                         a in pico_fine(),
                         b in pico_fine(),
                     ) {
-                        prop_assert!(laws::conn_monotone_l(&$conn, FD12(a), FD12(b)));
+                        prop_assert!(laws::monotone_l(&<$conn as ViewL<FD12, $Rate>>::L, FD12(a), FD12(b)));
                     }
 
                     #[test]
@@ -575,8 +623,8 @@ mod tests {
                         a in pico_coarse($num, $den),
                         b in pico_coarse($num, $den),
                     ) {
-                        prop_assert!(laws::conn_monotone_r(
-                            &$conn,
+                        prop_assert!(laws::monotone_r(
+                            &<$conn as ViewR<FD12, $Rate>>::R,
                             $Rate::from_bits(a),
                             $Rate::from_bits(b),
                         ));
@@ -585,10 +633,10 @@ mod tests {
                     #[test]
                     fn floor_le_ceil(p in pico_fine()) {
                         let pp = FD12(p);
-                        prop_assert!(laws::conn_floor_le_ceil(&$conn, pp));
+                        prop_assert!(laws::floor_le_ceil(&$conn, pp));
                         // Stronger: rational-ratio ULP bound
                         // (`ceil - floor ≤ 1` Sxx Q48.16 ULP).
-                        prop_assert!(laws::conn_ulp_bound(
+                        prop_assert!(laws::ulp_bound(
                             &$conn,
                             pp,
                             |s: $Rate| s.0.to_bits(),
@@ -600,8 +648,8 @@ mod tests {
                         p in pico_fine(),
                         s in pico_coarse($num, $den),
                     ) {
-                        prop_assert!(laws::conn_galois_l(
-                            &$conn,
+                        prop_assert!(laws::galois_l(
+                            &<$conn as ViewL<FD12, $Rate>>::L,
                             FD12(p),
                             $Rate::from_bits(s),
                         ));
@@ -612,8 +660,8 @@ mod tests {
                         p in pico_fine(),
                         s in pico_coarse($num, $den),
                     ) {
-                        prop_assert!(laws::conn_galois_r(
-                            &$conn,
+                        prop_assert!(laws::galois_r(
+                            &<$conn as ViewR<FD12, $Rate>>::R,
                             FD12(p),
                             $Rate::from_bits(s),
                         ));
@@ -623,17 +671,17 @@ mod tests {
                     // round-trip can grow p by up to NUM/DEN ps.
                     #[test]
                     fn closure_l(p in pico_safe($num)) {
-                        prop_assert!(laws::conn_closure_l(&$conn, FD12(p)));
+                        prop_assert!(laws::closure_l(&<$conn as ViewL<FD12, $Rate>>::L, FD12(p)));
                     }
 
                     #[test]
                     fn closure_r(p in pico_safe($num)) {
-                        prop_assert!(laws::conn_closure_r(&$conn, FD12(p)));
+                        prop_assert!(laws::closure_r(&<$conn as ViewR<FD12, $Rate>>::R, FD12(p)));
                     }
 
                     #[test]
                     fn idempotent(p in pico_safe($num)) {
-                        prop_assert!(laws::conn_idempotent(&$conn, FD12(p)));
+                        prop_assert!(laws::idempotent_l(&<$conn as ViewL<FD12, $Rate>>::L, FD12(p)));
                     }
                 }
             }
@@ -654,8 +702,8 @@ mod tests {
     fn fd12_inner_matches_ideal() {
         // Use f64 for the ideal — this test only, asserts sit here as
         // proof that the integer math agrees with the analytic formula.
-        fn check<R: SampleRate + Copy>(conn: Conn<FD12, R>, sample_one: R) {
-            let got = conn.inner(sample_one).0 as f64;
+        fn check<R: SampleRate + Copy>(got_pico: FD12) {
+            let got = got_pico.0 as f64;
             let ideal = 1.0e12 / (R::HZ as f64);
             assert!(
                 (got - ideal).abs() <= 1.0,
@@ -665,11 +713,11 @@ mod tests {
                 ideal
             );
         }
-        check(FD12S044, S044::from_sample(1));
-        check(FD12S048, S048::from_sample(1));
-        check(FD12S088, S088::from_sample(1));
-        check(FD12S096, S096::from_sample(1));
-        check(FD12S176, S176::from_sample(1));
-        check(FD12S192, S192::from_sample(1));
+        check::<S044>(FD12S044.inner(S044::from_sample(1)));
+        check::<S048>(FD12S048.inner(S048::from_sample(1)));
+        check::<S088>(FD12S088.inner(S088::from_sample(1)));
+        check::<S096>(FD12S096.inner(S096::from_sample(1)));
+        check::<S176>(FD12S176.inner(S176::from_sample(1)));
+        check::<S192>(FD12S192.inner(S192::from_sample(1)));
     }
 }

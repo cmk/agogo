@@ -17,6 +17,7 @@ use crate::conn::fixed::Micro;
 use crate::time::conn::SampleTickConn;
 use crate::time::swing;
 use crate::time::tick::Tick;
+use connections::fixed::u64::{I064U064, I128U064};
 
 /// Conservative upper bound on the number of [`ScheduledEvent`]s
 /// that can land in one buffer of `frames` samples.
@@ -94,8 +95,8 @@ pub fn tick_stream_into(
     let delta: i128 = i128::from(delay_samples) + i128::from(offset_samples);
     let swung_lo_signed = i128::from(buffer_start_sample) - delta;
     let swung_hi_signed = i128::from(buffer_end) - delta;
-    let swung_lo = swung_lo_signed.clamp(0, i128::from(u64::MAX)) as u64;
-    let swung_hi = swung_hi_signed.clamp(0, i128::from(u64::MAX)) as u64;
+    let swung_lo = I128U064.ceil(swung_lo_signed);
+    let swung_hi = I128U064.ceil(swung_hi_signed);
 
     // Convert swung-tick sample bounds to tick bounds, then expand by
     // swing displacement so off-beats (which are shifted by +amount in
@@ -109,9 +110,9 @@ pub fn tick_stream_into(
     let swing_d: i128 = -i128::from(common.shuffle.amount);
     let lo_from_sample = i128::from(stc.floor(swung_lo).0);
     let hi_from_sample = i128::from(stc.ceil(swung_hi).0);
-    let lo_tick = lo_from_sample.saturating_add(swing_d.min(0)).max(0) as u64;
+    let lo_tick = I128U064.ceil(lo_from_sample.saturating_add(swing_d.min(0)));
     let hi_tick_i = hi_from_sample.saturating_add(swing_d.max(0));
-    let hi_tick = hi_tick_i.clamp(0, i128::from(u64::MAX)) as u64;
+    let hi_tick = I128U064.ceil(hi_tick_i);
 
     if lo_tick > hi_tick {
         return;
@@ -126,7 +127,7 @@ pub fn tick_stream_into(
     // `tick_stream_into_matches_transform_filtered` proptests both
     // trip.
     let divisor = u64::from(common.divider.tick_count());
-    let delay_fwd = delay_samples.max(0) as u64;
+    let delay_fwd = I064U064.ceil(delay_samples);
     for t in (lo_tick..=hi_tick).map(Tick) {
         if t.0 % divisor != 0 {
             continue;
@@ -135,7 +136,7 @@ pub fn tick_stream_into(
         let base = stc.inner(swung);
         let with_delay = base.saturating_add(delay_fwd);
         let final_sample = if offset_samples >= 0 {
-            with_delay.saturating_add(offset_samples as u64)
+            with_delay.saturating_add(I064U064.ceil(offset_samples))
         } else {
             with_delay.saturating_sub(offset_samples.unsigned_abs())
         };
