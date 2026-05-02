@@ -46,6 +46,17 @@ pub mod host {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "core")]
+    #[test]
+    fn core_namespace_paths_compile() {
+        let tempo = crate::core::conn::tempo::Tempo::from_bpm_integer(120);
+        assert_eq!(
+            tempo,
+            crate::core::conn::tempo::Tempo::from_bpm_integer(120)
+        );
+    }
+
+    #[cfg(feature = "host")]
     #[test]
     fn core_and_host_namespace_paths_compile() {
         let tempo = crate::core::conn::tempo::Tempo::from_bpm_integer(120);
