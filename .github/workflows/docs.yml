@@ -15,8 +15,7 @@ env:
 
 # `deploy-pages` needs `pages: write` + `id-token: write`. Read-only
 # scope is enough for the build-only PR path.
-permissions:
-  contents: read
+
 
 # Don't pile up Pages deploys: a new push cancels an in-flight one.
 concurrency:
@@ -26,6 +25,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
