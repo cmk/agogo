@@ -5,11 +5,15 @@
 //! controls use atomics; ordered controls use an SPSC ring. The audio
 //! side never locks and never allocates.
 
+use std::fmt;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError};
 
 use agogo::core::conn::tempo::Tempo;
+
+pub const MAX_SOURCE_ID_LEN: usize = 64;
+pub const MAX_COALESCE_KEY_LEN: usize = 64;
 
 /// Ordered commands that must not silently coalesce.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -20,21 +24,269 @@ pub enum ControlCommand {
     Locate { tick: u32 },
 }
 
+/// Semantic id assigned before a command enters the RT bridge.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct CommandId(pub u64);
+
+impl CommandId {
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Fixed-capacity source id carried through the RT command envelope.
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct SourceId {
+    bytes: [u8; MAX_SOURCE_ID_LEN],
+    len: u8,
+}
+
+impl SourceId {
+    pub fn new(value: &str) -> Option<Self> {
+        fixed_string::<MAX_SOURCE_ID_LEN>(value).map(|(bytes, len)| Self { bytes, len })
+    }
+
+    pub fn as_str(&self) -> &str {
+        fixed_string_as_str(&self.bytes, self.len)
+    }
+}
+
+impl Default for SourceId {
+    fn default() -> Self {
+        Self::new("agogo.driver").expect("default source id fits fixed storage")
+    }
+}
+
+impl fmt::Debug for SourceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("SourceId").field(&self.as_str()).finish()
+    }
+}
+
+/// Optional coalescing key. Only last-value controls use this in v0.2.
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct CoalesceKey {
+    bytes: [u8; MAX_COALESCE_KEY_LEN],
+    len: u8,
+}
+
+impl CoalesceKey {
+    pub fn new(value: &str) -> Option<Self> {
+        fixed_string::<MAX_COALESCE_KEY_LEN>(value).map(|(bytes, len)| Self { bytes, len })
+    }
+
+    pub fn tempo() -> Self {
+        Self::new("tempo").expect("tempo coalesce key fits fixed storage")
+    }
+
+    pub fn as_str(&self) -> &str {
+        fixed_string_as_str(&self.bytes, self.len)
+    }
+}
+
+impl fmt::Debug for CoalesceKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("CoalesceKey").field(&self.as_str()).finish()
+    }
+}
+
+fn fixed_string<const N: usize>(value: &str) -> Option<([u8; N], u8)> {
+    if value.len() > N || value.len() > u8::MAX as usize {
+        return None;
+    }
+    let mut bytes = [0_u8; N];
+    bytes[..value.len()].copy_from_slice(value.as_bytes());
+    Some((bytes, value.len() as u8))
+}
+
+fn fixed_string_as_str(bytes: &[u8], len: u8) -> &str {
+    std::str::from_utf8(&bytes[..usize::from(len)])
+        .expect("fixed bridge string is built from utf-8 input")
+}
+
+/// Time domain attached to a command deadline.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CommandTimeDomain {
+    RtBuffer,
+    HostTime,
+    Tick,
+    Link,
+    Unknown,
+}
+
+impl CommandTimeDomain {
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "rt_buffer" => Self::RtBuffer,
+            "host_time" => Self::HostTime,
+            "tick" => Self::Tick,
+            "link" => Self::Link,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RtBuffer => "rt_buffer",
+            Self::HostTime => "host_time",
+            Self::Tick => "tick",
+            Self::Link => "link",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Deadline for a command. v0.2 accepts RT-buffer deadlines only.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct CommandDeadline {
+    pub time_domain: CommandTimeDomain,
+    pub buffer: u64,
+}
+
+impl CommandDeadline {
+    pub const fn rt_buffer(buffer: u64) -> Self {
+        Self {
+            time_domain: CommandTimeDomain::RtBuffer,
+            buffer,
+        }
+    }
+}
+
+/// Metadata required before any command may affect the RT side.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct AdmissionMetadata {
+    pub command_id: CommandId,
+    pub source_id: SourceId,
+    pub deadline: CommandDeadline,
+    pub coalesce_key: Option<CoalesceKey>,
+}
+
+impl AdmissionMetadata {
+    pub fn next_buffer(command_id: CommandId, source_id: SourceId, current_epoch: u64) -> Self {
+        Self {
+            command_id,
+            source_id,
+            deadline: CommandDeadline::rt_buffer(current_epoch.saturating_add(1)),
+            coalesce_key: None,
+        }
+    }
+
+    pub fn tempo(command_id: CommandId, source_id: SourceId, current_epoch: u64) -> Self {
+        Self {
+            coalesce_key: Some(CoalesceKey::tempo()),
+            ..Self::next_buffer(command_id, source_id, current_epoch)
+        }
+    }
+}
+
+/// Ordered RT queue payload.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct CommandEnvelope {
+    pub metadata: AdmissionMetadata,
+    pub command: ControlCommand,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum AdmissionStatus {
+    Accepted,
+    Rejected,
+    Late,
+}
+
+impl AdmissionStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Rejected => "rejected",
+            Self::Late => "late",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum AdmissionRejectReason {
+    QueueFull,
+    QueuePoisoned,
+    LateDeadline,
+    UnsupportedTimeDomain,
+    UnsupportedCommandClass,
+}
+
+impl AdmissionRejectReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::QueueFull => "queue_full",
+            Self::QueuePoisoned => "queue_poisoned",
+            Self::LateDeadline => "late_deadline",
+            Self::UnsupportedTimeDomain => "unsupported_time_domain",
+            Self::UnsupportedCommandClass => "unsupported_command_class",
+        }
+    }
+}
+
+/// Structured result of one admission attempt.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct AdmissionOutcome {
+    pub status: AdmissionStatus,
+    pub metadata: AdmissionMetadata,
+    pub reason: Option<AdmissionRejectReason>,
+}
+
+impl AdmissionOutcome {
+    pub const fn accepted(metadata: AdmissionMetadata) -> Self {
+        Self {
+            status: AdmissionStatus::Accepted,
+            metadata,
+            reason: None,
+        }
+    }
+
+    pub const fn rejected(metadata: AdmissionMetadata, reason: AdmissionRejectReason) -> Self {
+        Self {
+            status: AdmissionStatus::Rejected,
+            metadata,
+            reason: Some(reason),
+        }
+    }
+
+    pub const fn late(metadata: AdmissionMetadata) -> Self {
+        Self {
+            status: AdmissionStatus::Late,
+            metadata,
+            reason: Some(AdmissionRejectReason::LateDeadline),
+        }
+    }
+
+    pub const fn is_accepted(self) -> bool {
+        matches!(self.status, AdmissionStatus::Accepted)
+    }
+}
+
+/// RT-side command drain result.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RtCommandDrain {
+    Command(CommandEnvelope),
+    MissedDeadline(CommandEnvelope),
+}
+
 /// Per-buffer scalar snapshot read by the audio callback.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ControlParams {
     pub tempo: Tempo,
+    pub buffer_epoch: u64,
 }
 
 #[derive(Debug)]
 struct SharedControlParams {
     tempo_raw: AtomicU32,
+    buffer_epoch: AtomicU64,
 }
 
 impl SharedControlParams {
     fn new(tempo: Tempo) -> Self {
         Self {
             tempo_raw: AtomicU32::new(tempo.0),
+            buffer_epoch: AtomicU64::new(0),
         }
     }
 }
@@ -42,13 +294,14 @@ impl SharedControlParams {
 /// Async/control-side bridge handle.
 pub struct ControlProducer {
     shared: Arc<SharedControlParams>,
-    producer: Mutex<rtrb::Producer<ControlCommand>>,
+    producer: Mutex<rtrb::Producer<CommandEnvelope>>,
 }
 
-impl std::fmt::Debug for ControlProducer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ControlProducer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ControlProducer")
             .field("tempo", &self.tempo())
+            .field("buffer_epoch", &self.current_buffer_epoch())
             .finish_non_exhaustive()
     }
 }
@@ -56,11 +309,11 @@ impl std::fmt::Debug for ControlProducer {
 /// Audio-thread bridge handle.
 pub struct ControlConsumer {
     shared: Arc<SharedControlParams>,
-    consumer: rtrb::Consumer<ControlCommand>,
+    consumer: rtrb::Consumer<CommandEnvelope>,
 }
 
-impl std::fmt::Debug for ControlConsumer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ControlConsumer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ControlConsumer")
             .field("snapshot", &self.snapshot())
             .finish_non_exhaustive()
@@ -101,76 +354,361 @@ impl ControlProducer {
         self.shared.tempo_raw.store(tempo.0, Ordering::Release);
     }
 
+    /// Admit a last-value tempo control.
+    pub fn admit_tempo(&self, tempo: Tempo, metadata: AdmissionMetadata) -> AdmissionOutcome {
+        if let Some(outcome) = self.reject_if_not_admissible(metadata) {
+            return outcome;
+        }
+        self.set_tempo(tempo);
+        AdmissionOutcome::accepted(metadata)
+    }
+
     /// Read the latest tempo from the async side. Mainly for
     /// inverse-op capture and tests.
     pub fn tempo(&self) -> Tempo {
         Tempo(self.shared.tempo_raw.load(Ordering::Acquire))
     }
 
+    /// Return the most recent RT buffer epoch published by the
+    /// consumer.
+    pub fn current_buffer_epoch(&self) -> u64 {
+        self.shared.buffer_epoch.load(Ordering::Acquire)
+    }
+
+    /// Default deadline for a command admitted at the current soft
+    /// side instant.
+    pub fn default_deadline_buffer(&self) -> u64 {
+        self.current_buffer_epoch().saturating_add(1)
+    }
+
     /// Push one ordered command without blocking. A full queue is a
     /// caller-visible error; it is not a silent drop.
     pub fn try_push(&self, command: ControlCommand) -> Result<(), BridgeError> {
-        self.producer
-            .lock()?
-            .push(command)
-            .map_err(|_| BridgeError::QueueFull)
+        let metadata = AdmissionMetadata::next_buffer(
+            CommandId(0),
+            SourceId::default(),
+            self.current_buffer_epoch(),
+        );
+        match self.admit_ordered(command, metadata) {
+            outcome if outcome.is_accepted() => Ok(()),
+            AdmissionOutcome {
+                reason: Some(AdmissionRejectReason::QueueFull),
+                ..
+            } => Err(BridgeError::QueueFull),
+            AdmissionOutcome {
+                reason: Some(AdmissionRejectReason::QueuePoisoned),
+                ..
+            } => Err(BridgeError::QueuePoisoned),
+            _ => Ok(()),
+        }
+    }
+
+    /// Admit one ordered command envelope without blocking.
+    pub fn admit_ordered(
+        &self,
+        command: ControlCommand,
+        metadata: AdmissionMetadata,
+    ) -> AdmissionOutcome {
+        if let Some(outcome) = self.reject_if_not_admissible(metadata) {
+            return outcome;
+        }
+        if metadata.coalesce_key.is_some() {
+            return AdmissionOutcome::rejected(
+                metadata,
+                AdmissionRejectReason::UnsupportedCommandClass,
+            );
+        }
+        match self.producer.lock() {
+            Ok(mut producer) => producer
+                .push(CommandEnvelope { metadata, command })
+                .map(|()| AdmissionOutcome::accepted(metadata))
+                .unwrap_or_else(|_| {
+                    AdmissionOutcome::rejected(metadata, AdmissionRejectReason::QueueFull)
+                }),
+            Err(_) => AdmissionOutcome::rejected(metadata, AdmissionRejectReason::QueuePoisoned),
+        }
+    }
+
+    fn reject_if_not_admissible(&self, metadata: AdmissionMetadata) -> Option<AdmissionOutcome> {
+        if metadata.deadline.time_domain != CommandTimeDomain::RtBuffer {
+            return Some(AdmissionOutcome::rejected(
+                metadata,
+                AdmissionRejectReason::UnsupportedTimeDomain,
+            ));
+        }
+        if metadata.deadline.buffer <= self.current_buffer_epoch() {
+            return Some(AdmissionOutcome::late(metadata));
+        }
+        None
     }
 }
 
 impl ControlConsumer {
-    /// Read last-value controls once per buffer.
-    pub fn snapshot(&self) -> ControlParams {
+    /// Advance to the next RT buffer epoch and read last-value
+    /// controls once for this buffer.
+    pub fn begin_buffer(&self) -> ControlParams {
+        let epoch = self
+            .shared
+            .buffer_epoch
+            .fetch_add(1, Ordering::AcqRel)
+            .saturating_add(1);
         ControlParams {
             tempo: Tempo(self.shared.tempo_raw.load(Ordering::Acquire)),
+            buffer_epoch: epoch,
         }
     }
 
-    /// Drain one ordered command. Non-blocking and allocation-free.
-    pub fn try_pop(&mut self) -> Option<ControlCommand> {
+    /// Read last-value controls without advancing the buffer epoch.
+    pub fn snapshot(&self) -> ControlParams {
+        ControlParams {
+            tempo: Tempo(self.shared.tempo_raw.load(Ordering::Acquire)),
+            buffer_epoch: self.current_buffer_epoch(),
+        }
+    }
+
+    pub fn current_buffer_epoch(&self) -> u64 {
+        self.shared.buffer_epoch.load(Ordering::Acquire)
+    }
+
+    /// Drain one ordered command envelope. Non-blocking and
+    /// allocation-free.
+    pub fn try_pop(&mut self) -> Option<CommandEnvelope> {
         self.consumer.pop().ok()
+    }
+
+    /// Compatibility helper for callers that only care about the
+    /// command payload.
+    pub fn try_pop_command(&mut self) -> Option<ControlCommand> {
+        self.try_pop().map(|envelope| envelope.command)
+    }
+
+    /// Drain one command and report whether it missed its deadline
+    /// before the callback reached it.
+    pub fn drain_due_command(&mut self) -> Option<RtCommandDrain> {
+        let envelope = self.try_pop()?;
+        if envelope.metadata.deadline.buffer < self.current_buffer_epoch() {
+            Some(RtCommandDrain::MissedDeadline(envelope))
+        } else {
+            Some(RtCommandDrain::Command(envelope))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    fn metadata(id: u64, deadline: u64) -> AdmissionMetadata {
+        AdmissionMetadata {
+            command_id: CommandId(id),
+            source_id: SourceId::default(),
+            deadline: CommandDeadline::rt_buffer(deadline),
+            coalesce_key: None,
+        }
+    }
+
+    fn domain_strategy() -> impl Strategy<Value = CommandTimeDomain> {
+        prop_oneof![
+            Just(CommandTimeDomain::RtBuffer),
+            Just(CommandTimeDomain::HostTime),
+            Just(CommandTimeDomain::Tick),
+            Just(CommandTimeDomain::Link),
+            Just(CommandTimeDomain::Unknown),
+        ]
+    }
 
     #[test]
     fn tempo_set_applies_within_one_buffer() {
         let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
-        producer.set_tempo(Tempo::from_bpm_integer(140));
-        assert_eq!(consumer.snapshot().tempo, Tempo::from_bpm_integer(140));
+        let outcome = producer.admit_tempo(
+            Tempo::from_bpm_integer(140),
+            AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0),
+        );
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+        assert_eq!(
+            consumer.begin_buffer(),
+            ControlParams {
+                tempo: Tempo::from_bpm_integer(140),
+                buffer_epoch: 1,
+            }
+        );
     }
 
     #[test]
     fn queue_full_returns_error() {
         let (producer, mut consumer) = spsc(1, Tempo::from_bpm_integer(120));
-        producer
-            .try_push(ControlCommand::Start)
-            .expect("first push");
+        let first = producer.admit_ordered(ControlCommand::Start, metadata(1, 1));
+        assert_eq!(first.status, AdmissionStatus::Accepted);
+
+        let second = producer.admit_ordered(ControlCommand::Stop, metadata(2, 1));
+        assert_eq!(second.status, AdmissionStatus::Rejected);
+        assert_eq!(second.reason, Some(AdmissionRejectReason::QueueFull));
+
         assert_eq!(
-            producer.try_push(ControlCommand::Stop),
-            Err(BridgeError::QueueFull)
+            consumer.try_pop().map(|envelope| envelope.command),
+            Some(ControlCommand::Start)
         );
-        assert_eq!(consumer.try_pop(), Some(ControlCommand::Start));
         assert_eq!(consumer.try_pop(), None);
     }
 
     #[test]
     fn rt_consumer_reads_commands_in_fifo_order() {
         let (producer, mut consumer) = spsc(4, Tempo::from_bpm_integer(120));
-        producer.try_push(ControlCommand::Start).expect("start");
-        producer
-            .try_push(ControlCommand::Locate { tick: 960 })
-            .expect("locate");
-        producer.try_push(ControlCommand::Stop).expect("stop");
+        producer.admit_ordered(ControlCommand::Start, metadata(1, 1));
+        producer.admit_ordered(ControlCommand::Locate { tick: 960 }, metadata(2, 1));
+        producer.admit_ordered(ControlCommand::Stop, metadata(3, 1));
 
-        assert_eq!(consumer.try_pop(), Some(ControlCommand::Start));
         assert_eq!(
-            consumer.try_pop(),
+            consumer.try_pop().map(|envelope| envelope.command),
+            Some(ControlCommand::Start)
+        );
+        assert_eq!(
+            consumer.try_pop().map(|envelope| envelope.command),
             Some(ControlCommand::Locate { tick: 960 })
         );
-        assert_eq!(consumer.try_pop(), Some(ControlCommand::Stop));
+        assert_eq!(
+            consumer.try_pop().map(|envelope| envelope.command),
+            Some(ControlCommand::Stop)
+        );
         assert_eq!(consumer.try_pop(), None);
+    }
+
+    #[test]
+    fn stale_deadline_returns_late_and_does_not_enqueue() {
+        let (producer, mut consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        consumer.begin_buffer();
+        let outcome = producer.admit_ordered(ControlCommand::Start, metadata(1, 1));
+
+        assert_eq!(outcome.status, AdmissionStatus::Late);
+        assert_eq!(outcome.reason, Some(AdmissionRejectReason::LateDeadline));
+        assert_eq!(consumer.try_pop(), None);
+    }
+
+    #[test]
+    fn ordered_coalesce_key_is_rejected() {
+        let (producer, mut consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let mut meta = metadata(1, 1);
+        meta.coalesce_key = Some(CoalesceKey::new("transport").expect("key fits"));
+
+        let outcome = producer.admit_ordered(ControlCommand::Start, meta);
+
+        assert_eq!(outcome.status, AdmissionStatus::Rejected);
+        assert_eq!(
+            outcome.reason,
+            Some(AdmissionRejectReason::UnsupportedCommandClass)
+        );
+        assert_eq!(consumer.try_pop(), None);
+    }
+
+    #[test]
+    fn unsupported_time_domain_rejected_before_enqueue() {
+        let (producer, mut consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let mut meta = metadata(1, 1);
+        meta.deadline.time_domain = CommandTimeDomain::HostTime;
+
+        let outcome = producer.admit_ordered(ControlCommand::Start, meta);
+
+        assert_eq!(outcome.status, AdmissionStatus::Rejected);
+        assert_eq!(
+            outcome.reason,
+            Some(AdmissionRejectReason::UnsupportedTimeDomain)
+        );
+        assert_eq!(consumer.try_pop(), None);
+    }
+
+    #[test]
+    fn missed_deadline_fault_is_visible_on_drain() {
+        let (producer, mut consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let outcome = producer.admit_ordered(ControlCommand::Start, metadata(1, 2));
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+        consumer.begin_buffer();
+        consumer.begin_buffer();
+        consumer.begin_buffer();
+
+        assert!(matches!(
+            consumer.drain_due_command(),
+            Some(RtCommandDrain::MissedDeadline(CommandEnvelope {
+                command: ControlCommand::Start,
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn last_value_tempo_coalesces_by_key() {
+        let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let first = producer.admit_tempo(
+            Tempo::from_bpm_integer(130),
+            AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0),
+        );
+        let second = producer.admit_tempo(
+            Tempo::from_bpm_integer(140),
+            AdmissionMetadata::tempo(CommandId(2), SourceId::default(), 0),
+        );
+
+        assert_eq!(first.status, AdmissionStatus::Accepted);
+        assert_eq!(second.status, AdmissionStatus::Accepted);
+        assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(140));
+    }
+
+    proptest! {
+        #[test]
+        fn command_admission_is_total(
+            id in any::<u64>(),
+            deadline in 0_u64..8,
+            domain in domain_strategy(),
+            has_coalesce_key in any::<bool>(),
+        ) {
+            let (producer, _consumer) = spsc(1, Tempo::from_bpm_integer(120));
+            let mut meta = metadata(id, deadline);
+            meta.deadline.time_domain = domain;
+            if has_coalesce_key {
+                meta.coalesce_key = Some(CoalesceKey::new("transport").expect("key fits"));
+            }
+
+            let outcome = producer.admit_ordered(ControlCommand::Start, meta);
+
+            prop_assert!(matches!(
+                outcome.status,
+                AdmissionStatus::Accepted | AdmissionStatus::Rejected | AdmissionStatus::Late
+            ));
+            prop_assert_eq!(outcome.reason.is_none(), outcome.status == AdmissionStatus::Accepted);
+        }
+
+        #[test]
+        fn accepted_command_has_declared_deadline(
+            id in any::<u64>(),
+            deadline in 1_u64..8,
+        ) {
+            let (producer, _consumer) = spsc(4, Tempo::from_bpm_integer(120));
+            let meta = metadata(id, deadline);
+            let outcome = producer.admit_ordered(ControlCommand::Start, meta);
+
+            prop_assert_eq!(outcome.status, AdmissionStatus::Accepted);
+            prop_assert_eq!(outcome.metadata.command_id, CommandId(id));
+            prop_assert_eq!(outcome.metadata.source_id, SourceId::default());
+            prop_assert_eq!(outcome.metadata.deadline, CommandDeadline::rt_buffer(deadline));
+        }
+
+        #[test]
+        fn accepted_command_applies_by_deadline(deadline in 1_u64..8) {
+            let (producer, mut consumer) = spsc(4, Tempo::from_bpm_integer(120));
+            let outcome = producer.admit_ordered(ControlCommand::Start, metadata(1, deadline));
+            prop_assert_eq!(outcome.status, AdmissionStatus::Accepted);
+
+            for _ in 0..deadline {
+                consumer.begin_buffer();
+            }
+
+            let drained = consumer.drain_due_command();
+            let applied = match drained {
+                Some(RtCommandDrain::Command(envelope)) => {
+                    envelope.command == ControlCommand::Start
+                }
+                _ => false,
+            };
+            prop_assert!(applied);
+        }
     }
 }
