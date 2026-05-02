@@ -16,8 +16,9 @@
 #                                                 train; was crates/core/src/arb.rs's pulse_train
 #                                                 before Plan 2026-04-28-08 distributed arb.rs;
 #                                                 renamed pulse_train → pulse in Plan 2026-04-29-01 T6)
-#   crates/core/src/sink/audio.rs                 PCM ABI shape (AudioIo `&[f32]` slices; was
-#                                                 host.rs before Plan 2026-04-29-01 T6)
+#   crates/core/src/sink/audio.rs                 PCM ABI shape (AudioIo `&[f32]` slices) plus
+#                                                 generated audio-click PCM writes at the output
+#                                                 boundary; was host.rs before Plan 2026-04-29-01 T6
 #   crates/core/src/control/transport.rs          PCM ABI (empty `[f32; 0]` for AudioIo construction
 #                                                 in tests; was control.rs before Plan 2026-05-02-05)
 #   crates/core/src/channel/spec/parser.rs        argv-boundary (--ch delay=ms via F064FD06; split from machine/spec.rs in Plan 2026-04-28-06 T3; moved under channel/ in Plan 2026-04-29-01 T5)

@@ -2,11 +2,12 @@
 
 //! cpal back-end for `agogo::core::sink::audio::AudioHost`.
 //!
-//! `CpalHost` opens a cpal input stream (f32 samples), surfaces
-//! cpal's device enumeration through a
-//! stable API, and adapts cpal's per-buffer callback to
-//! [`agogo::core::sink::audio::AudioIo`]. The `output: &mut []` slice is a
-//! stub — CV output lands in v0.4's heterogeneous output layer.
+//! `CpalHost` opens cpal input-only or output-only streams (f32
+//! samples), surfaces cpal's device enumeration through a stable
+//! API, and adapts cpal's per-buffer callback to
+//! [`agogo::core::sink::audio::AudioIo`]. Output support starts with
+//! the generated audio-click test feature; CV output remains part of
+//! the heterogeneous output layer.
 //!
 //! # Precision note
 //!

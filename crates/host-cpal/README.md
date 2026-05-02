@@ -2,7 +2,9 @@
 
 cpal back-end for `agogo::core::sink::audio::AudioHost`. This is the
 first platform-audio integration; v0.1 wires the audio-in path, and
-v0.4 owns CV/gate output through the heterogeneous output layer.
+Plan 2026-05-02-06 adds output-only support for the generated audio
+metronome test feature. CV/gate output remains part of the
+heterogeneous output layer.
 
 Not a workspace member by design — `cargo test --workspace` skips it
 so the default CI path doesn't pull cpal + its platform system

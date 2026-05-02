@@ -11,7 +11,7 @@
 use core::num::{NonZeroU16, NonZeroU32};
 
 use crate::channel::dsl;
-use crate::channel::role::{MidiClickAccent, MidiClickConfig, MidiRole};
+use crate::channel::role::{AudioRole, MidiClickAccent, MidiClickConfig, MidiRole};
 use crate::conn::fixed::Micro;
 use crate::conn::float::F064FD06;
 use crate::conn::midi::{U4, U7};
@@ -21,8 +21,8 @@ use crate::time::tbase::TBase;
 use connections::extended::Extended;
 use connections::float::ExtendedFloat;
 
-use super::ChannelSpec;
 use super::error::ChannelSpecError;
+use super::{ChannelSpec, ChannelSpecRole};
 
 impl ChannelSpec {
     /// Parse a `key=val[,key=val]*` spec into a [`ChannelSpec`].
@@ -33,11 +33,10 @@ impl ChannelSpec {
         let pairs = tokenize(s)?;
 
         let mut id: Option<String> = None;
-        // The `dev=` key is required (audit P4 keeps that contract)
-        // but its value is implicitly `midi` — `dev=audio` errors
-        // at parse, `dev=midi` validates and stores nothing. Only
-        // the presence of the key is tracked.
-        let mut dev_seen: bool = false;
+        // The `dev=` key is required. MIDI remains the default
+        // production target; audio is limited to generated
+        // `mode=click` test output.
+        let mut dev_kw: Option<&'static str> = None; // "midi" | "audio"
         let mut out: Option<String> = None;
         let mut grid_str: Option<String> = None;
         let mut swing: SwingConfig = SwingConfig {
@@ -65,14 +64,13 @@ impl ChannelSpec {
             match k.as_str() {
                 "id" => id = Some(v),
                 "dev" => {
-                    match v.as_str() {
-                        "midi" => {} // ok — only valid value today
-                        "audio" => return Err(ChannelSpecError::AudioDeferred),
+                    dev_kw = Some(match v.as_str() {
+                        "midi" => "midi",
+                        "audio" => "audio",
                         other => {
                             return Err(ChannelSpecError::BadValue("dev", other.to_string()));
                         }
-                    }
-                    dev_seen = true;
+                    });
                 }
                 "out" => out = Some(v),
                 "grid" => {
@@ -246,11 +244,15 @@ impl ChannelSpec {
         let grid = dsl::parse(grid_expr, env)
             .map_err(|e| ChannelSpecError::BadValue("grid", e.to_string()))?;
 
-        // Cross-key validation: assemble `mode` from the per-key
-        // values according to the mode= keyword. Defaults to
-        // MidiRole::Clock if mode= absent.
-        let mode = match mode_kw.unwrap_or("clock") {
-            "clock" => {
+        let dev = dev_kw.ok_or(ChannelSpecError::MissingKey("dev"))?;
+
+        // Cross-key validation: assemble target-specific role from
+        // `dev=` + `mode=`. `dev=midi` keeps the historical
+        // default `mode=clock`; `dev=audio` must spell
+        // `mode=click` so an accidental audio clock spec does not
+        // silently turn into a no-op.
+        let role = match (dev, mode_kw.unwrap_or("clock")) {
+            ("midi", "clock") => {
                 // Reject click-only keys when mode is clock — they're
                 // silently ignored otherwise, which hides typos.
                 // Each first element is a string literal (`&'static
@@ -279,9 +281,9 @@ impl ChannelSpec {
                         ));
                     }
                 }
-                MidiRole::Clock
+                ChannelSpecRole::Midi(MidiRole::Clock)
             }
-            "click" => {
+            ("midi", "click") => {
                 let note = note.ok_or(ChannelSpecError::MissingKey("note"))?;
                 let vel = vel.ok_or(ChannelSpecError::MissingKey("vel"))?;
                 // GM drum kit default = mch 10 (1-based) = U4(9).
@@ -310,24 +312,54 @@ impl ChannelSpec {
                         None
                     }
                 };
-                MidiRole::Click(MidiClickConfig {
+                ChannelSpecRole::Midi(MidiRole::Click(MidiClickConfig {
                     note,
                     vel,
                     ch,
                     accent,
-                })
+                }))
+            }
+            ("audio", "click") => {
+                const MIDI_ONLY_KEYS: &[&str] = &[
+                    "note",
+                    "vel",
+                    "mch",
+                    "accent-every",
+                    "accent-note",
+                    "accent-vel",
+                ];
+                let presence = [
+                    note.is_some(),
+                    vel.is_some(),
+                    mch_zero_based.is_some(),
+                    accent_every.is_some(),
+                    accent_note.is_some(),
+                    accent_vel.is_some(),
+                ];
+                for (i, &key) in MIDI_ONLY_KEYS.iter().enumerate() {
+                    if presence[i] {
+                        return Err(ChannelSpecError::BadValue(
+                            key,
+                            "only valid with dev=midi,mode=click".into(),
+                        ));
+                    }
+                }
+                ChannelSpecRole::Audio(AudioRole::Click)
+            }
+            ("audio", "clock") => {
+                return Err(ChannelSpecError::BadValue(
+                    "mode",
+                    "dev=audio supports mode=click only".into(),
+                ));
             }
             _ => unreachable!("mode_kw is constrained to clock|click at parse"),
         };
 
-        if !dev_seen {
-            return Err(ChannelSpecError::MissingKey("dev"));
-        }
         Ok(Self {
             id,
             out,
             grid,
-            mode,
+            role,
             swing,
             offset_ticks,
             delay,
@@ -735,9 +767,27 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_dev_audio() {
-        let err = ChannelSpec::parse("dev=audio", &[]).unwrap_err();
-        assert_eq!(err, ChannelSpecError::AudioDeferred);
+    fn parse_accepts_audio_click() {
+        let spec = ChannelSpec::parse("dev=audio,mode=click,grid=t4", &[]).unwrap();
+        assert_eq!(spec.role, ChannelSpecRole::Audio(AudioRole::Click));
+    }
+
+    #[test]
+    fn parse_rejects_audio_without_click_mode() {
+        let err = ChannelSpec::parse("dev=audio,grid=t4", &[]).unwrap_err();
+        assert!(matches!(err, ChannelSpecError::BadValue("mode", _)));
+    }
+
+    #[test]
+    fn parse_rejects_audio_click_with_midi_keys() {
+        let err = ChannelSpec::parse("dev=audio,mode=click,grid=t4,note=37", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, msg) => {
+                assert_eq!(key, "note");
+                assert!(msg.contains("dev=midi"), "got: {msg}");
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
     }
 
     #[test]
@@ -799,7 +849,7 @@ mod tests {
     #[test]
     fn parse_default_mode_is_clock() {
         let spec = ChannelSpec::parse("dev=midi,grid=t4", &[]).unwrap();
-        assert_eq!(spec.mode, MidiRole::Clock);
+        assert_eq!(spec.role, ChannelSpecRole::Midi(MidiRole::Clock));
     }
 
     #[test]
@@ -807,8 +857,8 @@ mod tests {
         let s = "dev=midi,mode=click,grid=t4,note=37,vel=80,mch=10,\
                  accent-every=4,accent-note=38,accent-vel=120";
         let spec = ChannelSpec::parse(s, &[]).expect("parse");
-        let cfg = match spec.mode {
-            MidiRole::Click(c) => c,
+        let cfg = match spec.role {
+            ChannelSpecRole::Midi(MidiRole::Click(c)) => c,
             other => panic!("expected Click(Midi), got {:?}", other),
         };
         assert_eq!(cfg.note, U7(37));
@@ -823,8 +873,8 @@ mod tests {
     #[test]
     fn parse_click_defaults_mch_to_10() {
         let spec = ChannelSpec::parse("dev=midi,mode=click,grid=t4,note=76,vel=100", &[]).unwrap();
-        let cfg = match spec.mode {
-            MidiRole::Click(c) => c,
+        let cfg = match spec.role {
+            ChannelSpecRole::Midi(MidiRole::Click(c)) => c,
             _ => panic!(),
         };
         assert_eq!(cfg.ch, U4(9));
@@ -834,8 +884,8 @@ mod tests {
     fn parse_click_accent_note_defaults_to_note() {
         let s = "dev=midi,mode=click,grid=t4,note=37,vel=70,accent-every=4,accent-vel=120";
         let spec = ChannelSpec::parse(s, &[]).unwrap();
-        let cfg = match spec.mode {
-            MidiRole::Click(c) => c,
+        let cfg = match spec.role {
+            ChannelSpecRole::Midi(MidiRole::Click(c)) => c,
             _ => panic!(),
         };
         let accent = cfg.accent.unwrap();

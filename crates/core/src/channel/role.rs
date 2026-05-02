@@ -2,7 +2,7 @@
 //! field set.
 //!
 //! `Channel` (in [`crate::channel::time`]) is sum-typed by
-//! routing target (`Channel::Midi | Din | Cv`); each variant carries
+//! routing target (`Channel::Midi | Audio | Din | Cv`); each variant carries
 //! a [`ChannelCommon`] (the field set the scheduler / transform
 //! pipeline operates on) and a target-specific `*Role` payload that
 //! the renderer consumes.
@@ -103,6 +103,17 @@ pub struct MidiCcConfig {
     pub range: (U7, U7),
 }
 
+// ── audio target ────────────────────────────────────────────────────
+
+/// Audio-output target role.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum AudioRole {
+    /// Generated PCM click per scheduled tick. Test-feature surface:
+    /// sound-shaping constants live in the renderer, not in CLI
+    /// configuration.
+    Click,
+}
+
 // ── DIN sync target ─────────────────────────────────────────────────
 
 /// DIN-sync target role.
@@ -156,6 +167,7 @@ mod tests {
             cc: U7(74),
             range: (U7(0), U7(127)),
         });
+        let _ = AudioRole::Click;
         let _ = DinRole::Sync24;
         let _ = CvRole::Pulse;
         let _ = CvRole::Lfo;

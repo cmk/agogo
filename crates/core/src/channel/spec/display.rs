@@ -12,14 +12,14 @@ use crate::channel::role::MidiRole;
 use crate::conn::fixed::Micro;
 use crate::time::tbase::TBase;
 
-use super::ChannelSpec;
+use super::{ChannelSpec, ChannelSpecRole};
 
 impl Display for ChannelSpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // `dev=midi` is the only supported value (audit P4); emitted
-        // as a literal so the round-trip parser still sees the
-        // required key.
-        write!(f, "dev=midi,grid={}", self.grid)?;
+        match &self.role {
+            ChannelSpecRole::Midi(_) => write!(f, "dev=midi,grid={}", self.grid)?,
+            ChannelSpecRole::Audio(_) => write!(f, "dev=audio,grid={}", self.grid)?,
+        }
         if let Some(id) = &self.id {
             write!(f, ",id={}", quote_if_needed(id))?;
         }
@@ -28,9 +28,9 @@ impl Display for ChannelSpec {
         }
         // mode + click keys: emit only when non-default
         // (MidiRole::Clock is the implicit default, so it's omitted).
-        match &self.mode {
-            MidiRole::Clock => {}
-            MidiRole::Click(cfg) => {
+        match &self.role {
+            ChannelSpecRole::Midi(MidiRole::Clock) => {}
+            ChannelSpecRole::Midi(MidiRole::Click(cfg)) => {
                 write!(
                     f,
                     ",mode=click,note={},vel={},mch={}",
@@ -50,7 +50,10 @@ impl Display for ChannelSpec {
             }
             // MidiRole::Cc is a spec-surface stub; the parser doesn't
             // produce it today, so the Display side stays silent.
-            MidiRole::Cc(_) => {}
+            ChannelSpecRole::Midi(MidiRole::Cc(_)) => {}
+            ChannelSpecRole::Audio(_) => {
+                write!(f, ",mode=click")?;
+            }
         }
         if self.swing.amount != 0 || self.swing.resolution != TBase::T8 {
             if self.swing.resolution == TBase::T8 {
@@ -184,7 +187,7 @@ mod tests {
                 id: None,
                 out: None,
                 grid: Grid::ALL[0],
-                mode: MidiRole::Clock,
+                role: ChannelSpecRole::Midi(MidiRole::Clock),
                 swing: SwingConfig {
                     resolution: TBase::T8,
                     amount: 0,
@@ -210,16 +213,16 @@ mod tests {
         prop::sample::select(TBase::ALL.as_slice())
     }
 
-    /// Generate a `MidiRole` reachable from the spec parser:
-    /// `Clock` or `Click(MidiClickConfig)` with arbitrary
-    /// note/vel/ch and an optional accent.
+    /// Generate a target role reachable from the spec parser:
+    /// MIDI `Clock`, MIDI `Click(MidiClickConfig)`, or audio
+    /// `Click`.
     ///
     /// `accent.every` spans the full `NonZeroU32` domain — the
     /// round-trip property is u32-shape-preserving (parse-as-u32,
     /// Display via `Display for NonZeroU32`), so the entire domain
     /// is safe to sample. Per CLAUDE.md: don't bound to "keep
     /// things small," only to avoid documented hazards.
-    fn arb_mode() -> impl Strategy<Value = MidiRole> {
+    fn arb_role() -> impl Strategy<Value = ChannelSpecRole> {
         let click = (
             0u8..=127,
             1u8..=127,
@@ -236,18 +239,22 @@ mod tests {
                     note: U7(an),
                     vel: U7(av),
                 });
-                MidiRole::Click(MidiClickConfig {
+                ChannelSpecRole::Midi(MidiRole::Click(MidiClickConfig {
                     note: U7(note),
                     vel: U7(vel),
                     ch: U4(ch),
                     accent,
-                })
+                }))
             });
-        prop_oneof![Just(MidiRole::Clock), click]
+        prop_oneof![
+            Just(ChannelSpecRole::Midi(MidiRole::Clock)),
+            click,
+            Just(ChannelSpecRole::Audio(crate::channel::AudioRole::Click)),
+        ]
     }
 
     /// Full `NonZeroU16` domain for `bars` — same justification as
-    /// `arb_mode`'s `every`: parser is u16-shape-preserving, no
+    /// MIDI click accent `every`: parser is u16-shape-preserving, no
     /// arithmetic hazards in the round-trip path.
     fn arb_bars() -> impl Strategy<Value = Option<NonZeroU16>> {
         prop::option::of(
@@ -291,16 +298,16 @@ mod tests {
             any::<i32>(),
             arb_delay(),
             prop::option::of(any::<i64>()),
-            arb_mode(),
+            arb_role(),
             arb_bars(),
         )
             .prop_map(
-                |(grid, id, out, swing_res, swing_amt, offset_ticks, delay, snap, mode, bars)| {
+                |(grid, id, out, swing_res, swing_amt, offset_ticks, delay, snap, role, bars)| {
                     ChannelSpec {
                         id,
                         out,
                         grid,
-                        mode,
+                        role,
                         swing: SwingConfig {
                             resolution: swing_res,
                             amount: swing_amt,

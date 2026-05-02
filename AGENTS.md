@@ -270,7 +270,10 @@ code based on it.
   `cli/src/main.rs` to `cli/src/parsers.rs` and grouped trace/time/link
   handlers under subdirectories. Plan 2026-05-02-05 moved the
   `control.rs` PCM ABI test locals into `control/transport.rs`
-  alongside `Playhead`. The current allowlist is the 20 entries in
+  alongside `Playhead`. Plan 2026-05-02-06 kept
+  `crates/core/src/sink/audio.rs` on the allowlist for `AudioIo`
+  PCM slices and the generated audio-click renderer's output-boundary
+  PCM writes. The current allowlist is the 20 entries in
   `scripts/check-floats.sh::ALLOWED` (Plan 2026-04-28-06 T3 swapped
   `machine/spec.rs` for `machine/spec/parser.rs` when the kitchen
   sink split — same `delay=ms` argv boundary, just lives in the

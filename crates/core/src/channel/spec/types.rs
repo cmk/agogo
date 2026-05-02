@@ -6,20 +6,23 @@
 
 use core::num::NonZeroU16;
 
-use crate::channel::role::MidiRole;
+use crate::channel::role::{AudioRole, MidiRole};
 use crate::conn::fixed::Micro;
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
 
+/// Parsed output target + role for a `--ch` spec.
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+pub enum ChannelSpecRole {
+    Midi(MidiRole),
+    Audio(AudioRole),
+}
+
 /// Parsed `--ch` spec.
 ///
-/// Audit P4 (Plan 22): the spec carries no routing-target tag —
-/// every `ChannelSpec` is implicitly MIDI-targeted, because that's
-/// the only target the parser produces today (`dev=audio` is
-/// rejected at parse time as `AudioDeferred`). When later output work
-/// adds `dev=din` or `dev=cv` parsers, `ChannelSpec` becomes a sum type
-/// `enum { Midi, Din, Cv }` mirroring [`Channel`](crate::channel::Channel)'s
-/// variants from audit P3.
+/// The spec carries the same target/role split as
+/// [`Channel`](crate::channel::Channel): parsing keeps target-specific
+/// role payloads out of unrelated outputs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChannelSpec {
     /// Optional human-readable identifier. Free-form string.
@@ -28,13 +31,9 @@ pub struct ChannelSpec {
     pub out: Option<String>,
     /// Grid — resolved from a DSL expression at parse time.
     pub grid: Grid,
-    /// Per-channel output role. Default `MidiRole::Clock`;
-    /// `mode=click` produces `MidiRole::Click(MidiClickConfig)`.
-    /// The spec parser only ever produces MIDI-target roles
-    /// (audit P3 reshaped Channel into per-target variants;
-    /// non-MIDI targets aren't user-constructible from the
-    /// `--ch` mini-language today).
-    pub mode: MidiRole,
+    /// Per-channel output role, including the target selected by
+    /// `dev=`.
+    pub role: ChannelSpecRole,
     /// Swing configuration. Default: `T8:0` (no swing at eighth-note
     /// resolution).
     pub swing: SwingConfig,

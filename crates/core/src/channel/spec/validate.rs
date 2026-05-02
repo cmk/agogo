@@ -15,14 +15,14 @@ use crate::conn::fixed::Micro;
 
 use super::ChannelSpec;
 use super::error::ChannelSpecError;
+use super::types::ChannelSpecRole;
 
 impl ChannelSpec {
     /// Convert the parsed spec into the runtime [`Channel`] type.
     pub fn into_channel(self) -> Result<Channel, ChannelSpecError> {
-        // `dev=audio` is rejected at parse time (audit P4); by here
-        // every spec is implicitly MIDI-targeted. The mode/click
-        // validation already happened in `parse`, so `self.mode` is
-        // the ready-to-use MidiRole (Clock or Click(MidiClickConfig)).
+        // Target/mode validation already happened in `parse`, so
+        // `self.role` is ready to lower into the runtime `Channel`
+        // shape.
         // delay is already typed as Micro at the spec layer (Q3
         // closure for audit K). The parser body called micro_from_user_ms
         // — into_channel just clamps to MAX_DELAY.
@@ -42,15 +42,17 @@ impl ChannelSpec {
             ));
         }
 
-        Ok(Channel::Midi {
-            common: ChannelCommon {
-                divider: self.grid,
-                shuffle: self.swing,
-                delay,
-                offset: Micro::ZERO,
-                bar_multiplier: self.bars,
-            },
-            role: self.mode,
+        let common = ChannelCommon {
+            divider: self.grid,
+            shuffle: self.swing,
+            delay,
+            offset: Micro::ZERO,
+            bar_multiplier: self.bars,
+        };
+
+        Ok(match self.role {
+            ChannelSpecRole::Midi(role) => Channel::Midi { common, role },
+            ChannelSpecRole::Audio(role) => Channel::Audio { common, role },
         })
     }
 }
@@ -58,7 +60,7 @@ impl ChannelSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channel::role::MidiRole;
+    use crate::channel::role::{AudioRole, MidiRole};
     use crate::conn::midi::U4;
     use core::num::NonZeroU16;
     use proptest::prelude::*;
@@ -103,6 +105,19 @@ mod tests {
                 ..
             } => assert!(cfg.accent.is_none()),
             _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn into_channel_audio_click_returns_audio_variant() {
+        let spec = ChannelSpec::parse("dev=audio,mode=click,grid=t4,bars=4", &[]).unwrap();
+        let ch = spec.into_channel().unwrap();
+        match ch {
+            Channel::Audio {
+                role: AudioRole::Click,
+                common,
+            } => assert_eq!(common.bar_multiplier, NonZeroU16::new(4)),
+            _ => panic!("expected Channel::Audio {{ role: Click }}"),
         }
     }
 
