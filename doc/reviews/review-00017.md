@@ -140,8 +140,8 @@ caught it once they could run; fixed inline.
   clean across `agogo-core`, `agogo-cli`, `agogo-host-cpal`,
   `agogo-host-link`.
 - `scripts/check-floats.sh` clean. No new float-storage sites;
-  the four allowlisted files from Plan 14 (`machine.rs`,
-  `machine/spec.rs`, `host-link/source.rs`, `cli/run.rs`) keep
+  the four allowlisted files from Plan 14 (`control/transport.rs`,
+  `channel/spec.rs`, `host-link/source.rs`, `cli/run.rs`) keep
   their existing exception comments.
 - `agogo demo run --bpm 120 --sr 48000 --divider t64t
   --audio-in default --midi-out <port> --duration-ms 2000`

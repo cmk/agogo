@@ -1,4 +1,4 @@
-# PR #38 — Split machine/spec.rs into 5 single-concern files
+# PR #38 — Split channel/spec.rs into 5 single-concern files
 
 ## Summary
 
@@ -31,13 +31,13 @@ No functional changes. Pure file-layout work — every `pub fn` /
 `pub struct` keeps its name and signature; the parent
 `spec.rs`'s `pub use` re-exports keep external callers
 (`crate::control::ChannelSpec` etc., re-exported again from
-`machine.rs`) resolving without changes.
+`control/transport.rs`) resolving without changes.
 
 ### Other changes
 
 - **`scripts/check-floats.sh` allowlist updated.** The
-  `machine/spec.rs` entry (which guarded `micro_from_user_ms`'s
-  argv-boundary `f64`) swaps for `machine/spec/parser.rs` —
+  `channel/spec.rs` entry (which guarded `micro_from_user_ms`'s
+  argv-boundary `f64`) swaps for `channel/spec/parser.rs` —
   same `delay=ms` argv boundary, just in the parser submodule
   now. Total count stays at 20. CLAUDE.md amended.
 
@@ -48,12 +48,12 @@ collapsed since after T1+T2+T4+T5 the parent shell was already
 within reach):
 
 ```
-29ec30a debt: Extract parser to machine/spec/parser.rs; collapse spec.rs to 39-line shell
-b64318e debt: Extract Display + round-trip proptest to machine/spec/display.rs
-14157bf debt: Extract into_channel + tests to machine/spec/validate.rs
-83101f3 debt: Extract ChannelSpec struct + snap_intent from machine/spec.rs
-cedc208 debt: Extract ChannelSpecError from machine/spec.rs
-462cc15 plan: Split machine/spec.rs into 5 single-concern files
+29ec30a debt: Extract parser to channel/spec/parser.rs; collapse spec.rs to 39-line shell
+b64318e debt: Extract Display + round-trip proptest to channel/spec/display.rs
+14157bf debt: Extract into_channel + tests to channel/spec/validate.rs
+83101f3 debt: Extract ChannelSpec struct + snap_intent from channel/spec.rs
+cedc208 debt: Extract ChannelSpecError from channel/spec.rs
+462cc15 plan: Split channel/spec.rs into 5 single-concern files
 ```
 
 ### Verification
@@ -117,7 +117,7 @@ blocks per the plan's §Notes on test redistribution. Spot-checked:
 seed for `spec_round_trip`) would be orphaned by the test move —
 proptest derives the regression file path from the test source
 file location, so post-split it would look at
-`machine/spec/display.txt`, not `machine/spec.txt`. Fixed in the
+`channel/spec/display.txt`, not `machine/spec.txt`. Fixed in the
 T4 fixup: `git mv` the seed to the new path so the regression
 safety net is preserved. MEMORY.md flags this as a contract
 violation we've hit before; nice catch.
@@ -140,8 +140,8 @@ matches the plan's intent. Parent at 39 (vs ~30 target) — the
 overage is the module-level doc comment which must stay in the
 parent per Rust convention.
 
-`scripts/check-floats.sh` allowlist swap (`machine/spec.rs` →
-`machine/spec/parser.rs`) is a clean one-for-one — total stays at
+`scripts/check-floats.sh` allowlist swap (`channel/spec.rs` →
+`channel/spec/parser.rs`) is a clean one-for-one — total stays at
 20. CLAUDE.md amended with the parenthetical noting the Plan
 2026-04-28-06 T3 swap. Both correct and consistent.
 

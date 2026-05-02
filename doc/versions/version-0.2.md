@@ -15,7 +15,7 @@ stdio server/client
   -> stdio-core dispatcher + policy + event log
   -> agogo host adapter
   -> agogo RT bridge
-  -> Machine::on_buffer
+  -> Playhead::on_buffer
   -> timestamped sink or declared best-effort sink
   -> agogo-state snapshot back to stdio-core
 ```
@@ -36,7 +36,7 @@ stdio server/client
 
 ### S1 - Callback Contract And Allocation Gates
 
-- Add a test/bench harness that asserts no allocation in `Machine::on_buffer`
+- Add a test/bench harness that asserts no allocation in `Playhead::on_buffer`
   after construction.
 - Add worst-case channel/event count timing tests for the configured buffer
   sizes.
@@ -101,7 +101,7 @@ control passing through a lossy telemetry channel.
 
 | Property | Invariant |
 | --- | --- |
-| `rt_callback_no_alloc` | `Machine::on_buffer` performs no allocation after construction. |
+| `rt_callback_no_alloc` | `Playhead::on_buffer` performs no allocation after construction. |
 | `command_admission_is_total` | Every command returns accepted, rejected, or late; no silent loss. |
 | `accepted_command_applies_by_deadline` | Accepted commands apply by their declared domain/deadline or report a missed-deadline fault. |
 | `control_independent_of_observation` | Control works with zero observation subscribers. |

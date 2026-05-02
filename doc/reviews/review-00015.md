@@ -94,7 +94,7 @@ the first end-to-end execution: a click on the audio input drives
 the PLL, the scheduler emits ticks, the renderer turns ticks into
 `0xF8` clock bytes, the SPSC + drain thread flushes to midir, a
 peer's MIDI clock follower locks on. Plan 14 generalises this to
-N channels via `Machine` and ships `agogo run` + `bin/agogo` for
+N channels via `Playhead` and ships `agogo run` + `bin/agogo` for
 the polished v0.1 acceptance.
 
 ### Verification
@@ -183,7 +183,7 @@ midir → peer chain works end-to-end.
   covered by per-task unit tests; hardware fixture smokes land
   with Plan 14's `agogo run` acceptance path. Detailed in the
   plan's Review section.
-- **`agogo run` + `bin/agogo` + `Machine`** — Plan 14. Generalises
+- **`agogo run` + `bin/agogo` + `Playhead`** — Plan 14. Generalises
   the single-channel demo to N channels, adds Ctrl-C handling,
   exposes wider sample-rate dispatch, lands the v0.1 acceptance
   scenario.
@@ -209,7 +209,7 @@ midir → peer chain works end-to-end.
 
 ### Next
 
-- **Plan 14** (`Machine` + `agogo run` + `bin/agogo`): closes the
+- **Plan 14** (`Playhead` + `agogo run` + `bin/agogo`): closes the
   third v0.1 output-chain slot. Generalises Plan 13's
   single-channel demo to N channels, lands the v0.1 acceptance
   scenario, and absorbs `agogo demo` → `agogo run` semantics.

@@ -15,7 +15,7 @@ midi = ["dep:agogo", "agogo/midi"]
 # `demo` activates the `agogo demo` subcommand: cpal audio in +
 # midir MIDI out + the SPSC drain thread + CallbackState pipeline.
 demo = ["core", "cpal", "midi"]
-# `run` activates `agogo run`: N-channel Machine, six-rate static
+# `run` activates `agogo run`: N-channel Playhead, six-rate static
 # dispatch, Ctrl-C handling, top-level pipeline.
 # Includes `link` so `--source link` is wired up; without `link`
 # the handler errors cleanly on `--source link`.

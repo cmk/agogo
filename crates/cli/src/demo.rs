@@ -4,7 +4,7 @@
 //! `CallbackState` hot loop, the rtrb SPSC + drain thread, and
 //! midir output via `agogo::host::midi::MidirSink`. Single-channel
 //! `MidiClock` for v0.1; `agogo run` generalises to N channels via
-//! `Machine`.
+//! `Playhead`.
 //!
 //! Plan 2026-04-28-05 T7: extracted from `cli/main.rs`.
 
@@ -13,7 +13,7 @@ use agogo::core::conn::fixed::Micro;
 use agogo::core::conn::sample::{S048, SampleRate};
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-use agogo::core::control::{Machine, TransportPolicy};
+use agogo::core::control::{Playhead, TransportPolicy};
 use agogo::core::sink::audio::{AudioHost, Config};
 use agogo::core::time::grid::Grid;
 use agogo::core::time::swing::SwingConfig;
@@ -207,10 +207,10 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     let drain_sink: Arc<dyn agogo::core::sink::midi::MidiSink + Send + Sync> = sink;
     let drain = consumer.spawn_drain(drain_sink);
 
-    // Machine + CallbackState. `agogo run` generalises this
+    // Playhead + CallbackState. `agogo run` generalises this
     // single-channel state to N channels; the demo keeps its
     // single-channel CLI surface by building a one-channel
-    // Machine with `TransportPolicy::Scripted { empty }` so the
+    // Playhead with `TransportPolicy::Scripted { empty }` so the
     // emitted byte stream stays byte-identical to the original demo
     // path (no Start / Stop / Continue, just clock).
     let channel = Channel::Midi {
@@ -226,7 +226,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         },
         role: MidiRole::Clock,
     };
-    let machine = Machine::<S048>::new(
+    let playhead = Playhead::<S048>::new(
         vec![channel],
         phase_source,
         args.sr,
@@ -237,7 +237,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         },
         args.buffer_frames as usize,
     );
-    let mut state = CallbackState::<S048> { machine, producer };
+    let mut state = CallbackState::<S048> { playhead, producer };
 
     // Open audio host.
     let host = if args.audio_in == "default" {

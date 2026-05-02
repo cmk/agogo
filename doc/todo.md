@@ -413,11 +413,11 @@ when a future plan grep brings up a stale promise.
 - **`ChannelSpec.dev` field deletion** — Plan 22 (audit P4 first half).
 - **`ChannelSpec.delay_ms: f64 → FD06` and `RunArgs.bpm: f64 → Tempo`** —
   Plan 27 (Q3 / audit K + L); `delay_ms` now crosses via the `F064FD06`
-  Conn per `crates/core/src/machine/spec.rs:27`.
+  Conn per `crates/core/src/channel/spec.rs:27`.
 - **`fxp.rs` deletion / `boundary.rs` migration** — Plan 28-03 T5.
 - **`Quantum` + `f64_beats_to_quantum` move to `host-link`** — Plan
   28-03 T4; lives at `crates/host-link/src/quantum.rs`.
-- **`machine/spec.rs` 1299-line split** — Plan 28-06; spec/{display,
+- **`channel/spec.rs` 1299-line split** — Plan 28-06; spec/{display,
   parser, types, validate}.rs.
 - **`cli/main.rs` 1727-line extraction** — Plan 28-05; now grouped
   under `cli/src/trace/`, `cli/src/time/`, and `cli/src/link/`

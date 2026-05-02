@@ -42,7 +42,7 @@ not make false sample-accuracy claims.
 
 ## Acceptance
 
-- Demo: one running `Machine` drives MIDI clock, CV pulse, and OSC tick outputs
+- Demo: one running `Playhead` drives MIDI clock, CV pulse, and OSC tick outputs
   from the same master timeline.
 - Snapshot reports output health, drop counters, and timing capability per
   output.

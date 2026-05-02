@@ -185,7 +185,7 @@ The plan also required `spec_round_trip` (the existing proptest) to keep passing
 
 **T5** — `Display for ChannelSpec` at `spec.rs:523` uses `cfg.ch.0 + 1` as planned. CLI smoke verification described in plan; covered by `cargo test --workspace`.
 
-**One item not in the plan but present in the diff:** The `collect_tick_samples` helper in `machine.rs` was updated to accept `U4` directly. The plan's Review section documents this as an intentional deviation. Confirmed accurate.
+**One item not in the plan but present in the diff:** The `collect_tick_samples` helper in `control/transport.rs` was updated to accept `U4` directly. The plan's Review section documents this as an intentional deviation. Confirmed accurate.
 
 ### Risks
 

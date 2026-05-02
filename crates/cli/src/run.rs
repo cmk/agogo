@@ -42,7 +42,7 @@ use agogo::core::conn::boundary::tempo_to_f64_bpm;
 use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-use agogo::core::control::{Machine, MachineStopHandle, TransportPolicy};
+use agogo::core::control::{Playhead, PlayheadStopHandle, TransportPolicy};
 use agogo::core::sink::audio::{AudioHost, AudioIo, Config};
 use agogo::core::time::tick::PPQN;
 use agogo::host::cpal::CpalHost;
@@ -196,7 +196,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 }
 
 /// Rate-monomorphic body. `R: SampleTime` plumbs all the way down
-/// into `PhaseSource<R>` / `Machine<R>` / `CallbackState<R>` so the
+/// into `PhaseSource<R>` / `Playhead<R>` / `CallbackState<R>` so the
 /// audio callback never branches on rate at runtime. The
 /// `Send + 'static` bound is what cpal's `data_callback` requires
 /// of the moved closure.
@@ -299,7 +299,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
             start_emitted: false,
         }
     };
-    let machine = Machine::<R>::new(
+    let playhead = Playhead::<R>::new(
         channels,
         phase_source,
         args.sr,
@@ -308,8 +308,8 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
         transport,
         args.buffer_frames as usize,
     );
-    let stop_handle = machine.stop_handle();
-    let mut state = CallbackState::<R> { machine, producer };
+    let stop_handle = playhead.stop_handle();
+    let mut state = CallbackState::<R> { playhead, producer };
 
     // Open audio host.
     let host = if args.audio_in == "default" {
@@ -350,7 +350,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     );
 
     // Install Ctrl-C handler. The handler flips the stop flag and
-    // signals Machine to emit Stop on the next buffer.
+    // signals Playhead to emit Stop on the next buffer.
     let stop_flag = Arc::new(AtomicBool::new(false));
     install_ctrlc_handler(stop_flag.clone(), stop_handle.clone(), link_handle.clone())?;
 
@@ -377,7 +377,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
         }
     }
 
-    // Give the Machine one more buffer-tick to emit the Stop byte
+    // Give the Playhead one more buffer-tick to emit the Stop byte
     // before tearing down the stream. ~50 ms covers the worst-case
     // cpal buffer + the drain thread's 1 ms loop.
     std::thread::sleep(Duration::from_millis(50));
@@ -399,7 +399,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
 
 fn install_ctrlc_handler(
     stop_flag: Arc<AtomicBool>,
-    stop_handle: MachineStopHandle,
+    stop_handle: PlayheadStopHandle,
     link_handle: Option<LinkSessionHandle>,
 ) -> Result<(), String> {
     ctrlc::set_handler(move || {

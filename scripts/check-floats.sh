@@ -18,8 +18,8 @@
 #                                                 renamed pulse_train → pulse in Plan 2026-04-29-01 T6)
 #   crates/core/src/sink/audio.rs                 PCM ABI shape (AudioIo `&[f32]` slices; was
 #                                                 host.rs before Plan 2026-04-29-01 T6)
-#   crates/core/src/control.rs                    PCM ABI (empty `[f32; 0]` for AudioIo construction
-#                                                 in tests; was machine.rs before Plan 2026-04-29-01 T6)
+#   crates/core/src/control/transport.rs          PCM ABI (empty `[f32; 0]` for AudioIo construction
+#                                                 in tests; was control.rs before Plan 2026-05-02-05)
 #   crates/core/src/channel/spec/parser.rs        argv-boundary (--ch delay=ms via F064FD06; split from machine/spec.rs in Plan 2026-04-28-06 T3; moved under channel/ in Plan 2026-04-29-01 T5)
 #   crates/core/src/conn/float.rs                 vendored from connections — F064FDxx Conns
 #                                                 with f64-correction loops are intrinsic
@@ -77,7 +77,7 @@ ALLOWED=(
   # PCM samples. Same exception class as the old `arb.rs` entry.
   "crates/core/src/control/sync/pulse.rs"
   "crates/core/src/sink/audio.rs"
-  "crates/core/src/control.rs"
+  "crates/core/src/control/transport.rs"
   "crates/core/src/channel/spec/parser.rs"
   # Vendored from connections — both modules ship with f64 inside
   # their float→fixed Conn machinery (`F064FDxx` correction loops

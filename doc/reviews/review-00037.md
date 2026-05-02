@@ -84,7 +84,7 @@ Unchanged from PR #36's deferred list:
 - T6 `LpfPid` (clocked-style controller wrapper for v0.5 Link follower)
 - T7 `TransportState<S>` typestate skeleton
 - T8 `RelativeClock` calibration helper
-- T9 `machine/spec.rs` 1299-line split (still its own kitchen sink)
+- T9 `channel/spec.rs` 1299-line split (still its own kitchen sink)
 - `compose!` / `ceiling1` body cleanups
 - host-link 4-layer wrapping cleanup
 

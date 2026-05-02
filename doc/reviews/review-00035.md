@@ -65,7 +65,7 @@ references after the rewrite (only doc-comment historical citations).
 - **T6 `LpfPid`** — the `clocked` rolling-avg + LERP'd PI controller wrapper. Adds new behaviour; deserves its own review.
 - **T7 `TransportState<S>`** — typestate skeleton for v0.5 transport FSM.
 - **T8 `RelativeClock`** — calibration helper for future MIDI input.
-- **T9 `machine/spec.rs` split** (1299-line kitchen sink → 4 files).
+- **T9 `channel/spec.rs` split** (1299-line kitchen sink → 4 files).
 - **T11 CLI `main.rs` extraction** (1727 lines → 7 sibling modules).
 - **T12 small stragglers** (`MidiRtByte::Continue` `#[allow(dead_code)]`, `micro_from_ms` rename, `channel.rs` re-export hub audit).
 

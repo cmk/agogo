@@ -105,7 +105,7 @@ Three commits in the expected order: `plan:` opener, a single `refactor:` sweep 
 
 ### Test Coverage
 
-No tests were deleted. Test counts in `sync/{detect,pll,source}.rs`, `machine.rs`, `host-cpal/callback.rs` match pre-rename structure — every test function was renamed at the type-annotation level only. Plan's claim of 941 tests passing identically is consistent with diff content.
+No tests were deleted. Test counts in `sync/{detect,pll,source}.rs`, `control/transport.rs`, `host-cpal/callback.rs` match pre-rename structure — every test function was renamed at the type-annotation level only. Plan's claim of 941 tests passing identically is consistent with diff content.
 
 ### Plan Conformance
 
@@ -221,7 +221,7 @@ Fixed in ab1e2f2 — pico_to_samples docstring now describes the dispatch as "th
 <!-- gh-id: 3151145620 -->
 #### ↳ cmk ([2026-04-28 02:01 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151145620))
 
-Fixed in ab1e2f2 — corrected "Affected files (12)" to (14) and added the two missing entries (machine/spec.rs and host-link/link.rs). The brittle `crates/core/src/fxp.rs:55-83` line range is now a symbol-anchored description ("the section between the canonical re-exports and the SampleTime trait declaration") so it doesn't break if the alias block moves.
+Fixed in ab1e2f2 — corrected "Affected files (12)" to (14) and added the two missing entries (channel/spec.rs and host-link/link.rs). The brittle `crates/core/src/fxp.rs:55-83` line range is now a symbol-anchored description ("the section between the canonical re-exports and the SampleTime trait declaration") so it doesn't break if the alias block moves.
 
 <!-- gh-id: 3151145926 -->
 #### ↳ cmk ([2026-04-28 02:01 UTC](https://github.com/cmk/agogo/pull/30#discussion_r3151145926))

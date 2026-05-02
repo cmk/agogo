@@ -185,14 +185,14 @@ pub fn render_midi_click_block(
 use crate::channel::role::{ChannelCommon, MidiRole};
 
 /// Render one MIDI channel's block to the sink. Match-exhaustive on
-/// [`MidiRole`]; the `Machine`-level dispatch hands us only
+/// [`MidiRole`]; the `Playhead`-level dispatch hands us only
 /// `Channel::Midi` variants — a `Cv` / `Din` channel literally
 /// cannot reach this function (compile-time, not runtime, guarantee).
 ///
 /// Plan 21 (audit P3) replaced the old `render_channel_block`
 /// (which dispatched on a flat `ChannelMode` and silently no-op'd
 /// non-MIDI variants) with this typed version. `click_counter`
-/// must be `Some(_)` for `MidiRole::Click(_)`; non-`Machine`
+/// must be `Some(_)` for `MidiRole::Click(_)`; non-`Playhead`
 /// callers (the `Clock`-only render-path tests) pass `None`.
 ///
 /// `common` is unused today — later per-channel mute / mix /
@@ -213,7 +213,7 @@ pub fn render_midi_channel(
         }
         MidiRole::Click(cfg) => {
             let counter =
-                click_counter.expect("MidiRole::Click(_) requires a counter slot from Machine");
+                click_counter.expect("MidiRole::Click(_) requires a counter slot from Playhead");
             render_midi_click_block(events, cfg, counter, sink);
         }
         // Spec-surface stub; rendering lands in v0.2+.
@@ -804,7 +804,7 @@ mod tests {
         let role = MidiRole::Click(cfg);
         let evs = [ev(0)];
         let sink = TestSink::new();
-        // Plan 2026-04-25-03 contract: Machine always supplies the
+        // Plan 2026-04-25-03 contract: Playhead always supplies the
         // counter; passing None is a programmer error and panics fast.
         render_midi_channel(&common, &role, &evs, None, 0, None, &sink);
     }

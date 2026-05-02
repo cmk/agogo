@@ -27,7 +27,7 @@ use connections::fixed::u64::{I064U064, I128U064};
 /// `+16` slack absorbs swing-boundary overrun where the scheduler
 /// expands its tick window by `swing_d` ticks.
 ///
-/// Used by [`Machine`](crate::control::Machine) and `host-cpal`'s
+/// Used by [`Playhead`](crate::control::Playhead) and `host-cpal`'s
 /// callback to size their pre-allocated
 /// `Vec<ScheduledEvent>` so [`tick_stream_into`] never reallocates
 /// inside the audio callback.

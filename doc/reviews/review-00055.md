@@ -59,7 +59,7 @@ Copilot reviewed 42 out of 42 changed files in this pull request and generated 1
 | crates/core/src/sink/midi.rs | Updates module docs/comments to remove stale plan references and clarify transport layering. |
 | crates/core/src/sink/audio.rs | Updates module docs/comments to remove stale plan references and align forward-compat notes. |
 | crates/core/src/control/event.rs | Updates comments to remove stale plan references for allocation-free scheduling contract. |
-| crates/core/src/control.rs | Updates `Machine` module docs/comments to remove stale plan references and align function names. |
+| crates/core/src/control.rs | Updates `Playhead` module docs/comments to remove stale plan references and align function names. |
 | crates/core/src/channel/spec/types.rs | Updates comment roadmap wording for future routing-target tag additions. |
 | crates/core/src/channel/spec/display.rs | Updates test comment wording to remove stale plan references. |
 | crates/core/src/channel.rs | Updates comment about forward-compat routing roles/backends. |

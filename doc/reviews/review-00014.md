@@ -50,7 +50,7 @@ integration, not abstraction design.
 `MidiRtByte` (not `TransportEvent`) because Plan 14's transport FSM
 (`doc/designs/transport.md:66-68`) owns a higher-level
 `TransportEvent` enum — `{ Play, Stop, Locate, PhaseSourceStart,
-PhaseSourceStop }` — whose transitions the Machine maps down to
+PhaseSourceStop }` — whose transitions the Playhead maps down to
 these real-time bytes per buffer. `MidiRtByte` names exactly what it
 is: a member of MIDI 1.0's System Real-Time Messages category.
 

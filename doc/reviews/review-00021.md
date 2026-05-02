@@ -42,7 +42,7 @@ expresses a dotted-quarter cadence not in `Grid::ALL`.
   so `u16::MAX (65,535)` caps at ~5.8% of that with comfortable
   headroom (~36 hours at 120 BPM in 4/4). `bars × 3840` fits in u32
   with no overflow-check arithmetic.
-- **Per-channel accent and bar counters live on `Machine`,** not on
+- **Per-channel accent and bar counters live on `Playhead`,** not on
   `Channel`. `Channel` stays `Copy`. Both reset to 0 in the existing
   transport-stop arm.
 
@@ -53,7 +53,7 @@ expresses a dotted-quarter cadence not in `Grid::ALL`.
   `click_records_are_paired_on_off`,
   `click_status_byte_carries_channel`,
   `accent_lands_every_n_emitted_clicks_from_zero`,
-  `click_counter_persists_across_calls`. Plus 4 Machine-level
+  `click_counter_persists_across_calls`. Plus 4 Playhead-level
   integration tests for counter reset on stop and bars+accent
   composition.
 - `agogo-cli`: 25 passing. New: `run_accepts_mode_click_spec`,
@@ -104,7 +104,7 @@ Plan: [`doc/plans/plan-2026-04-25-03.md`](../plans/plan-2026-04-25-03.md).
 
 Four commits:
 1. `plan: mode=click metronome + bar multiplier, sprint goals` — correct prefix, opens the branch.
-2. `feat(core): T1–T4 ClickConfig types, rendering, Machine counters + bar filter` — bundles four tasks but they form a coherent unit (types + rendering + machine wiring). Acceptable.
+2. `feat(core): T1–T4 ClickConfig types, rendering, Playhead counters + bar filter` — bundles four tasks but they form a coherent unit (types + rendering + machine wiring). Acceptable.
 3. `feat(core,cli): T5 spec parser + T6 CLI smoke test` — both tasks are parser/CLI tier; fine together.
 4. `doc: Finalize plan 03 and PR description` — correct.
 
@@ -114,7 +114,7 @@ All subjects are under 72 characters. No merge commits visible.
 
 **Conventions.** `thiserror` in the lib crate, no `unsafe`, `F64F06`/`Conn` for ms→µs conversions, modern module layout (no `mod.rs`). `micro_from_ms` wraps `F64F06.ceil` correctly — not open-coded arithmetic.
 
-**`render_channel_block` always passes `Some` counter to every channel.** `Machine::on_buffer:344` passes `Some(&mut self.click_counters[idx])` regardless of whether the channel is `Click` or `MidiClock`. The `click_counter` parameter is unused in the `MidiClock` / stub arms, so this is safe. It does mean the parallel `click_counters` vec is advanced-by-never for non-Click channels — the doc comment on the struct field correctly says "Slot is meaningful only for `ChannelMode::Click(_)` channels."
+**`render_channel_block` always passes `Some` counter to every channel.** `Playhead::on_buffer:344` passes `Some(&mut self.click_counters[idx])` regardless of whether the channel is `Click` or `MidiClock`. The `click_counter` parameter is unused in the `MidiClock` / stub arms, so this is safe. It does mean the parallel `click_counters` vec is advanced-by-never for non-Click channels — the doc comment on the struct field correctly says "Slot is meaningful only for `ChannelMode::Click(_)` channels."
 
 **`accent_every = 0` double-defense.** The `accent-every` parser rejects 0 at line 211–215 and then uses `NonZeroU32::new(e).expect("accent-every > 0")` at line 343. The `expect` is unreachable code if the parser runs first; `// SAFETY:` would be a clearer comment than `// SAFETY: e > 0 enforced at parse time`, but this is cosmetic.
 
@@ -176,7 +176,7 @@ The `shift_ms` field of `ChannelSpec` can be any `f64` (including negative), but
 
 T1 (`ClickConfig` + `ChannelMode::Click`) — implemented, `all_variants_constructible` updated.
 T2 (`Channel.bar_multiplier`) — field added, all fixture builders updated.
-T3 (Machine counters + bar filter) — `bar_counters` and `click_counters` added, filter applied, both reset on stop.
+T3 (Playhead counters + bar filter) — `bar_counters` and `click_counters` added, filter applied, both reset on stop.
 T4 (`render_midi_click_block` + dispatch) — implemented including the `expect` panic contract.
 T5 (spec parser) — all keys handled, cross-key validation, Display round-trip.
 T6 (CLI smoke test) — `run_accepts_mode_click_spec` and `run_accepts_bars_on_non_t1_div` added.
@@ -187,7 +187,7 @@ Spot checks from the Verification table: all 15 listed spot checks are present a
 
 ### Risks
 
-**`render_channel_block` `expect` panic for missing counter.** The contract "Click channel must have `Some` counter" is enforced at runtime, not structurally. `Machine::on_buffer` always passes `Some(...)`, so the panic path is only reachable from test code or direct callers that forget the contract. The plan's Review section acknowledges this and defers a typed fix. Given the scope this is acceptable — but callers outside `Machine` (e.g., future integration tests constructing Click channels directly) risk the panic silently. A doc comment on `render_channel_block` already explains the precondition.
+**`render_channel_block` `expect` panic for missing counter.** The contract "Click channel must have `Some` counter" is enforced at runtime, not structurally. `Playhead::on_buffer` always passes `Some(...)`, so the panic path is only reachable from test code or direct callers that forget the contract. The plan's Review section acknowledges this and defers a typed fix. Given the scope this is acceptable — but callers outside `Playhead` (e.g., future integration tests constructing Click channels directly) risk the panic silently. A doc comment on `render_channel_block` already explains the precondition.
 
 **No TODOs or stubs in new code.** Stub variants (`Din`, `AnalogPulse`, etc.) are pre-existing; no new ones added.
 
@@ -201,7 +201,7 @@ Spot checks from the Verification table: all 15 listed spot checks are present a
 
 1. **`click_counter_advances_across_buffer_boundaries` must be a proptest.** (`out/midi.rs`) Convert `click_counter_persists_across_calls` to a `proptest!` with arbitrary split point `m in 0usize..=32`, total count `n in 0usize..=32`, and arbitrary accent period `any::<u32>().prop_filter(..., |&n| n > 0)`. This is the "buffer boundaries" invariant the plan commits to shipping.
 
-2. **`bars_filter_emits_every_nth_grid_event` must be a proptest varying divider and mode.** (`machine.rs`) Convert `bars_filter_keeps_every_nth_event` to a `proptest!` sampling `Grid::ALL` for the divider and generating both `MidiClock` and `Click` mode channels, with arbitrary `bars=N` value in `1..=16`. The plan's Verification table description explicitly requires "Strategy varies divider across `Grid::ALL` and mode across clock/click."
+2. **`bars_filter_emits_every_nth_grid_event` must be a proptest varying divider and mode.** (`control/transport.rs`) Convert `bars_filter_keeps_every_nth_event` to a `proptest!` sampling `Grid::ALL` for the divider and generating both `MidiClock` and `Click` mode channels, with arbitrary `bars=N` value in `1..=16`. The plan's Verification table description explicitly requires "Strategy varies divider across `Grid::ALL` and mode across clock/click."
 
 3. **Generator domain bounds in `arb_mode` and `arb_bars` need justification comments or expansion.** (`spec.rs:749`, `spec.rs:768`) Per CLAUDE.md: either expand `1u32..=64` → `any::<u32>().prop_filter(...)` / `1u32..=u32::MAX` and `1u16..=1000` → `1u16..=u16::MAX`, or add a comment directly above each strategy function explaining why the narrowing is safe and add a spot check at the excluded boundary.
 
@@ -216,7 +216,7 @@ Spot checks from the Verification table: all 15 listed spot checks are present a
 All three Must-fix items above were addressed before push and survived the subsequent rebase onto Plan 17's refactored base:
 
 1. ✅ `click_counter_advances_across_buffer_boundaries` is now a proptest with arbitrary split point, suffix count, and accent period (`out/midi.rs`).
-2. ✅ `bars_filter_emits_every_nth_grid_event` is now a proptest sampling `Grid::ALL` × clock/click; boundary spot check `bars_filter_huge_n_keeps_only_first_event` covers `bars=u16::MAX` (`machine.rs`).
+2. ✅ `bars_filter_emits_every_nth_grid_event` is now a proptest sampling `Grid::ALL` × clock/click; boundary spot check `bars_filter_huge_n_keeps_only_first_event` covers `bars=u16::MAX` (`control/transport.rs`).
 3. ✅ `arb_mode.accent_every` and `arb_bars` widened to full `NonZeroU32` / `NonZeroU16` domain with documented justification (`spec.rs`).
 
 Follow-up #4 (shift_ms — now `delay_ms` after rebase) was also addressed as a bonus: `arb_spec.delay_ms` widened with a comment. Follow-up #5 (typed Click/non-Click contract) remains a v0.2 debt item, captured in the plan's Review section.
@@ -243,7 +243,7 @@ Adds two composable scheduling/output features to the core + CLI: a per-channel 
 
 **Changes:**
 - Add `ChannelMode::Click(ClickConfig::Midi(MidiClickConfig{...}))` and MIDI click rendering in `out/midi.rs`.
-- Add `Channel.bar_multiplier` plus `Machine`-owned `bar_counters`/`click_counters`, applying the bars filter pre-render and resetting counters on transport stop.
+- Add `Channel.bar_multiplier` plus `Playhead`-owned `bar_counters`/`click_counters`, applying the bars filter pre-render and resetting counters on transport stop.
 - Extend `ChannelSpec` parsing/Display (`mode=click`, `note`/`vel`/`mch`, `accent-*`, `bars`) and add CLI smoke tests + plan/review docs.
 
 ### Reviewed changes
@@ -301,7 +301,7 @@ Prefer removing the unused `MIDI_NOTE_OFF` import (and this dummy const), or use
 <!-- gh-id: 3143031933 -->
 ### Copilot on [`crates/core/src/control.rs:70`](https://github.com/cmk/agogo/pull/21#discussion_r3143031933) (2026-04-26 05:29 UTC)
 
-`bar_counters` / `click_counters` are indexed in lock-step with `self.channels`, but `Machine.channels` is a public `Vec`. If any caller mutates `machine.channels` after construction (push/remove/reorder), `on_buffer` can panic due to out-of-bounds indexing or silently associate counters with the wrong channel.
+`bar_counters` / `click_counters` are indexed in lock-step with `self.channels`, but `Playhead.channels` is a public `Vec`. If any caller mutates `machine.channels` after construction (push/remove/reorder), `on_buffer` can panic due to out-of-bounds indexing or silently associate counters with the wrong channel.
 
 Consider making `channels` private (or at least `pub(crate)`), or adding a guard that enforces/repairs the invariant (e.g., a debug assertion that lengths match, or a non-allocating early error) so misuse fails fast with a clearer message.
 
