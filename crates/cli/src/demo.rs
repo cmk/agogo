@@ -1,28 +1,28 @@
 //! `agogo demo run` single-channel end-to-end pipeline.
 //!
-//! Wires together cpal audio in via `host-cpal::CpalHost`, the
+//! Wires together cpal audio in via `agogo::host::cpal::CpalHost`, the
 //! `CallbackState` hot loop, the rtrb SPSC + drain thread, and
-//! midir output via `host-midi::MidirSink`. Single-channel
+//! midir output via `agogo::host::midi::MidirSink`. Single-channel
 //! `MidiClock` for v0.1; `agogo run` generalises to N channels via
 //! `Machine`.
 //!
 //! Plan 2026-04-28-05 T7: extracted from `cli/main.rs`.
 
-use agogo_core::channel::{Channel, ChannelCommon, MidiRole};
-use agogo_core::conn::fixed::Micro;
-use agogo_core::conn::sample::{S048, SampleRate};
-use agogo_core::conn::tempo::Tempo;
-use agogo_core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-use agogo_core::control::{Machine, TransportPolicy};
-use agogo_core::sink::audio::{AudioHost, Config};
-use agogo_core::time::grid::Grid;
-use agogo_core::time::swing::SwingConfig;
-use agogo_core::time::tbase::TBase;
-use agogo_core::time::tick::PPQN;
-use agogo_host_cpal::CpalHost;
-use agogo_host_cpal::cpal::callback::CallbackState;
-use agogo_host_cpal::cpal::control::spsc;
-use agogo_host_midi::MidirSink;
+use agogo::core::channel::{Channel, ChannelCommon, MidiRole};
+use agogo::core::conn::fixed::Micro;
+use agogo::core::conn::sample::{S048, SampleRate};
+use agogo::core::conn::tempo::Tempo;
+use agogo::core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo::core::control::{Machine, TransportPolicy};
+use agogo::core::sink::audio::{AudioHost, Config};
+use agogo::core::time::grid::Grid;
+use agogo::core::time::swing::SwingConfig;
+use agogo::core::time::tbase::TBase;
+use agogo::core::time::tick::PPQN;
+use agogo::host::cpal::CpalHost;
+use agogo::host::cpal::callback::CallbackState;
+use agogo::host::cpal::control::spsc;
+use agogo::host::midi::MidirSink;
 use bpaf::Bpaf;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -204,7 +204,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     // SPSC + drain.
     let (producer, consumer) = spsc(1024);
     let dropped_handle = producer.dropped_handle();
-    let drain_sink: Arc<dyn agogo_core::sink::midi::MidiSink + Send + Sync> = sink;
+    let drain_sink: Arc<dyn agogo::core::sink::midi::MidiSink + Send + Sync> = sink;
     let drain = consumer.spawn_drain(drain_sink);
 
     // Machine + CallbackState. `agogo run` generalises this
@@ -256,7 +256,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     };
 
     // Move state into the data callback.
-    let cb = Box::new(move |io: &mut agogo_core::sink::audio::AudioIo| {
+    let cb = Box::new(move |io: &mut agogo::core::sink::audio::AudioIo| {
         state.on_buffer(io);
     });
 
@@ -266,7 +266,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         "agogo demo: running for {} ms, --bpm {:.2} --sr {} --grid {} \
          --source {} --audio-in {} --midi-out {}",
         args.duration_ms,
-        agogo_core::conn::boundary::tempo_to_f64_bpm(args.bpm),
+        agogo::core::conn::boundary::tempo_to_f64_bpm(args.bpm),
         args.sr,
         args.grid,
         args.source,

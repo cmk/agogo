@@ -8,11 +8,11 @@
 //! rather than in `main.rs`'s EOF test block (Plan
 //! 2026-04-28-05 T1).
 
-use agogo_core::conn::fixed::Pico;
-use agogo_core::conn::sample::{S048, SampleRate, SampleTime};
-use agogo_core::conn::tempo::Tempo;
-use agogo_core::control::sync::pulse::pulse_train;
-use agogo_core::control::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
+use agogo::core::conn::fixed::Pico;
+use agogo::core::conn::sample::{S048, SampleRate, SampleTime};
+use agogo::core::conn::tempo::Tempo;
+use agogo::core::control::sync::pulse::pulse_train;
+use agogo::core::control::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
 
 /// CSV row — integer fields throughout. Peak position is emitted
 /// as a single Q48.16 `bits_q48_16` value rather than split
@@ -36,7 +36,7 @@ pub struct TraceRow {
 pub fn trace(bpm: Tempo, ppq: u32, jitter: Pico, pulses: u32, seed: u64) -> Vec<TraceRow> {
     let (samples, _truth): (Vec<f32>, Vec<S048>) =
         pulse_train::<S048>(bpm, ppq, jitter, pulses, seed);
-    let pulse_rate_hz = agogo_core::conn::boundary::tempo_to_hz(bpm, ppq);
+    let pulse_rate_hz = agogo::core::conn::boundary::tempo_to_hz(bpm, ppq);
     let spacing_samples = (S048::HZ as f64 / pulse_rate_hz) as u32;
     let mut detector = PeakDetector::<S048>::new(DetectorConfig {
         threshold_q15: 16_384, // 0.5 Q0.15

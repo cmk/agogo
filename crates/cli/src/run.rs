@@ -13,13 +13,13 @@
 //! Feature-gated on `run` (= `demo + link + ctrlc`). Compiled in by
 //! `cargo build -p agogo-cli --features run`.
 //!
-//! ## `agogo_host_link::*` scoping rule (Plan 09 T3 audit)
+//! ## `agogo::host::link::*` scoping rule (Plan 09 T3 audit)
 //!
 //! The `agogo-cli` crate is meant to stay buildable without the
 //! `link` feature (`cargo build -p agogo-cli --no-default-features
 //! --features core,cpal,midi` is the regression-pinned invariant —
 //! see `.github/workflows/ci.yml` `cli-no-link` job). Module-scope
-//! `agogo_host_link::*` imports in this file are OK because the
+//! `agogo::host::link::*` imports in this file are OK because the
 //! whole module sits behind `cfg(feature = "run")` and `run` requires
 //! `link`.
 //!
@@ -29,7 +29,7 @@
 //! source arms would break the architectural separation: even though
 //! the import compiles fine here, it advertises a Link dependency to
 //! readers that internal/external mode emphatically does not have.
-//! Plan 09's T1 helper (`agogo_host_link::apply_snap_offsets`) lives
+//! Plan 09's T1 helper (`agogo::host::link::apply_snap_offsets`) lives
 //! in host-link itself for the same reason — fewer Link call sites
 //! in cli, not more.
 
@@ -37,21 +37,21 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use agogo_core::channel::Channel;
-use agogo_core::conn::boundary::tempo_to_f64_bpm;
-use agogo_core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
-use agogo_core::conn::tempo::Tempo;
-use agogo_core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-use agogo_core::control::{Machine, MachineStopHandle, TransportPolicy};
-use agogo_core::sink::audio::{AudioHost, AudioIo, Config};
-use agogo_core::time::tick::PPQN;
-use agogo_host_cpal::CpalHost;
-use agogo_host_cpal::cpal::callback::CallbackState;
-use agogo_host_cpal::cpal::control::spsc;
-use agogo_host_link::{
+use agogo::core::channel::Channel;
+use agogo::core::conn::boundary::tempo_to_f64_bpm;
+use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
+use agogo::core::conn::tempo::Tempo;
+use agogo::core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo::core::control::{Machine, MachineStopHandle, TransportPolicy};
+use agogo::core::sink::audio::{AudioHost, AudioIo, Config};
+use agogo::core::time::tick::PPQN;
+use agogo::host::cpal::CpalHost;
+use agogo::host::cpal::callback::CallbackState;
+use agogo::host::cpal::control::spsc;
+use agogo::host::link::{
     HostTimeAnchor, LinkPhaseSource, LinkSession, LinkSessionHandle, LinkWriteConfig, Quantum,
 };
-use agogo_host_midi::MidirSink;
+use agogo::host::midi::MidirSink;
 use bpaf::Bpaf;
 use std::num::NonZeroU32;
 
@@ -124,11 +124,11 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     // Parse all --ch specs eagerly (in order, so variable refs
     // resolve) before any device opens.
-    let named = match agogo_core::channel::spec::parse_channels(&args.ch) {
+    let named = match agogo::core::channel::spec::parse_channels(&args.ch) {
         Ok(named) => named,
         Err(e) => {
             let failing_entry = (0..args.ch.len()).find_map(|idx| {
-                agogo_core::channel::spec::parse_channels(&args.ch[..=idx])
+                agogo::core::channel::spec::parse_channels(&args.ch[..=idx])
                     .err()
                     .map(|_| (idx, args.ch[idx].as_str()))
             });
@@ -203,7 +203,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 fn run_with_rate<R: SampleTime + Send + 'static>(
     args: &RunArgs,
     bpm: Tempo,
-    specs: Vec<agogo_core::channel::spec::ChannelSpec>,
+    specs: Vec<agogo::core::channel::spec::ChannelSpec>,
     mut channels: Vec<Channel>,
     midi_port_request: String,
 ) -> Result<(), String> {
@@ -228,7 +228,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     // SPSC + drain thread.
     let (producer, consumer) = spsc(1024);
     let dropped_handle = producer.dropped_handle();
-    let drain_sink: Arc<dyn agogo_core::sink::midi::MidiSink + Send + Sync> = sink;
+    let drain_sink: Arc<dyn agogo::core::sink::midi::MidiSink + Send + Sync> = sink;
     let drain = consumer.spawn_drain(drain_sink);
 
     // Build PhaseSource per --source. Link case mints a
@@ -275,7 +275,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
                 // host-link itself (helper imported via the existing
                 // `LinkSession` use line) — cli code doesn't grow a
                 // new `LinkSession::*` call site for this.
-                agogo_host_link::apply_snap_offsets(&specs, &mut session, &mut channels);
+                agogo::host::link::apply_snap_offsets(&specs, &mut session, &mut channels);
                 let (lps, handle) = LinkPhaseSource::new(session);
                 (PhaseSource::Custom(Box::new(lps)), Some(handle))
             }
@@ -477,7 +477,7 @@ mod tests {
         fn parse_bpm_to_tempo_ok_iff_in_range(f in prop::num::f64::ANY) {
             let s = format!("{f}");
             let parsed: f64 = s.parse().unwrap_or(f64::NAN);
-            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= agogo_core::conn::boundary::MAX_BPM_F64;
+            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= agogo::core::conn::boundary::MAX_BPM_F64;
             prop_assert_eq!(parse_bpm_to_tempo(s).is_ok(), in_range);
         }
 
@@ -501,7 +501,7 @@ mod tests {
     #[test]
     fn parse_quantum_from_beats_accepts_4_5() {
         let got = parse_quantum_from_beats("4.5".to_string()).unwrap();
-        assert_eq!(got, agogo_host_link::f64_beats_to_quantum(4.5));
+        assert_eq!(got, agogo::host::link::f64_beats_to_quantum(4.5));
     }
 
     #[test]

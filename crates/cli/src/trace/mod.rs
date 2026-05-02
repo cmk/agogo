@@ -4,11 +4,11 @@ pub mod channel;
 pub mod midi;
 pub mod sync;
 
-use agogo_core::channel::ChannelCommon;
-use agogo_core::conn::fixed::Micro;
-use agogo_core::time::grid::Grid;
-use agogo_core::time::swing::SwingConfig;
-use agogo_core::time::tbase::TBase;
+use agogo::core::channel::ChannelCommon;
+use agogo::core::conn::fixed::Micro;
+use agogo::core::time::grid::Grid;
+use agogo::core::time::swing::SwingConfig;
+use agogo::core::time::tbase::TBase;
 use bpaf::Bpaf;
 
 use crate::parsers::{
@@ -23,13 +23,13 @@ pub enum SyncSub {
     #[bpaf(command("trace"))]
     Trace {
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo_core::conn::tempo::Tempo,
+        bpm: agogo::core::conn::tempo::Tempo,
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
         #[bpaf(long, argument("PPQ"), parse(parse_positive_u32))]
         ppq: u32,
-        #[bpaf(long, argument::<String>("JITTER_US"), parse(parse_jitter_us_to_pico), fallback(agogo_core::conn::fixed::Pico::ZERO))]
-        jitter_us: agogo_core::conn::fixed::Pico,
+        #[bpaf(long, argument::<String>("JITTER_US"), parse(parse_jitter_us_to_pico), fallback(agogo::core::conn::fixed::Pico::ZERO))]
+        jitter_us: agogo::core::conn::fixed::Pico,
         #[bpaf(long, argument("PULSES"), parse(parse_positive_u32))]
         pulses: u32,
         #[bpaf(long, argument("SEED"), fallback(1))]
@@ -46,7 +46,7 @@ pub enum ChannelSub {
     Trace {
         /// Tempo in beats per minute.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo_core::conn::tempo::Tempo,
+        bpm: agogo::core::conn::tempo::Tempo,
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
@@ -56,8 +56,8 @@ pub enum ChannelSub {
         /// Positive delay compensation in ms; clamped to `[0, 300]`
         /// inside the transform. Non-finite or negative values
         /// rejected at the CLI boundary.
-        #[bpaf(long, argument::<String>("MS"), parse(parse_ms_to_micro), fallback(agogo_core::conn::fixed::Micro::ZERO))]
-        delay: agogo_core::conn::fixed::Micro,
+        #[bpaf(long, argument::<String>("MS"), parse(parse_ms_to_micro), fallback(agogo::core::conn::fixed::Micro::ZERO))]
+        delay: agogo::core::conn::fixed::Micro,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
         frames: usize,
@@ -82,7 +82,7 @@ pub enum MidiSub {
     Trace {
         /// Tempo in beats per minute.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo_core::conn::tempo::Tempo,
+        bpm: agogo::core::conn::tempo::Tempo,
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
@@ -115,7 +115,8 @@ pub fn dispatch_sync(sub: SyncSub) -> Result<(), String> {
             pulses,
             seed,
         } => {
-            if sr != <agogo_core::conn::sample::S048 as agogo_core::conn::sample::SampleRate>::HZ {
+            if sr != <agogo::core::conn::sample::S048 as agogo::core::conn::sample::SampleRate>::HZ
+            {
                 return Err(format!(
                     "sync trace is pinned to 48 kHz this sprint (got --sr {sr}); \
                      multi-rate support deferred"
