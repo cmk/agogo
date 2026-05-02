@@ -9,7 +9,7 @@ publish = false
 [features]
 default = ["core", "host"]
 core = ["dep:core_impl"]
-host = ["dep:host_impl"]
+host = ["core", "dep:host_impl"]
 cpal = ["core", "host", "dep:cpal_impl"]
 link = ["core", "host", "dep:link_impl", "link_impl/rusty-link"]
 midi = ["core", "host", "dep:midi_impl"]
