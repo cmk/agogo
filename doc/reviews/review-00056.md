@@ -32,3 +32,13 @@ Validation:
 ---
 
 No actionable correctness issues were found; the workspace tests, warning-denied clippy, and the no-default-features CLI check pass for the reviewed diff.
+
+## Local review (2026-05-01)
+
+**Branch:** plan-2026-05-02-01
+**Commits:** 5 (origin/main..plan-2026-05-02-01)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The migrated connection markers and saturating-cast replacements preserve the existing behavior, and the workspace tests, clippy, no-default CLI check, and rustdoc warning check pass locally. I did not find any actionable correctness issues in the diff.
