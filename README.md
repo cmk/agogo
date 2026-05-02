@@ -1,8 +1,9 @@
 [![CI](https://github.com/cmk/agogo/actions/workflows/ci.yml/badge.svg)](https://github.com/cmk/agogo/actions/workflows/ci.yml)
+[![Docs](https://github.com/cmk/agogo/actions/workflows/docs.yml/badge.svg)](https://cmk.github.io/agogo/)
 
 # agogo
 
-Rust workspace for agogo.
+Rust workspace for agogo. API docs: <https://cmk.github.io/agogo/>.
 
 Agent workflow instructions live in `AGENTS.md`. `CLAUDE.md` is a
 compatibility symlink for Claude Code, and Claude-specific commands remain

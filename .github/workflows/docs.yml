@@ -1,0 +1,72 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # `-D warnings` keeps broken intra-doc links from landing silently —
+  # matches the `-D warnings` clippy gate in `ci.yml`.
+  RUSTDOCFLAGS: "-D warnings"
+
+# `deploy-pages` needs `pages: write` + `id-token: write`. Read-only
+# scope is enough for the build-only PR path.
+permissions:
+  contents: read
+
+# Don't pile up Pages deploys: a new push cancels an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
+      # ALSA headers: not needed by the four current workspace
+      # members but keeps this job future-proof if cpal/midi join.
+      - name: install ALSA dev headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # `--lib` skips bin targets — `agogo-cli` defines a `[[bin]]`
+      # named `agogo` that otherwise collides with the facade lib
+      # crate's doc output path (cargo issue #6313).
+      - name: cargo doc
+        run: cargo doc --workspace --no-deps --lib
+      # Pages serves whatever is at the artifact root; a redirect
+      # lands the bare domain on the facade crate's index.
+      - name: write top-level redirect
+        run: |
+          cat > target/doc/index.html <<'EOF'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>agogo — API docs</title>
+          <meta http-equiv="refresh" content="0; url=agogo/index.html">
+          <link rel="canonical" href="agogo/index.html">
+          <p><a href="agogo/index.html">Redirecting to the agogo crate docs…</a></p>
+          EOF
+      - name: upload pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
