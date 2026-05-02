@@ -142,14 +142,16 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     };
 
     // Extract target-specific device requests before consuming specs.
-    let midi_port_request = named
-        .iter()
-        .find(|(_, spec)| matches!(spec.role, ChannelSpecRole::Midi(_)))
-        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()));
-    let audio_output_request = named
-        .iter()
-        .find(|(_, spec)| matches!(spec.role, ChannelSpecRole::Audio(_)))
-        .map(|(_, spec)| spec.out.clone().unwrap_or_else(|| "default".to_string()));
+    let midi_port_request = single_target_output_request(
+        &named,
+        |role| matches!(role, ChannelSpecRole::Midi(_)),
+        "MIDI",
+    )?;
+    let audio_output_request = single_target_output_request(
+        &named,
+        |role| matches!(role, ChannelSpecRole::Audio(_)),
+        "audio",
+    )?;
 
     // Keep specs alongside channels so the link branch in
     // `run_with_rate` can call `apply_snap_offsets` after constructing
@@ -241,6 +243,35 @@ fn channel_mix(channels: &[Channel]) -> ChannelMix {
             .iter()
             .any(|ch| matches!(ch, Channel::Audio { .. })),
     }
+}
+
+fn single_target_output_request(
+    named: &[(String, agogo::core::channel::spec::ChannelSpec)],
+    mut matches_target: impl FnMut(&ChannelSpecRole) -> bool,
+    target_name: &str,
+) -> Result<Option<String>, String> {
+    let mut request: Option<String> = None;
+    for (id, spec) in named {
+        if !matches_target(&spec.role) {
+            continue;
+        }
+        let out = spec.out.clone().unwrap_or_else(|| "default".to_string());
+        match &request {
+            Some(existing) if existing != &out => {
+                return Err(format!(
+                    "multiple {target_name} output devices requested: `{existing}` and `{out}` \
+                     (channel `{id}`); use one shared out= until multi-device routing exists"
+                ));
+            }
+            Some(_) => {}
+            None => request = Some(out),
+        }
+    }
+    Ok(request)
+}
+
+fn config_device_name(request: &str) -> Option<String> {
+    (request != "default").then(|| request.to_string())
 }
 
 fn run_with_rate<R: SampleTime + Send + 'static>(
@@ -388,7 +419,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
             host,
             Config {
                 input_device: None,
-                output_device: Some(request.clone()),
+                output_device: config_device_name(&request),
                 sample_rate: args.sr,
                 buffer_frames: args.buffer_frames,
                 input_channels: 0,
@@ -406,7 +437,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
         (
             host,
             Config {
-                input_device: Some(args.audio_in.clone()),
+                input_device: config_device_name(&args.audio_in),
                 output_device: None,
                 sample_rate: args.sr,
                 buffer_frames: args.buffer_frames,
@@ -678,6 +709,41 @@ mod tests {
                 has_audio: true,
             }
         );
+    }
+
+    #[test]
+    fn run_rejects_multiple_midi_outputs_until_routing_exists() {
+        let args = args_with(
+            vec!["dev=midi,grid=t4,out=midi-a", "dev=midi,grid=t8,out=midi-b"],
+            48_000,
+        );
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("multiple MIDI output devices") && err.contains("midi-a"),
+            "expected multi-MIDI-output error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_rejects_multiple_audio_outputs_until_routing_exists() {
+        let args = args_with(
+            vec![
+                "dev=audio,mode=click,grid=t4,out=speakers-a",
+                "dev=audio,mode=click,grid=t8,out=speakers-b",
+            ],
+            48_000,
+        );
+        let err = run(&args).unwrap_err();
+        assert!(
+            err.contains("multiple audio output devices") && err.contains("speakers-a"),
+            "expected multi-audio-output error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn config_device_name_preserves_default_as_none() {
+        assert_eq!(config_device_name("default"), None);
+        assert_eq!(config_device_name("named"), Some("named".to_string()));
     }
 
     /// Plan 22 (audit P4): post-field-removal, every spec is
