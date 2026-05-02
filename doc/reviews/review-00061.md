@@ -73,8 +73,72 @@ The weakened invariant (intra-branch transient red OK) accurately describes the 
 ### Recommendations
 
 **Must fix before push:**
-1. `.githooks/pre-commit` line 49: change `cargo fmt --all -- --check` to `cargo fmt -p agogo-core -p agogo-cli -- --check` per MEMORY.md.
+1. ~~`.githooks/pre-commit` line 49: change `cargo fmt --all -- --check` to `cargo fmt -p agogo-core -p agogo-cli -- --check` per MEMORY.md.~~ **Resolved** in commit `3b6240b` (round commit on this branch).
 
 **Follow-up (not blocking push):**
 2. `remote_sha` unused in pre-push loop. Cosmetic.
 3. Spot-check table omits `git commit --amend`. Low priority; standard git behavior.
+
+<!-- gh-id: 3176477592 -->
+### Copilot on [`AGENTS.md:659`](https://github.com/cmk/agogo/pull/61#discussion_r3176477592) (2026-05-02 09:59 UTC)
+
+The documentation for Layer 2 is now stale: this list still says pre-commit runs `cargo fmt --all`, but the hook in `.githooks/pre-commit` was changed to the narrower `cargo fmt -p agogo-core -p agogo-cli -- --check`. Leaving the old command here will send contributors back to the repo-wide fmt scope that this PR is explicitly trying to avoid.
+
+<!-- gh-id: 4214815489 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-02 09:59 UTC](https://github.com/cmk/agogo/pull/61#pullrequestreview-4214815489))
+
+## Pull request overview
+
+This PR splits the local Git hook pipeline so cheap checks still run on every commit while the expensive workspace test/lint suite runs once per push. In this codebase, that change is meant to preserve the repo’s “green before publication” workflow while reducing the per-commit cost during normal branch iteration.
+
+**Changes:**
+- Trim `.githooks/pre-commit` down to the fast deterministic checks and scope the fmt check to the workspace crates.
+- Add a new `.githooks/pre-push` hook that runs `cargo test --workspace` and `cargo clippy --all-targets -- -D warnings`, skipping delete-only/no-op pushes.
+- Update project documentation and sprint/review records to describe the new pre-commit / pre-push split and the revised “each pushed commit is green” convention.
+
+### Reviewed changes
+
+Copilot reviewed 5 out of 5 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| `doc/reviews/review-00061.md` | Adds the PR review record summarizing the hook split and local review outcome. |
+| `doc/plans/plan-2026-05-02-07.md` | Adds the sprint plan describing the motivation, tasks, verification, and review notes for the hook split. |
+| `AGENTS.md` | Updates contributor guidance and repository conventions to reflect the new hook layering and per-push green invariant. |
+| `.githooks/pre-push` | Introduces the new expensive push-time gate for tests and clippy. |
+| `.githooks/pre-commit` | Removes the expensive checks, keeps the fast checks, and narrows the fmt scope. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3176477602 -->
+### Copilot on [`doc/plans/plan-2026-05-02-07.md:39`](https://github.com/cmk/agogo/pull/61#discussion_r3176477602) (2026-05-02 09:59 UTC)
+
+This plan still records `cargo fmt --all -- --check` as both the intended pre-commit command and a passing build gate, but the implementation was updated in this PR to use the narrower package-scoped fmt command. Because the Review section later says that drift was fixed, these earlier sections now contradict the final state of the branch.
+
+
+<!-- gh-id: 3176477607 -->
+### Copilot on [`doc/reviews/review-00061.md:58`](https://github.com/cmk/agogo/pull/61#discussion_r3176477607) (2026-05-02 09:59 UTC)
+
+This review record contradicts the final code: it says `.githooks/pre-commit` still runs `cargo fmt --all -- --check` and even lists that as a must-fix item, but the hook in this PR has already been updated to the package-scoped fmt command. Since this file is meant to capture the completed review outcome, it should be updated to reflect that the issue was resolved instead of leaving a stale blocker in the final document.
+
+<!-- gh-id: 3176491423 -->
+#### ↳ cmk ([2026-05-02 10:16 UTC](https://github.com/cmk/agogo/pull/61#discussion_r3176491423))
+
+Fixed — AGENTS.md:659 now lists the scoped command and explains the reason inline. Same edit applied to the run-it-yourself instruction one paragraph below.
+
+<!-- gh-id: 3176491512 -->
+#### ↳ cmk ([2026-05-02 10:16 UTC](https://github.com/cmk/agogo/pull/61#discussion_r3176491512))
+
+Fixed — T1's 'Keep' list and the build-gates entry both now show the scoped command. The Drift entry in the Review section already documents the original-vs-fixed transition.
+
+<!-- gh-id: 3176491616 -->
+#### ↳ cmk ([2026-05-02 10:16 UTC](https://github.com/cmk/agogo/pull/61#discussion_r3176491616))
+
+Fixed — Recommendations item 1 is now struck-through and annotated **Resolved** with the round-commit SHA (3b6240b). The body of the Code Quality finding already noted the fix; the contradiction was in the trailing list.
