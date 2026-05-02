@@ -655,12 +655,16 @@ commit was invoked — chained Bash, terminal, IDE, anything. This
 is the unbypassable safety net at commit time. Runs the cheap
 chain:
 
-1. `cargo fmt --all -- --check` — fmt drift aborts the commit.
-   Run `cargo fmt --all` to fix. (Was warn-only previously; flipped
-   to blocking after a real CI fmt failure in a sibling project that
-   local tooling let through. Keeping the fmt step blocking forces
-   drift to be fixed at commit time when the cost is one
-   `cargo fmt --all` invocation.)
+1. `cargo fmt -p agogo-core -p agogo-cli -- --check` — fmt drift
+   aborts the commit. Run `cargo fmt -p agogo-core -p agogo-cli`
+   to fix. Scope is explicit (not `--all`) because the sibling
+   `connections` path-dep is reachable from this workspace and
+   we don't want to fail on its formatting state. (The fmt step
+   was warn-only previously; flipped to blocking after a real CI
+   fmt failure in a sibling project that local tooling let
+   through. Keeping the fmt step blocking forces drift to be
+   fixed at commit time when the cost is one `cargo fmt`
+   invocation.)
 2. `scripts/check-pii.sh` — grep the staged diff for absolute
    user-home paths (`/Users/...` on macOS, `/home/...` on Linux),
    private-key headers, and common API-token shapes. Fail fast on

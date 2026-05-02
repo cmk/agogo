@@ -13,9 +13,9 @@
 #     cargo clippy, run once per push instead of once per commit).
 #
 # This file holds the cheap, deterministic checks (sub-second
-# combined) that catch the highest-leverage mistakes at the
-# moment of staging: fmt drift, leaked PII, naked floats outside
-# the allowlist, layer violations. Runs on every commit,
+# combined) that catch the highest-leverage mistakes at commit
+# time, after staging: fmt drift, leaked PII, naked floats
+# outside the allowlist, layer violations. Runs on every commit,
 # regardless of how the commit was invoked (agent, terminal, IDE)
 # — this is the unbypassable safety net at commit time.
 #
