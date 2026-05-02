@@ -97,7 +97,7 @@ impl<R: SampleTime> PhaseSource<R> {
     /// Feed a block of audio samples into the clock. No-op for
     /// `Internal`; routes to detector → PLL for `External`; delegates
     /// to the `PhaseSourceImpl` for `Custom`. Silent blocks leave the
-    /// PLL untouched — [`phase_at_sample`] projects analytically from
+    /// PLL untouched — [`Self::phase_at_sample`] projects analytically from
     /// the last observed pulse.
     pub fn feed_samples(&mut self, samples: &[f32], start: u64) {
         match self {

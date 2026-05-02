@@ -9,7 +9,7 @@ pub(crate) fn parse_positive_u32(v: u32) -> Result<u32, String> {
     }
 }
 
-/// bpaf parser: --delay <ms-as-f64> -> Micro at the argv-handler
+/// bpaf parser: `--delay <ms-as-f64>` -> Micro at the argv-handler
 /// boundary. Open-codes the ms->s shift inside the parser body:
 /// `F064FD06` interprets f64 as canonical seconds, and there is no
 /// `Conn<f64-as-ms, FD06>` rung.
@@ -32,7 +32,7 @@ pub(crate) fn parse_ms_to_micro(s: String) -> Result<agogo_core::conn::fixed::Mi
     }
 }
 
-/// bpaf parser: --jitter-us <us-as-f64> -> Pico at the argv-handler
+/// bpaf parser: `--jitter-us <us-as-f64>` -> Pico at the argv-handler
 /// boundary. Same argv-boundary rationale as `parse_ms_to_micro`:
 /// `F064FD12` interprets f64 as seconds, so the us->s shift is
 /// open-coded inside the parser body.

@@ -265,7 +265,7 @@ qa_variant!(T512P, qa_t512p_ceil, qa_t512p_floor);
 
 /// Quantise a `Tick` to the nearest `Time` on the `g` grid, keeping
 /// the result on that grid (no further nicest-coarsening, unlike
-/// [`ticktime`]). `fn` pointers can't close over `g`, so dispatch is a
+/// [`TICKTIME`]). `fn` pointers can't close over `g`, so dispatch is a
 /// per-const `match`.
 pub fn quantize_at(g: Grid) -> RuntimeConn<Tick, Time> {
     if g == Grid::T1 {

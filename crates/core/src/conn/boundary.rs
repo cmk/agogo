@@ -3,8 +3,8 @@
 //!
 //! Moved here from `crate::fxp` (Plan 2026-04-28-03 T5) — these are the
 //! `f64 ↔ fxp` conversion seam, alongside the conn-shaped value types
-//! [`Phase`](crate::conn::phase::Phase),
-//! [`Tempo`](crate::conn::tempo::Tempo), and the
+//! [`Phase`],
+//! [`Tempo`], and the
 //! [`fixed`](crate::conn::fixed) / [`float`](crate::conn::float) /
 //! [`sample`](crate::conn::sample) ladders. (Plan 2026-04-29-01 T2
 //! collapsed these into one parent so the layering rule can mark
