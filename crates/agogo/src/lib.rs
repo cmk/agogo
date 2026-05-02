@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Public facade namespace for the agogo workspace.
 //!
@@ -10,6 +11,7 @@
 //! - [`host`] for host-side drivers and optional backends.
 
 #[cfg(feature = "core")]
+#[cfg_attr(docsrs, doc(cfg(feature = "core")))]
 pub mod core {
     //! Core scheduling, control, sink, and time primitives.
 
@@ -17,12 +19,14 @@ pub mod core {
 }
 
 #[cfg(feature = "host")]
+#[cfg_attr(docsrs, doc(cfg(feature = "host")))]
 pub mod host {
     //! Host-side drivers and optional host backends.
 
     pub use host_impl::*;
 
     #[cfg(feature = "cpal")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "cpal")))]
     pub mod cpal {
         //! cpal audio backend.
 
@@ -30,6 +34,7 @@ pub mod host {
     }
 
     #[cfg(feature = "link")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "link")))]
     pub mod link {
         //! Ableton Link backend.
 
@@ -37,6 +42,7 @@ pub mod host {
     }
 
     #[cfg(feature = "midi")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "midi")))]
     pub mod midi {
         //! midir MIDI backend.
 
