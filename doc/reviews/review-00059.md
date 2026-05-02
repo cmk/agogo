@@ -2,7 +2,12 @@
 
 ## Summary
 
-Two-commit branch.
+Two pieces of work, one PR — a `feat:` commit for the docs
+workflow and README link, plus a `debt:` commit porting the
+`scripts/check-layers.sh` improvements from the sibling
+`stdio-core` repo. (A `plan:` commit opens the branch and a
+`doc:` commit finalizes it; later commits address review
+feedback.)
 
 **`feat: Publish workspace rustdoc to GitHub Pages`** adds
 `.github/workflows/docs.yml`. On every push to `main` the workflow
@@ -144,3 +149,69 @@ falls outside plan scope.
 - The `<<'EOF'` heredoc in `docs.yml` writes leading whitespace
   into the generated `index.html`. Cosmetic only; switch to
   `<<-'EOF'` + tab-indent if desired in a later pass.
+
+<!-- gh-id: 3176358981 -->
+### Copilot on [`scripts/check-layers.sh:151`](https://github.com/cmk/agogo/pull/59#discussion_r3176358981) (2026-05-02 07:56 UTC)
+
+The new grouped-import parser still misses valid Rust nested groups such as `use crate::{time::{A, B}, control::C};`. `emit_import_tops()` captures only up to the first `}` (`[^}]*`), so any later top-level imports in the same statement are dropped and can bypass the layer check.
+
+
+<!-- gh-id: 4214714670 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-02 07:56 UTC](https://github.com/cmk/agogo/pull/59#pullrequestreview-4214714670))
+
+## Pull request overview
+
+This PR adds a GitHub Pages rustdoc publish workflow for the workspace, updates repository docs to point at the published API docs, and strengthens the core layering gate in `scripts/check-layers.sh` so it catches more import forms.
+
+**Changes:**
+- Add `.github/workflows/docs.yml` to build workspace rustdoc on PRs and deploy it to GitHub Pages from `main`.
+- Update `README.md` and `AGENTS.md` to reference the published docs site and describe the expanded layering checks.
+- Port `scripts/check-layers.sh` improvements to detect `pub use` and grouped imports, plus validate `//! layer:` sentinels.
+
+### Reviewed changes
+
+Copilot reviewed 6 out of 6 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| `scripts/check-layers.sh` | Extends the layer-checking script to parse more import patterns and validate module sentinels. |
+| `doc/reviews/review-00059.md` | Adds a review record summarizing the PR, its validation, and follow-up notes. |
+| `doc/plans/plan-2026-05-02-04.md` | Adds the implementation plan covering the docs workflow, README update, and script port. |
+| `README.md` | Adds a Docs badge and direct API docs link. |
+| `AGENTS.md` | Updates contributor guidance to reflect the stricter layer-checking behavior. |
+| `.github/workflows/docs.yml` | Adds the GitHub Actions workflow that builds and deploys rustdoc to GitHub Pages. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3176358993 -->
+### Copilot on [`doc/reviews/review-00059.md:5`](https://github.com/cmk/agogo/pull/59#discussion_r3176358993) (2026-05-02 07:56 UTC)
+
+nit: The file now contradicts itself about how many commits are on the branch. The summary says "Two-commit branch", but the local-review section below records `Commits: 4 (origin/main..plan-2026-05-02-04)`. One of these needs updating so the review record stays factually consistent.
+
+
+<!-- gh-id: 3176358998 -->
+### Copilot on [`doc/plans/plan-2026-05-02-04.md:20`](https://github.com/cmk/agogo/pull/59#discussion_r3176358998) (2026-05-02 07:56 UTC)
+
+nit: This plan still describes the branch as shipping "two commits", but the review file added in the same PR records four commits on `origin/main..plan-2026-05-02-04`. Please update the plan text so the branch history documented in `doc/` is internally consistent.
+
+<!-- gh-id: 3176376210 -->
+#### ↳ cmk ([2026-05-02 08:14 UTC](https://github.com/cmk/agogo/pull/59#discussion_r3176376210))
+
+Fixed — switched from `[^}]*` to greedy `(.*)` plus an inner-group collapse loop. Bash has no recursive regex so the function now strips innermost `{...}` blocks iteratively until none remain, then splits the residual depth-0 commas. Smoke-tested with `use crate::{time::{Tempo, Phase}, control::sync::pll::Pll};` and the gate now flags both `time` and `control`.
+
+<!-- gh-id: 3176376324 -->
+#### ↳ cmk ([2026-05-02 08:14 UTC](https://github.com/cmk/agogo/pull/59#discussion_r3176376324))
+
+Fixed — replaced "Two-commit branch" with prose describing the `plan: / feat: / debt: / doc:` quartet (plus any review-round commits on top), so the Summary stays consistent with the local-review section.
+
+<!-- gh-id: 3176376458 -->
+#### ↳ cmk ([2026-05-02 08:14 UTC](https://github.com/cmk/agogo/pull/59#discussion_r3176376458))
+
+Fixed — updated the dependency-graph note to spell out the `feat: / debt:` split for T1+T2 vs T3 and the full commit quartet, instead of the misleading "two commits" shorthand.

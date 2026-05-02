@@ -139,8 +139,17 @@ emit_import_tops() {
     local line_body="$1"
     local rest item
 
-    if [[ "$line_body" =~ use[[:space:]]+(crate|agogo_core)::\{([^}]*)\} ]]; then
+    if [[ "$line_body" =~ use[[:space:]]+(crate|agogo_core)::\{(.*)\} ]]; then
+        # Greedy `.*` captures from the first `{` to the LAST `}`,
+        # so the whole outer brace body is in `rest`. Bash has no
+        # recursive regex, so collapse innermost `{...}` blocks
+        # iteratively until none remain — leaves only the
+        # depth-0 commas, which are the ones that separate the
+        # top-level imports we care about.
         rest="${BASH_REMATCH[2]}"
+        while [[ "$rest" =~ \{[^{}]*\} ]]; do
+            rest="${rest//${BASH_REMATCH[0]}/}"
+        done
         rest="${rest//,/ }"
         for item in $rest; do
             item="${item%%::*}"
