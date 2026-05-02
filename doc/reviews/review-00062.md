@@ -35,3 +35,27 @@ Verification:
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo clippy -p agogo-cli --features run --all-targets -- -D warnings`
 - `cargo clippy --manifest-path crates/host-cpal/Cargo.toml --all-targets -- -D warnings`
+
+## Local review (2026-05-02)
+
+**Branch:** plan-2026-05-02-06
+**Commits:** 3 (origin/main..plan-2026-05-02-06 before this review note)
+**Reviewer:** Codex in-session local-only review
+
+---
+
+The canonical `scripts/local_review.sh` transition could not run in
+this environment: it invokes `codex review --base origin/main`, and the
+sandbox rejected that external review call because it would disclose
+private repository context to the Codex review service. I did not try to
+bypass that restriction.
+
+Local-only review covered the target-selection path in `agogo run`, the
+cpal output-only callback path, parser cross-key validation, and the
+stateless audio renderer. No must-fix issues were found.
+
+Residual risk: the generated click renderer is intentionally stateless,
+so a click that starts near the end of one callback buffer is truncated
+instead of continuing into the next buffer. This is documented in the
+plan review section and is acceptable for the current test feature; WAV
+playback or productized sound shaping should revisit it.
