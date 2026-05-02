@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = ["core", "host"]
 core = ["dep:core_impl"]
@@ -20,3 +24,6 @@ host_impl = { package = "agogo-host", path = "../host", optional = true }
 cpal_impl = { package = "agogo-host-cpal", path = "../host-cpal", optional = true }
 link_impl = { package = "agogo-host-link", path = "../host-link", optional = true }
 midi_impl = { package = "agogo-host-midi", path = "../host-midi", optional = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(docsrs)"] }
