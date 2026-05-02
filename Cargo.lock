@@ -3,13 +3,21 @@
 version = 4
 
 [[package]]
-name = "agogo-cli"
+name = "agogo"
 version = "0.1.0"
 dependencies = [
  "agogo-core",
+ "agogo-host",
  "agogo-host-cpal",
  "agogo-host-link",
  "agogo-host-midi",
+]
+
+[[package]]
+name = "agogo-cli"
+version = "0.1.0"
+dependencies = [
+ "agogo",
  "bpaf",
  "ctrlc",
  "proptest",

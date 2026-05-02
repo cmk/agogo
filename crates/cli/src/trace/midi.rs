@@ -7,13 +7,13 @@
 //!
 //! Plan 2026-04-28-05 T6: extracted from `cli/main.rs`.
 
-use agogo_core::channel::MidiRole;
-use agogo_core::conn::fixed::Micro;
-use agogo_core::conn::tempo::Tempo;
-use agogo_core::control::event::tick_stream;
-use agogo_core::sink::midi::{MidiRtByte, TestSink, render_midi_channel};
-use agogo_core::time::conn::SampleTickConn;
-use agogo_core::time::tick::PPQN;
+use agogo::core::channel::MidiRole;
+use agogo::core::conn::fixed::Micro;
+use agogo::core::conn::tempo::Tempo;
+use agogo::core::control::event::tick_stream;
+use agogo::core::sink::midi::{MidiRtByte, TestSink, render_midi_channel};
+use agogo::core::time::conn::SampleTickConn;
+use agogo::core::time::tick::PPQN;
 
 use super::{checked_trace_frames, parse_grid_arg, straight_common, validate_audio_rate};
 
@@ -83,11 +83,11 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo_core::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP};
+    use agogo::core::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP};
 
     fn base_args() -> TraceArgs {
         TraceArgs {
-            bpm: agogo_core::conn::tempo::Tempo::from_bpm_integer(120),
+            bpm: agogo::core::conn::tempo::Tempo::from_bpm_integer(120),
             sr: 48_000,
             grid: "t4".to_string(),
             frames: 24_000,

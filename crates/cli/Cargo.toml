@@ -8,10 +8,10 @@ publish = false
 
 [features]
 default = ["core"]
-core = ["dep:agogo-core"]
-link = ["core", "dep:agogo-host-link", "agogo-host-link/rusty-link"]
-cpal = ["dep:agogo-host-cpal"]
-midi = ["dep:agogo-host-midi"]
+core = ["dep:agogo", "agogo/core", "agogo/host"]
+link = ["core", "agogo/link"]
+cpal = ["dep:agogo", "agogo/cpal"]
+midi = ["dep:agogo", "agogo/midi"]
 # `demo` activates the `agogo demo` subcommand: cpal audio in +
 # midir MIDI out + the SPSC drain thread + CallbackState pipeline.
 demo = ["core", "cpal", "midi"]
@@ -22,15 +22,11 @@ demo = ["core", "cpal", "midi"]
 run = ["demo", "link", "dep:ctrlc"]
 
 [dependencies]
-agogo-core = { workspace = true, optional = true }
-# Direct path deps (not workspace deps) — `crates/host-link`,
-# `crates/host-cpal`, and `crates/host-midi` live outside
-# `[workspace].members` so CI doesn't resolve their platform
-# system deps (libasound, CoreAudio, WASAPI) unless their feature
-# is explicitly requested.
-agogo-host-cpal = { path = "../host-cpal", optional = true }
-agogo-host-link = { path = "../host-link", optional = true }
-agogo-host-midi = { path = "../host-midi", optional = true }
+agogo = { path = "../agogo", default-features = false, optional = true }
+# Optional backend features flow through the `agogo` facade. The
+# backend crates still live outside `[workspace].members`, so CI
+# doesn't resolve their platform system deps (libasound, CoreAudio,
+# WASAPI) unless the matching feature is explicitly requested.
 bpaf = { workspace = true }
 ctrlc = { version = "3", optional = true }
 

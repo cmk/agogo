@@ -7,11 +7,11 @@
 //!
 //! Plan 2026-04-28-05 T2: extracted from `cli/main.rs`.
 
-use agogo_core::conn::fixed::Micro;
-use agogo_core::conn::tempo::Tempo;
-use agogo_core::control::tick_stream;
-use agogo_core::time::conn::SampleTickConn;
-use agogo_core::time::tick::PPQN;
+use agogo::core::conn::fixed::Micro;
+use agogo::core::conn::tempo::Tempo;
+use agogo::core::control::tick_stream;
+use agogo::core::time::conn::SampleTickConn;
+use agogo::core::time::tick::PPQN;
 
 use super::{checked_trace_frames, parse_grid_arg, straight_common, validate_audio_rate};
 

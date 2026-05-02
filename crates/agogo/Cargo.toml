@@ -1,0 +1,22 @@
+[package]
+name = "agogo"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["core", "host"]
+core = ["dep:agogo-core"]
+host = ["dep:agogo-host"]
+cpal = ["core", "host", "dep:agogo-host-cpal"]
+link = ["core", "host", "dep:agogo-host-link", "agogo-host-link/rusty-link"]
+midi = ["core", "host", "dep:agogo-host-midi"]
+
+[dependencies]
+agogo-core = { workspace = true, optional = true }
+agogo-host = { path = "../host", optional = true }
+agogo-host-cpal = { path = "../host-cpal", optional = true }
+agogo-host-link = { path = "../host-link", optional = true }
+agogo-host-midi = { path = "../host-midi", optional = true }
