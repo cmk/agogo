@@ -1,14 +1,16 @@
-//! Galois connections for `Tick`, `Time`, `Rational`, and `Grid`.
+//! Marker-backed Galois connections for `Tick`, `Time`, `Rational`,
+//! and `Grid`.
 //!
-//! Five `Conn<A, B>` values port the Haskell Cirklon connections:
+//! Four static marker values plus one runtime-selected family port the
+//! Haskell Cirklon connections:
 //!
-//! | Rust            | Haskell      | Shape                        |
-//! |-----------------|--------------|------------------------------|
-//! | [`TICKTIME`]    | `ticks`      | `Conn<Tick, Time>`           |
-//! | [`WHOLTICK`]    | `ratTick`    | `Conn<Whole, Tick>`          |
-//! | [`quantize_at`] | `quantizeAt` | `Conn<Tick, Time>` per Grid  |
-//! | [`TIMETIME`]    | `time`       | `Conn<(Time, Time), Time>`   |
-//! | [`GRIDGRID`]    | `tbase`      | `Conn<(Grid, Grid), Grid>`   |
+//! | Rust            | Haskell      | Public API                                |
+//! |-----------------|--------------|-------------------------------------------|
+//! | [`TICKTIME`]    | `ticks`      | marker with `ViewL<Tick, Time>` + `ViewR<Tick, Time>` |
+//! | [`WHOLTICK`]    | `ratTick`    | marker with `ViewL<Whole, Tick>` + `ViewR<Whole, Tick>` |
+//! | [`quantize_at`] | `quantizeAt` | returns `RuntimeConn<Tick, Time>` for one `Grid` |
+//! | [`TIMETIME`]    | `time`       | marker with `ViewL<(Time, Time), Time>` + `ViewR<(Time, Time), Time>` |
+//! | [`GRIDGRID`]    | `tbase`      | marker with `ViewL<(Grid, Grid), Grid>` + `ViewR<(Grid, Grid), Grid>` |
 //!
 //! Naming: per CLAUDE.md, Conn accessors are 8-char identifiers
 //! built from two 4-char side names. Single-type-side Conns
@@ -18,12 +20,13 @@
 //! exempt from the 8-char rule, since each instance is named by the
 //! parameter `g: Grid`.
 //!
-//! All use bare `fn` pointers through kind-tagged
-//! [`connections::conn::ConnL`] / [`connections::conn::ConnR`] views —
-//! no closure capture, tempo-independent. Static connections are
-//! zero-sized marker values matching upstream's triple API.
-//! `quantize_at` stays a function because its inner / ceil / floor
-//! pointers vary per `Grid` value.
+//! The four static connections are zero-sized marker values matching
+//! upstream's triple API. Their inherent `.ceil()`, `.inner()`, and
+//! `.floor()` methods forward to kind-tagged
+//! [`connections::conn::ConnL`] / [`connections::conn::ConnR`] views
+//! built from bare `fn` pointers. `quantize_at` returns
+//! [`RuntimeConn`] because its inner / ceil / floor pointers vary per
+//! `Grid` value.
 //!
 //! **Orientation of `timetime` and `gridgrid`.** These are lattice
 //! connections: the pair side carries the divisibility product order,
@@ -113,7 +116,7 @@ impl<A: Copy, B: Copy> RuntimeConn<A, B> {
     }
 }
 
-// ── ticktime: Conn<Tick, Time> ───────────────────────────────────
+// ── ticktime: Tick ↔ Time marker ─────────────────────────────────
 
 /// Precondition: `n.0 ≤ u32::MAX × Grid::T1.tick_count()`. The
 /// `ticktime` Conn unwraps `from_ticks` here because `Conn::ceil` is
@@ -146,7 +149,7 @@ def_conn_marker!(
     ticktime_floor
 );
 
-// ── wholtick: Conn<Whole, Tick> ──────────────────────────────────
+// ── wholtick: Whole ↔ Tick marker ────────────────────────────────
 
 fn tpw_rational() -> Rational64 {
     Rational64::new(TPW, 1)
@@ -191,7 +194,7 @@ def_conn_marker!(
     wholtick_floor
 );
 
-// ── quantize_at: Conn<Tick, Time> per Grid ───────────────────────
+// ── quantize_at: RuntimeConn<Tick, Time> per Grid ────────────────
 
 fn qa_inner(t: Time) -> Tick {
     time_to_tick(t)
@@ -345,7 +348,7 @@ pub fn quantize_at(g: Grid) -> RuntimeConn<Tick, Time> {
     }
 }
 
-// ── timetime: Conn<(Time, Time), Time> ───────────────────────────
+// ── timetime: (Time, Time) ↔ Time marker ─────────────────────────
 
 fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
     while b != 0 {
@@ -404,7 +407,7 @@ def_conn_marker!(
     timetime_floor
 );
 
-// ── gridgrid: Conn<(Grid, Grid), Grid> ───────────────────────────
+// ── gridgrid: (Grid, Grid) ↔ Grid marker ─────────────────────────
 
 fn gridgrid_ceil(ab: (Grid, Grid)) -> Grid {
     let (a, b) = ab;
