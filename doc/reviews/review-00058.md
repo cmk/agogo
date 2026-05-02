@@ -33,3 +33,13 @@ facade's stable convenience import set is clearer from downstream usage.
 - `cargo test -p agogo --features cpal,link,midi --quiet`
 - `cargo clippy --all-targets --quiet -- -D warnings`
 - `RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p agogo --all-features --no-deps`
+
+## Local review (2026-05-02)
+
+**Branch:** plan-2026-05-02-03
+**Commits:** 3 (origin/main..plan-2026-05-02-03)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The changes are limited to docs.rs/Rustdoc feature metadata and corresponding review/plan documentation. The added cfg handling is consistent with docs.rs nightly builds and does not alter runtime API or feature wiring.
