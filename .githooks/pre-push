@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# .githooks/pre-push — git-side pre-push gate (expensive checks).
+#
+# Runs `cargo test --workspace` + `cargo clippy --all-targets`
+# once per push, instead of once per commit. The fast checks
+# (fmt, PII, floats, layers) live in `.githooks/pre-commit` and
+# already ran when each local commit was created.
+#
+# Why split: `cargo test --workspace` + `cargo clippy
+# --all-targets` cost ~50s combined on this workspace. Charging
+# that to every intra-branch commit is wasteful when only the
+# pushed state needs to be green for CI / bisect purposes.
+#
+# Stdin contract (from githooks(5)):
+#   <local-ref> <local-sha> <remote-ref> <remote-sha>
+# One line per ref being pushed. A delete looks like
+# `(delete) 0000000000000000000000000000000000000000 <remote-ref>
+# <remote-sha>`. We only fire the suite if at least one ref is
+# being pushed with a non-zero local sha — otherwise the push is
+# a delete-only / no-op and there's no new code to verify.
+#
+# Activate with:
+#
+#     git config core.hooksPath .githooks
+#
+# Bypass with `git push --no-verify` only when explicitly
+# authorized.
+#
+# Exit codes follow git convention: nonzero aborts the push.
+
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+step() {
+  printf 'pre-push: %s\n' "$*"
+}
+
+zero_sha="0000000000000000000000000000000000000000"
+have_push=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [[ -n "$local_sha" && "$local_sha" != "$zero_sha" ]]; then
+    have_push=1
+  fi
+done
+
+if [[ "$have_push" -eq 0 ]]; then
+  step "no refs to push (delete-only or no-op); skipping suite"
+  exit 0
+fi
+
+# 1. Test suite — blocking.
+step "cargo test --workspace --quiet"
+cargo test --workspace --quiet
+
+# 2. Lints — blocking; matches CI.
+step "cargo clippy --all-targets --quiet -- -D warnings"
+cargo clippy --all-targets --quiet -- -D warnings
+
+step "OK"
