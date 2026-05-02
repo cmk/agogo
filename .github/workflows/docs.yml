@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.85.0
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/configure-pages@v5
       # ALSA headers: not needed by the four current workspace
       # members but keeps this job future-proof if cpal/midi join.
       - name: install ALSA dev headers
