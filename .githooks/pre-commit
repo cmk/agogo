@@ -44,9 +44,12 @@ step() {
 }
 
 # 1. cargo fmt — blocking. Drift aborts the commit. Run
-#    `cargo fmt --all` to fix.
-step "cargo fmt --all -- --check"
-cargo fmt --all -- --check
+#    `cargo fmt -p agogo-core -p agogo-cli` to fix. Scope is
+#    explicit (not `--all`) because the sibling `connections`
+#    path-dep is reachable from this workspace and we don't want
+#    to fail on its formatting state.
+step "cargo fmt -p agogo-core -p agogo-cli -- --check"
+cargo fmt -p agogo-core -p agogo-cli -- --check
 
 # 2. PII / secret scan — blocking.
 step "scripts/check-pii.sh"
