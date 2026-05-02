@@ -57,6 +57,17 @@ jobs:
       - name: check-layers.sh
         run: scripts/check-layers.sh
 
+  facade-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: docs.rs facade metadata
+        env:
+          RUSTDOCFLAGS: --cfg docsrs
+        run: cargo +nightly doc -p agogo --no-default-features --features core,host --no-deps
+
   # Excluded crates (not workspace members) — `cargo test --workspace`
   # in the `test` job above skips them by design (keeps the default
   # CI path off platform system deps). These dedicated jobs exercise
