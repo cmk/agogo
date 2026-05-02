@@ -1,12 +1,16 @@
 //! Driver-shaped tool routing for the host adapter.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use agogo::core::conn::tempo::Tempo;
 use serde_json::{Value, json};
 
-use crate::bridge::{BridgeError, ControlCommand, ControlProducer, spsc};
+use crate::bridge::{
+    AdmissionMetadata, AdmissionOutcome, CoalesceKey, CommandDeadline, CommandId,
+    CommandTimeDomain, ControlCommand, ControlProducer, MAX_COALESCE_KEY_LEN, MAX_SOURCE_ID_LEN,
+    SourceId, spsc,
+};
 
 /// Initial adapter configuration.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -67,6 +71,7 @@ impl Tool {
 pub struct AgogoDriver {
     producer: Arc<ControlProducer>,
     mounted: AtomicBool,
+    next_command_id: AtomicU64,
 }
 
 impl AgogoDriver {
@@ -76,6 +81,7 @@ impl AgogoDriver {
             Self {
                 producer: Arc::new(producer),
                 mounted: AtomicBool::new(false),
+                next_command_id: AtomicU64::new(1),
             },
             consumer,
         )
@@ -85,6 +91,7 @@ impl AgogoDriver {
         Self {
             producer: Arc::new(producer),
             mounted: AtomicBool::new(false),
+            next_command_id: AtomicU64::new(1),
         }
     }
 
@@ -118,24 +125,36 @@ impl AgogoDriver {
             return Err("agogo driver is not mounted".to_owned());
         }
 
-        match Tool::parse(tool).ok_or_else(|| format!("unknown agogo tool: {tool}"))? {
-            Tool::TempoSet => {
-                let tempo = parse_integer_bpm(&args)?;
-                self.producer.set_tempo(tempo);
-            }
-            Tool::ChannelConfigure => {
-                let channel = parse_u32_field(&args, "channel")?;
-                self.push(ControlCommand::ChannelConfigure { channel })?;
-            }
-            Tool::Start => self.push(ControlCommand::Start)?,
-            Tool::Stop => self.push(ControlCommand::Stop)?,
-            Tool::Locate => {
-                let tick = parse_u32_field(&args, "tick")?;
-                self.push(ControlCommand::Locate { tick })?;
-            }
-        }
+        let outcome =
+            match Tool::parse(tool).ok_or_else(|| format!("unknown agogo tool: {tool}"))? {
+                Tool::TempoSet => {
+                    let tempo = parse_integer_bpm(&args)?;
+                    let metadata = self.parse_metadata(&args, Some(CoalesceKey::tempo()))?;
+                    self.producer.admit_tempo(tempo, metadata)
+                }
+                Tool::ChannelConfigure => {
+                    let channel = parse_u32_field(&args, "channel")?;
+                    let metadata = self.parse_metadata(&args, None)?;
+                    self.producer
+                        .admit_ordered(ControlCommand::ChannelConfigure { channel }, metadata)
+                }
+                Tool::Start => {
+                    let metadata = self.parse_metadata(&args, None)?;
+                    self.producer.admit_ordered(ControlCommand::Start, metadata)
+                }
+                Tool::Stop => {
+                    let metadata = self.parse_metadata(&args, None)?;
+                    self.producer.admit_ordered(ControlCommand::Stop, metadata)
+                }
+                Tool::Locate => {
+                    let tick = parse_u32_field(&args, "tick")?;
+                    let metadata = self.parse_metadata(&args, None)?;
+                    self.producer
+                        .admit_ordered(ControlCommand::Locate { tick }, metadata)
+                }
+            };
 
-        Ok(accepted_next_buffer())
+        Ok(admission_response(outcome))
     }
 
     pub fn inverse_op(&self, tool: &str, args: &Value) -> Option<(String, Value)> {
@@ -151,19 +170,90 @@ impl AgogoDriver {
         }
     }
 
-    fn push(&self, command: ControlCommand) -> Result<(), String> {
-        self.producer.try_push(command).map_err(|err| match err {
-            BridgeError::QueueFull => "agogo control queue is full".to_owned(),
-            BridgeError::QueuePoisoned => "agogo control queue lock is poisoned".to_owned(),
+    fn parse_metadata(
+        &self,
+        args: &Value,
+        default_coalesce_key: Option<CoalesceKey>,
+    ) -> Result<AdmissionMetadata, String> {
+        let object = json_object(args)?;
+        let command_id = match object.get("command_id") {
+            Some(value) => CommandId(
+                value
+                    .as_u64()
+                    .ok_or_else(|| "field `command_id` must be an unsigned integer".to_owned())?,
+            ),
+            None => CommandId(self.next_command_id.fetch_add(1, Ordering::Relaxed)),
+        };
+        let source_id = match object.get("source_id") {
+            Some(value) => {
+                let source = value
+                    .as_str()
+                    .ok_or_else(|| "field `source_id` must be a string".to_owned())?;
+                SourceId::new(source).ok_or_else(|| {
+                    format!("field `source_id` must be <= {MAX_SOURCE_ID_LEN} bytes")
+                })?
+            }
+            None => SourceId::default(),
+        };
+        let time_domain = match object.get("time_domain") {
+            Some(value) => {
+                let domain = value
+                    .as_str()
+                    .ok_or_else(|| "field `time_domain` must be a string".to_owned())?;
+                CommandTimeDomain::parse(domain)
+            }
+            None => CommandTimeDomain::RtBuffer,
+        };
+        let deadline_buffer = match object.get("deadline_buffer") {
+            Some(value) => value
+                .as_u64()
+                .ok_or_else(|| "field `deadline_buffer` must be an unsigned integer".to_owned())?,
+            None => self.producer.default_deadline_buffer(),
+        };
+        let coalesce_key = match object.get("coalesce_key") {
+            Some(Value::Null) => None,
+            Some(value) => {
+                let key = value
+                    .as_str()
+                    .ok_or_else(|| "field `coalesce_key` must be a string".to_owned())?;
+                Some(CoalesceKey::new(key).ok_or_else(|| {
+                    format!("field `coalesce_key` must be <= {MAX_COALESCE_KEY_LEN} bytes")
+                })?)
+            }
+            None => default_coalesce_key,
+        };
+
+        Ok(AdmissionMetadata {
+            command_id,
+            source_id,
+            deadline: CommandDeadline {
+                time_domain,
+                buffer: deadline_buffer,
+            },
+            coalesce_key,
         })
     }
 }
 
-fn accepted_next_buffer() -> Value {
-    json!({
-        "accepted": true,
-        "applies_by": "next_buffer",
-    })
+fn admission_response(outcome: AdmissionOutcome) -> Value {
+    let mut value = json!({
+        "status": outcome.status.as_str(),
+        "accepted": outcome.is_accepted(),
+        "command_id": outcome.metadata.command_id.get(),
+        "source_id": outcome.metadata.source_id.as_str(),
+        "time_domain": outcome.metadata.deadline.time_domain.as_str(),
+        "deadline_buffer": outcome.metadata.deadline.buffer,
+    });
+    let object = value
+        .as_object_mut()
+        .expect("admission response is an object");
+    if let Some(key) = outcome.metadata.coalesce_key {
+        object.insert("coalesce_key".to_owned(), json!(key.as_str()));
+    }
+    if let Some(reason) = outcome.reason {
+        object.insert("reason".to_owned(), json!(reason.as_str()));
+    }
+    value
 }
 
 fn parse_integer_bpm(args: &Value) -> Result<Tempo, String> {
@@ -175,15 +265,18 @@ fn parse_integer_bpm(args: &Value) -> Result<Tempo, String> {
 }
 
 fn parse_u32_field(args: &Value, field: &str) -> Result<u32, String> {
-    let object = args
-        .as_object()
-        .ok_or_else(|| "tool arguments must be a JSON object".to_owned())?;
+    let object = json_object(args)?;
     let value = object
         .get(field)
         .ok_or_else(|| format!("missing integer field `{field}`"))?
         .as_u64()
         .ok_or_else(|| format!("field `{field}` must be an unsigned integer"))?;
     u32::try_from(value).map_err(|_| format!("field `{field}` exceeds u32"))
+}
+
+fn json_object(args: &Value) -> Result<&serde_json::Map<String, Value>, String> {
+    args.as_object()
+        .ok_or_else(|| "tool arguments must be a JSON object".to_owned())
 }
 
 #[cfg(test)]
@@ -225,7 +318,18 @@ mod tests {
             .handle_call(Tool::TempoSet.name(), json!({ "bpm": 140 }))
             .expect("tempo set");
 
-        assert_eq!(out, accepted_next_buffer());
+        assert_eq!(
+            out,
+            json!({
+                "status": "accepted",
+                "accepted": true,
+                "command_id": 1,
+                "source_id": "agogo.driver",
+                "time_domain": "rt_buffer",
+                "deadline_buffer": 1,
+                "coalesce_key": "tempo",
+            })
+        );
         assert_eq!(consumer.snapshot().tempo, Tempo::from_bpm_integer(140));
     }
 
@@ -286,16 +390,22 @@ mod tests {
             .handle_call(Tool::Stop.name(), json!({}))
             .expect("stop");
 
-        assert_eq!(consumer.try_pop(), Some(ControlCommand::Start));
         assert_eq!(
-            consumer.try_pop(),
+            consumer.try_pop().map(|envelope| envelope.command),
+            Some(ControlCommand::Start)
+        );
+        assert_eq!(
+            consumer.try_pop().map(|envelope| envelope.command),
             Some(ControlCommand::Locate { tick: 960 })
         );
-        assert_eq!(consumer.try_pop(), Some(ControlCommand::Stop));
+        assert_eq!(
+            consumer.try_pop().map(|envelope| envelope.command),
+            Some(ControlCommand::Stop)
+        );
     }
 
     #[test]
-    fn queue_full_returns_tool_error() {
+    fn queue_full_returns_rejected_admission() {
         let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig {
             queue_capacity: 1,
             ..AgogoDriverConfig::default()
@@ -304,10 +414,143 @@ mod tests {
         driver
             .handle_call(Tool::Start.name(), json!({}))
             .expect("first command");
-        let err = driver
+        let out = driver
             .handle_call(Tool::Stop.name(), json!({}))
+            .expect("rejected admission response");
+        assert_eq!(
+            out,
+            json!({
+                "status": "rejected",
+                "accepted": false,
+                "command_id": 2,
+                "source_id": "agogo.driver",
+                "time_domain": "rt_buffer",
+                "deadline_buffer": 1,
+                "reason": "queue_full",
+            })
+        );
+    }
+
+    #[test]
+    fn ordered_tool_with_coalesce_key_rejected() {
+        let (driver, mut consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let out = driver
+            .handle_call(Tool::Start.name(), json!({ "coalesce_key": "transport" }))
+            .expect("rejected admission response");
+
+        assert_eq!(
+            out,
+            json!({
+                "status": "rejected",
+                "accepted": false,
+                "command_id": 1,
+                "source_id": "agogo.driver",
+                "time_domain": "rt_buffer",
+                "deadline_buffer": 1,
+                "coalesce_key": "transport",
+                "reason": "unsupported_command_class",
+            })
+        );
+        assert_eq!(consumer.try_pop(), None);
+    }
+
+    #[test]
+    fn locate_with_stale_deadline_returns_late() {
+        let (driver, mut consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+        consumer.begin_buffer();
+
+        let out = driver
+            .handle_call(
+                Tool::Locate.name(),
+                json!({ "tick": 960, "deadline_buffer": 1 }),
+            )
+            .expect("late admission response");
+
+        assert_eq!(
+            out,
+            json!({
+                "status": "late",
+                "accepted": false,
+                "command_id": 1,
+                "source_id": "agogo.driver",
+                "time_domain": "rt_buffer",
+                "deadline_buffer": 1,
+                "reason": "late_deadline",
+            })
+        );
+        assert_eq!(consumer.try_pop(), None);
+    }
+
+    #[test]
+    fn unsupported_time_domain_rejected_before_queue() {
+        let (driver, mut consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let out = driver
+            .handle_call(Tool::Start.name(), json!({ "time_domain": "host_time" }))
+            .expect("rejected admission response");
+
+        assert_eq!(
+            out,
+            json!({
+                "status": "rejected",
+                "accepted": false,
+                "command_id": 1,
+                "source_id": "agogo.driver",
+                "time_domain": "host_time",
+                "deadline_buffer": 1,
+                "reason": "unsupported_time_domain",
+            })
+        );
+        assert_eq!(consumer.try_pop(), None);
+    }
+
+    #[test]
+    fn malformed_metadata_returns_tool_error() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let err = driver
+            .handle_call(Tool::Start.name(), json!({ "source_id": 7 }))
             .unwrap_err();
-        assert_eq!(err, "agogo control queue is full");
+
+        assert_eq!(err, "field `source_id` must be a string");
+    }
+
+    #[test]
+    fn metadata_fields_are_echoed() {
+        let (driver, mut consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let out = driver
+            .handle_call(
+                Tool::Start.name(),
+                json!({
+                    "command_id": 42,
+                    "source_id": "stdio-core",
+                    "deadline_buffer": 3,
+                }),
+            )
+            .expect("accepted admission response");
+
+        assert_eq!(
+            out,
+            json!({
+                "status": "accepted",
+                "accepted": true,
+                "command_id": 42,
+                "source_id": "stdio-core",
+                "time_domain": "rt_buffer",
+                "deadline_buffer": 3,
+            })
+        );
+        let envelope = consumer.try_pop().expect("enqueued command");
+        assert_eq!(envelope.command, ControlCommand::Start);
+        assert_eq!(envelope.metadata.command_id.get(), 42);
+        assert_eq!(envelope.metadata.source_id.as_str(), "stdio-core");
     }
 
     #[test]
