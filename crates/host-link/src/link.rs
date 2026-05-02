@@ -1,6 +1,6 @@
 //! `LinkClock` — the agogo-side handle on an Ableton Link session.
 //!
-//! Implements `agogo_core::control::sync::PhaseSourceImpl` over rusty_link: the
+//! Implements `agogo::core::control::sync::PhaseSourceImpl` over rusty_link: the
 //! lifecycle surface (construct / enable / tempo / num_peers) from
 //! Plan 07, plus the host-time bridge (Plan 08) that maps a
 //! stream-global sample index to Link's host-time domain and returns
@@ -17,13 +17,13 @@
 
 use std::num::NonZeroU32;
 
-use agogo_core::conn::boundary::{f64_phase_to_phase, tempo_to_f64_bpm};
-use agogo_core::conn::fixed::Micro;
-use agogo_core::conn::float::F064FD06;
-use agogo_core::conn::float::{Extended, ExtendedFloat};
-use agogo_core::conn::phase::Phase;
-use agogo_core::conn::tempo::Tempo;
-use agogo_core::control::sync::PhaseSourceImpl;
+use agogo::core::conn::boundary::{f64_phase_to_phase, tempo_to_f64_bpm};
+use agogo::core::conn::fixed::Micro;
+use agogo::core::conn::float::F064FD06;
+use agogo::core::conn::float::{Extended, ExtendedFloat};
+use agogo::core::conn::phase::Phase;
+use agogo::core::conn::tempo::Tempo;
+use agogo::core::control::sync::PhaseSourceImpl;
 
 use crate::quantum::Quantum;
 use rusty_link::{AblLink, SessionState};
@@ -144,7 +144,7 @@ impl LinkClock {
         // Link FFI: AblLink returns BPM as f64. `f64_bpm_to_tempo`
         // handles the one-shot conversion to the `Tempo` newtype
         // (µBPM u32, saturating on out-of-range).
-        agogo_core::conn::boundary::f64_bpm_to_tempo(self.session.tempo())
+        agogo::core::conn::boundary::f64_bpm_to_tempo(self.session.tempo())
     }
 
     /// Number of peers currently joined to the session.
@@ -209,7 +209,7 @@ impl LinkClock {
     pub fn snap_offset_micro(&mut self, quantum: Quantum) -> Micro {
         // Quantum (Micro / microbeats) → f64 beats via the lawful
         // F064FD06 Conn inverse. The `10⁶` unit shift lives inside
-        // `F064FD06`'s definition (`agogo_core::conn::float`).
+        // `F064FD06`'s definition (`agogo::core::conn::float`).
         // `Extended::Finite` lifts the `Micro` into the saturation
         // lattice F064FD06 operates on; `Bot`/`Top` are unreachable
         // for a finite `Quantum` but the match keeps the result total.

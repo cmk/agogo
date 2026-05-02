@@ -1,11 +1,11 @@
 #![forbid(unsafe_code)]
 
-//! cpal back-end for `agogo_core::sink::audio::AudioHost`.
+//! cpal back-end for `agogo::core::sink::audio::AudioHost`.
 //!
 //! `CpalHost` opens a cpal input stream (f32 samples), surfaces
 //! cpal's device enumeration through a
 //! stable API, and adapts cpal's per-buffer callback to
-//! [`agogo_core::sink::audio::AudioIo`]. The `output: &mut []` slice is a
+//! [`agogo::core::sink::audio::AudioIo`]. The `output: &mut []` slice is a
 //! stub — CV output lands in v0.4's heterogeneous output layer.
 //!
 //! # Precision note
@@ -17,6 +17,12 @@
 //! PLL's phase estimate directly); platform-native MIDI back-ends
 //! (CoreMIDI / JACK / ALSA-MIDI / WinMM) that tighten the output
 //! side are part of v0.2+ timestamped-output work.
+
+extern crate self as agogo;
+
+pub(crate) mod core {
+    pub(crate) use core_impl::*;
+}
 
 pub mod cpal;
 

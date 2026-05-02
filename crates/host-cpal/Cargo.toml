@@ -18,7 +18,7 @@ publish = false
 # `libasound2-dev` preinstalled.
 
 [dependencies]
-agogo-core = { path = "../core" }
+core_impl = { package = "agogo-core", path = "../core" }
 # cpal 0.15 is the current stable; no newer version has changed the
 # `build_input_stream` ABI we rely on.
 cpal = "0.15"

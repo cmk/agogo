@@ -434,7 +434,7 @@ when a future plan grep brings up a stale promise.
   open follow-on listed above.
 - **`snap_intent` accessor on `ChannelSpec`** — Plan 20 shipped the
   accessor; Plan 28-09 T1 wired it into the orchestrator via
-  `agogo_host_link::apply_snap_offsets` (the walk lives on the
+  `agogo::host::link::apply_snap_offsets` (the walk lives on the
   host-link side, not in cli, to avoid widening cli/Link coupling).
 - **`Quantum::from_bars(N)` typed fallbacks** — Plan 28-02 confirmed
   `bpaf` accepts the `pub const fn` directly; the `fallback_with`

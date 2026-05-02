@@ -15,7 +15,7 @@ publish = false
 # Windows) into the default CI path.
 
 [dependencies]
-agogo-core = { path = "../core" }
+core_impl = { package = "agogo-core", path = "../core" }
 # midir 0.10 is the current stable cross-platform MIDI binding;
 # inherits its precision ceiling (~1 ms USB-bus jitter, see
 # doc/agogo.md §4) which is the v0.1 baseline. Platform-native

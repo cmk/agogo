@@ -13,7 +13,7 @@ use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
 
 // Re-export the float-boundary primitive types so downstream crates
 // that don't depend on `connections` directly (cli, host-link) can
-// reach them through `agogo_core::conn::float::{Extended, ExtendedFloat}`.
+// reach them through `agogo::core::conn::float::{Extended, ExtendedFloat}`.
 pub use connections::extended::Extended;
 pub use connections::float::ExtendedFloat;
 

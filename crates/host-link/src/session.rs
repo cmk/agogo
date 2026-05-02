@@ -4,16 +4,16 @@
 //! Stubbed in T0; filled out in T4 once tempo-push (T1) and the FSM
 //! (T2) + quantum snap (T3) are in place.
 
-use agogo_core::channel::Channel;
-use agogo_core::channel::spec::ChannelSpec;
-use agogo_core::conn::fixed::Micro;
-use agogo_core::conn::phase::Phase;
-use agogo_core::conn::tempo::Tempo;
+use agogo::core::channel::Channel;
+use agogo::core::channel::spec::ChannelSpec;
+use agogo::core::conn::fixed::Micro;
+use agogo::core::conn::phase::Phase;
+use agogo::core::conn::tempo::Tempo;
 // Required for `LinkClock::phase_at_sample` (trait-provided method
 // called by the `phase_at_sample` shim below). Copilot flagged this
 // as unused on PR #16 round 1 — false positive: removing it breaks
 // `cargo build --features rusty-link`.
-use agogo_core::control::sync::PhaseSourceImpl;
+use agogo::core::control::sync::PhaseSourceImpl;
 
 use crate::link::{HostTimeAnchor, LinkClock};
 use crate::quantum::Quantum;
@@ -181,7 +181,7 @@ impl LinkSession {
     ///
     /// Pre-P2 this was `arm_channel(&mut Channel)` which mutated the
     /// channel directly; that coupling is gone — `LinkSession` no
-    /// longer touches `agogo_core::channel::Channel`.
+    /// longer touches `agogo::core::channel::Channel`.
     ///
     /// Link's host-time model and agogo's `Micro` lattice are both
     /// microseconds, so no `SampleTickConn` is needed here —
@@ -325,7 +325,7 @@ mod tests {
     /// from `specs[i]`. Mirrors the orchestrator's pre-helper shape.
     fn build_pair(spec_strs: &[&str]) -> (Vec<ChannelSpec>, Vec<Channel>) {
         let owned: Vec<String> = spec_strs.iter().map(|s| (*s).to_string()).collect();
-        let named = agogo_core::channel::spec::parse_channels(&owned).expect("parse spec");
+        let named = agogo::core::channel::spec::parse_channels(&owned).expect("parse spec");
         let specs: Vec<ChannelSpec> = named.iter().map(|(_, s)| s.clone()).collect();
         let channels: Vec<Channel> = specs
             .iter()

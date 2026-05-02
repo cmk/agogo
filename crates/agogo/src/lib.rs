@@ -13,34 +13,34 @@
 pub mod core {
     //! Core scheduling, control, sink, and time primitives.
 
-    pub use agogo_core::*;
+    pub use core_impl::*;
 }
 
 #[cfg(feature = "host")]
 pub mod host {
     //! Host-side drivers and optional host backends.
 
-    pub use agogo_host::*;
+    pub use host_impl::*;
 
     #[cfg(feature = "cpal")]
     pub mod cpal {
         //! cpal audio backend.
 
-        pub use agogo_host_cpal::cpal::*;
+        pub use cpal_impl::cpal::*;
     }
 
     #[cfg(feature = "link")]
     pub mod link {
         //! Ableton Link backend.
 
-        pub use agogo_host_link::*;
+        pub use link_impl::*;
     }
 
     #[cfg(feature = "midi")]
     pub mod midi {
         //! midir MIDI backend.
 
-        pub use agogo_host_midi::*;
+        pub use midi_impl::*;
     }
 }
 

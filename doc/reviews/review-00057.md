@@ -13,10 +13,10 @@ nested public modules instead of fused crate roots:
 
 The facade keeps backend crates optional and feature-gated, so the
 default workspace build still avoids platform and Link dependencies.
-`agogo-cli` now consumes the facade paths instead of importing
-`agogo_core`, `agogo_host_cpal`, `agogo_host_link`, or
-`agogo_host_midi` directly. Backend crates continue to depend on
-`agogo-core` directly to avoid dependency cycles.
+`agogo-cli` now consumes the facade paths instead of importing fused
+crate roots directly. Backend implementation crates continue to depend
+on `agogo-core` at the Cargo layer to avoid dependency cycles, but
+their Rust source routes through private `agogo::core` namespace shims.
 
 Verification:
 
@@ -30,3 +30,6 @@ Verification:
 - `cargo test -p agogo --features cpal,link,midi --quiet`
 - `cargo test -p agogo-cli --features run --no-run`
 - `cargo test -p agogo-cli --no-default-features --features core,cpal,midi --no-run`
+- `cargo test --manifest-path crates/host-cpal/Cargo.toml --offline`
+- `cargo test --manifest-path crates/host-midi/Cargo.toml --offline`
+- `cargo test --manifest-path crates/host-link/Cargo.toml --features rusty-link --no-run --offline`

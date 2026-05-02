@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, PoisonError};
 
-use agogo_core::conn::tempo::Tempo;
+use agogo::core::conn::tempo::Tempo;
 
 /// Ordered commands that must not silently coalesce.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

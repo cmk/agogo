@@ -3,7 +3,7 @@
 //!
 //! Test utilities shared across the workspace.
 //!
-//! Available to all crates via `agogo_core::test`. Not gated behind
+//! Available to all crates via `agogo::core::test`. Not gated behind
 //! `#[cfg(test)]` so integration tests and downstream dev-dependencies
 //! can use it.
 

@@ -20,7 +20,7 @@ default = []
 rusty-link = ["dep:rusty_link", "dep:rust-fsm"]
 
 [dependencies]
-agogo-core = { path = "../core" }
+core_impl = { package = "agogo-core", path = "../core" }
 # Pinned at 0.4.8 (same rev as the local `ext/rusty_link` clone used
 # for offline dev). Registry-fetched so CI doesn't need the local
 # `ext/` tree populated. Local co-dev can still override via a
