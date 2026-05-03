@@ -339,6 +339,16 @@ macro_rules! sample_i064_conn {
                 <Q000I064 as ViewL<Q64_0, i64>>::L,
             );
         }
+
+        impl $CONN {
+            pub fn ceil(self, x: $Rate) -> i64 {
+                <Self as ViewL<$Rate, i64>>::L.ceil(x)
+            }
+
+            pub fn inner(self, x: i64) -> $Rate {
+                <Self as ViewL<$Rate, i64>>::L.inner(x)
+            }
+        }
     };
 }
 
