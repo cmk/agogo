@@ -5,6 +5,7 @@
 //! small host-facing API that a sibling adapter can wrap.
 
 use agogo::core::conn::sample::S048;
+use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::{PhaseSource, Playhead, TransportPolicy};
 use agogo::core::sink::audio::AudioIo;
 use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
@@ -78,13 +79,15 @@ impl Runtime {
         );
         let snapshot_slot = SnapshotSlot::new(config.initial_tempo);
         let publisher = SnapshotPublisher::new(snapshot_slot.reader());
-        Self {
+        let runtime = Self {
             driver,
             consumer,
             playhead,
             snapshot_slot,
             publisher,
-        }
+        };
+        runtime.write_snapshot_frame(config.initial_tempo, 0);
+        runtime
     }
 
     pub fn mount(&self) -> Result<(), String> {
@@ -107,12 +110,16 @@ impl Runtime {
         let mut io = AudioIo::new(
             &input,
             &mut output,
-            report.params.buffer_epoch.saturating_sub(1) * RUNTIME_BUFFER_FRAMES as u64,
+            report
+                .params
+                .buffer_epoch
+                .saturating_sub(1)
+                .saturating_mul(RUNTIME_BUFFER_FRAMES as u64),
             RUNTIME_SAMPLE_RATE,
             RUNTIME_BUFFER_FRAMES,
         );
         self.playhead.on_buffer(&mut io, &NoopSink);
-        self.write_snapshot(report);
+        self.write_snapshot_frame(report.params.tempo, report.params.buffer_epoch);
         report
     }
 
@@ -184,19 +191,19 @@ impl Runtime {
         }
     }
 
-    fn write_snapshot(&self, report: CommandApplyReport) -> u64 {
+    fn write_snapshot_frame(&self, tempo: Tempo, buffer_epoch: u64) -> u64 {
         let state = if self.playhead.is_running() {
             TransportStateCode::Running
         } else {
             TransportStateCode::Stopped
         };
         self.snapshot_slot.writer().write(&RtSnapshotFrame {
-            bpm: report.params.tempo,
+            bpm: tempo,
             transport: RtTransportFrame {
                 state,
                 bar: 0,
                 beat: 0,
-                tick: report.params.buffer_epoch as u32,
+                tick: buffer_epoch as u32,
             },
             sync: RtSyncFrame::default(),
             audio: RtAudioFrame {
@@ -248,6 +255,33 @@ mod tests {
     use agogo::core::conn::tempo::Tempo;
 
     #[test]
+    fn runtime_initial_snapshot_matches_playhead_state() {
+        let mut runtime = Runtime::new();
+        runtime.mount().expect("mount");
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.seq, 1);
+        assert_eq!(snapshot.bpm.0, Tempo::from_bpm_integer(120).0);
+        assert_eq!(
+            snapshot.transport.state,
+            crate::snapshot::TransportState::Running
+        );
+        assert_eq!(snapshot.audio.sample_rate, RUNTIME_SAMPLE_RATE);
+        assert_eq!(snapshot.audio.buffer_size, RUNTIME_BUFFER_FRAMES as u32);
+
+        let mut sink = CaptureSink::default();
+        assert!(runtime.publish_snapshot(&mut sink).expect("publish"));
+        assert!(matches!(
+            sink.item.map(|params| params.op),
+            Some(ObservationOp::Create {
+                form_id,
+                form_type: FormType::Other(form_type),
+                ..
+            }) if form_id == AGOGO_MAIN_ID && form_type == AGOGO_STATE_FORM_TYPE
+        ));
+    }
+
+    #[test]
     fn runtime_tempo_set_applies_and_snapshots() {
         let mut runtime = Runtime::new();
         runtime.mount().expect("mount");
@@ -274,10 +308,10 @@ mod tests {
         );
         assert_eq!(report.apply.params.tempo, Tempo::from_bpm_integer(132));
         assert!(report.apply.tempo_updated);
-        assert_eq!(report.snapshot_seq, 1);
+        assert_eq!(report.snapshot_seq, 2);
 
         let snapshot = runtime.snapshot();
-        assert_eq!(snapshot.seq, 1);
+        assert_eq!(snapshot.seq, 2);
         assert_eq!(snapshot.bpm.0, Tempo::from_bpm_integer(132).0);
         assert_eq!(
             snapshot.transport.state,

@@ -48,3 +48,18 @@ Full review comments:
 
 - [P2] Drop the stale RUSTSEC ignore after the MSRV bump — deny.toml:13-13
   With this patch agogo's MSRV is 1.92, but the advisory ignore still suppresses RUSTSEC-2026-0009 even though the comment says the fixed `time` release only needed Rust 1.88 and should be re-evaluated once MSRV reached 1.88+. CI will keep allowing the locked vulnerable `time 0.3.45` instead of forcing the now-compatible 0.3.47 update, so the security gate remains blind to a fixable advisory.
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-03-05
+**Commits:** 6 (origin/main..plan-2026-05-03-05)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The new runtime helper can expose an incorrect initial observation state before any buffer advancement, which affects the adapter-facing surface it is intended to support.
+
+Review comment:
+
+- [P2] Seed the initial runtime snapshot from the playhead — crates/host/src/runtime.rs:74-79
+  When an adapter reads or publishes the runtime surface immediately after `mount()` but before the first `advance_buffer()`, this slot still contains `SnapshotSlot`'s default stopped/zero-audio frame even though the `Playhead` constructed above is already running (`TransportState::new` starts with `running = true`). That makes the initial `agogo-state` observation falsely report `stopped` until some later buffer write happens; initialize the slot from the runtime/playhead state or make the playhead start stopped.
