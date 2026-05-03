@@ -196,28 +196,21 @@ fn run_output_stream(
         buffer_size: BufferSize::Fixed(cfg.buffer_frames),
     };
     let sample_rate = cfg.sample_rate;
-    let scratch_frames = cfg.buffer_frames as usize;
+    let scratch_frames = (cfg.buffer_frames as usize).max(1);
     spawn_stream(move |stop_rx, ready_tx| {
         let mut next_start: u64 = 0;
         let input_stub: [f32; 0] = []; // PCM ABI
         let mut mono_output = vec![0.0_f32; scratch_frames]; // PCM ABI
         let data_cb = move |samples: &mut [f32], _info: &OutputCallbackInfo| {
-            let channels = usize::from(output_channels);
-            let frames = samples.len() / channels;
-            samples.fill(0.0_f32); // PCM ABI
-
-            let writable_frames = frames.min(mono_output.len());
-            mono_output[..writable_frames].fill(0.0_f32); // PCM ABI
-            let mut io = AudioIo::new(
+            next_start = render_mono_output_chunks(
                 &input_stub,
-                &mut mono_output[..writable_frames],
+                samples,
+                usize::from(output_channels),
+                &mut mono_output,
                 next_start,
                 sample_rate,
-                writable_frames,
+                cb.as_mut(),
             );
-            cb(&mut io);
-            fan_out_mono(&mono_output[..writable_frames], samples, channels);
-            next_start = next_start.saturating_add(frames as u64);
         };
         let err_cb = |e: StreamError| {
             tracing::error!(?e, "cpal stream error");
@@ -231,6 +224,48 @@ fn run_output_stream(
         };
         play_and_park(stream, stop_rx, ready_tx);
     })
+}
+
+fn render_mono_output_chunks(
+    input: &[f32],
+    interleaved: &mut [f32],
+    channels: usize,
+    mono_output: &mut [f32],
+    buffer_start_sample: u64,
+    sample_rate: u32,
+    cb: &mut dyn FnMut(&mut AudioIo),
+) -> u64 {
+    interleaved.fill(0.0_f32); // PCM ABI
+    if channels == 0 || mono_output.is_empty() {
+        return buffer_start_sample;
+    }
+
+    let frames = interleaved.len() / channels;
+    let mut rendered_frames = 0;
+    while rendered_frames < frames {
+        let chunk_frames = (frames - rendered_frames).min(mono_output.len());
+        mono_output[..chunk_frames].fill(0.0_f32); // PCM ABI
+        let chunk_start = buffer_start_sample.saturating_add(rendered_frames as u64);
+        let mut io = AudioIo::new(
+            input,
+            &mut mono_output[..chunk_frames],
+            chunk_start,
+            sample_rate,
+            chunk_frames,
+        );
+        cb(&mut io);
+
+        let sample_start = rendered_frames * channels;
+        let sample_end = sample_start + chunk_frames * channels;
+        fan_out_mono(
+            &mono_output[..chunk_frames],
+            &mut interleaved[sample_start..sample_end],
+            channels,
+        );
+        rendered_frames += chunk_frames;
+    }
+
+    buffer_start_sample.saturating_add(frames as u64)
 }
 
 fn select_output_channels(
@@ -489,6 +524,37 @@ mod tests {
         fan_out_mono(&[0.25, -0.5], &mut interleaved, 3);
 
         assert_eq!(interleaved, [0.25, 0.25, 0.25, -0.5, -0.5, -0.5]);
+    }
+
+    #[test]
+    fn oversized_output_callback_is_rendered_in_scratch_chunks() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut interleaved = [0.0_f32; 10]; // PCM ABI
+        let mut mono_output = [0.0_f32; 2]; // PCM ABI
+        let mut calls = Vec::new();
+        let mut cb = |io: &mut AudioIo<'_>| {
+            calls.push((io.buffer_start_sample, io.frames));
+            for (idx, sample) in io.output.iter_mut().enumerate() {
+                *sample = (io.buffer_start_sample + idx as u64) as f32; // PCM ABI
+            }
+        };
+
+        let next_start = render_mono_output_chunks(
+            &input,
+            &mut interleaved,
+            2,
+            &mut mono_output,
+            100,
+            48_000,
+            &mut cb,
+        );
+
+        assert_eq!(calls, vec![(100, 2), (102, 2), (104, 1)]);
+        assert_eq!(next_start, 105);
+        assert_eq!(
+            interleaved,
+            [100.0, 100.0, 101.0, 101.0, 102.0, 102.0, 103.0, 103.0, 104.0, 104.0]
+        );
     }
 
     fn caps(
