@@ -3,11 +3,10 @@
 //! host adapter support for agogo.
 //!
 //! This crate starts with agogo-owned real-time control primitives.
-//! The actual `stdio_core::driver::StudioMcpServer` impl remains
-//! behind the dependency boundary because the sibling stdio-core
-//! checkout currently pins a newer Rust toolchain than this workspace.
-//! Keeping the RT bridge independent preserves `cargo test --workspace`
-//! on agogo's pinned toolchain while giving the adapter a tested core.
+//! The actual `stdio_core::driver::McpServer` impl remains behind the
+//! dependency boundary so agogo stays useful without a stdio-core runtime
+//! dependency. The runtime helper gives the adapter a tested core that
+//! sibling stdio-core test/dev code can wrap.
 
 extern crate self as agogo;
 

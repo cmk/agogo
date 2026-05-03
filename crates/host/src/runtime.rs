@@ -6,6 +6,8 @@
 
 use agogo::core::conn::sample::S048;
 use agogo::core::control::{PhaseSource, Playhead, TransportPolicy};
+use agogo::core::sink::audio::AudioIo;
+use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
 use serde_json::Value;
 
 use crate::bridge::{CommandApplyReport, ControlConsumer, apply_control_to_playhead};
@@ -100,6 +102,16 @@ impl Runtime {
     /// Advance one RT buffer and publish the resulting snapshot frame.
     pub fn advance_buffer(&mut self) -> CommandApplyReport {
         let report = apply_control_to_playhead(&mut self.consumer, &mut self.playhead);
+        let input = [];
+        let mut output = [];
+        let mut io = AudioIo::new(
+            &input,
+            &mut output,
+            report.params.buffer_epoch.saturating_sub(1) * RUNTIME_BUFFER_FRAMES as u64,
+            RUNTIME_SAMPLE_RATE,
+            RUNTIME_BUFFER_FRAMES,
+        );
+        self.playhead.on_buffer(&mut io, &NoopSink);
         self.write_snapshot(report);
         report
     }
@@ -214,6 +226,18 @@ impl ObservationSink for CaptureSink {
     }
 }
 
+struct NoopSink;
+
+impl MidiSink for NoopSink {
+    fn send_at(&self, _msg: &[u8], _at_sample: u64) {}
+}
+
+impl MidiTimingCapabilities for NoopSink {
+    fn timing_capability(&self) -> MidiTimingCapability {
+        MidiTimingCapability::best_effort("agogo-host-runtime")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -292,6 +316,31 @@ mod tests {
         assert_eq!(
             runtime.snapshot().transport.state,
             crate::snapshot::TransportState::Running
+        );
+    }
+
+    #[test]
+    fn runtime_stop_applies_and_snapshots() {
+        let mut runtime = Runtime::new();
+        runtime.mount().expect("mount");
+
+        let report = runtime
+            .run_command_step(
+                Tool::Stop.name(),
+                json!({
+                    "source_id": "test",
+                    "command_id": 9,
+                    "time_domain": "rt_buffer",
+                    "deadline_buffer": 1,
+                }),
+            )
+            .expect("stop command");
+
+        assert_eq!(report.admission["status"], json!("accepted"));
+        assert_eq!(report.apply.applied_commands, 1);
+        assert_eq!(
+            runtime.snapshot().transport.state,
+            crate::snapshot::TransportState::Stopped
         );
     }
 
