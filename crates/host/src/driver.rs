@@ -7,9 +7,9 @@ use agogo::core::conn::tempo::Tempo;
 use serde_json::{Value, json};
 
 use crate::bridge::{
-    AdmissionMetadata, AdmissionOutcome, CoalesceKey, CommandDeadline, CommandId,
-    CommandTimeDomain, ControlCommand, ControlProducer, MAX_COALESCE_KEY_LEN, MAX_SOURCE_ID_LEN,
-    SourceId, spsc,
+    AdmissionMetadata, AdmissionOutcome, AdmissionRejectReason, CoalesceKey, CommandDeadline,
+    CommandId, CommandTimeDomain, ControlCommand, ControlProducer, MAX_COALESCE_KEY_LEN,
+    MAX_SOURCE_ID_LEN, SourceId, spsc,
 };
 
 /// Initial adapter configuration.
@@ -125,34 +125,35 @@ impl AgogoDriver {
             return Err("agogo driver is not mounted".to_owned());
         }
 
-        let outcome =
-            match Tool::parse(tool).ok_or_else(|| format!("unknown agogo tool: {tool}"))? {
-                Tool::TempoSet => {
-                    let tempo = parse_integer_bpm(&args)?;
-                    let metadata = self.parse_metadata(&args, Some(CoalesceKey::tempo()))?;
-                    self.producer.admit_tempo(tempo, metadata)
-                }
-                Tool::ChannelConfigure => {
-                    let channel = parse_u32_field(&args, "channel")?;
-                    let metadata = self.parse_metadata(&args, None)?;
-                    self.producer
-                        .admit_ordered(ControlCommand::ChannelConfigure { channel }, metadata)
-                }
-                Tool::Start => {
-                    let metadata = self.parse_metadata(&args, None)?;
-                    self.producer.admit_ordered(ControlCommand::Start, metadata)
-                }
-                Tool::Stop => {
-                    let metadata = self.parse_metadata(&args, None)?;
-                    self.producer.admit_ordered(ControlCommand::Stop, metadata)
-                }
-                Tool::Locate => {
-                    let tick = parse_u32_field(&args, "tick")?;
-                    let metadata = self.parse_metadata(&args, None)?;
-                    self.producer
-                        .admit_ordered(ControlCommand::Locate { tick }, metadata)
-                }
-            };
+        let outcome = match Tool::parse(tool)
+            .ok_or_else(|| format!("unknown agogo tool: {tool}"))?
+        {
+            Tool::TempoSet => {
+                let tempo = parse_integer_bpm(&args)?;
+                let metadata = self.parse_metadata(&args, Some(CoalesceKey::tempo()))?;
+                self.producer.admit_tempo(tempo, metadata)
+            }
+            Tool::ChannelConfigure => {
+                let channel = parse_u32_field(&args, "channel")?;
+                let metadata = self.parse_metadata(&args, None)?;
+                let _command = ControlCommand::ChannelConfigure { channel };
+                AdmissionOutcome::rejected(metadata, AdmissionRejectReason::UnsupportedCommandClass)
+            }
+            Tool::Start => {
+                let metadata = self.parse_metadata(&args, None)?;
+                self.producer.admit_ordered(ControlCommand::Start, metadata)
+            }
+            Tool::Stop => {
+                let metadata = self.parse_metadata(&args, None)?;
+                self.producer.admit_ordered(ControlCommand::Stop, metadata)
+            }
+            Tool::Locate => {
+                let tick = parse_u32_field(&args, "tick")?;
+                let metadata = self.parse_metadata(&args, None)?;
+                let _command = ControlCommand::Locate { tick };
+                AdmissionOutcome::rejected(metadata, AdmissionRejectReason::UnsupportedCommandClass)
+            }
+        };
 
         Ok(admission_response(outcome))
     }
@@ -436,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn ordered_tools_reach_rt_consumer() {
+    fn supported_ordered_tools_reach_rt_consumer() {
         let (driver, mut consumer) = AgogoDriver::new(AgogoDriverConfig::default());
         driver.on_mount().expect("mount");
 
@@ -444,19 +445,12 @@ mod tests {
             .handle_call(Tool::Start.name(), json!({}))
             .expect("start");
         driver
-            .handle_call(Tool::Locate.name(), json!({ "tick": 960 }))
-            .expect("locate");
-        driver
             .handle_call(Tool::Stop.name(), json!({}))
             .expect("stop");
 
         assert_eq!(
             consumer.try_pop().map(|envelope| envelope.command),
             Some(ControlCommand::Start)
-        );
-        assert_eq!(
-            consumer.try_pop().map(|envelope| envelope.command),
-            Some(ControlCommand::Locate { tick: 960 })
         );
         assert_eq!(
             consumer.try_pop().map(|envelope| envelope.command),
@@ -517,28 +511,24 @@ mod tests {
     }
 
     #[test]
-    fn locate_with_stale_deadline_returns_late() {
+    fn unsupported_ordered_tool_rejected_before_queue() {
         let (driver, mut consumer) = AgogoDriver::new(AgogoDriverConfig::default());
         driver.on_mount().expect("mount");
-        consumer.begin_buffer();
 
         let out = driver
-            .handle_call(
-                Tool::Locate.name(),
-                json!({ "tick": 960, "deadline_buffer": 1 }),
-            )
-            .expect("late admission response");
+            .handle_call(Tool::Locate.name(), json!({ "tick": 960 }))
+            .expect("rejected admission response");
 
         assert_eq!(
             out,
             json!({
-                "status": "late",
+                "status": "rejected",
                 "accepted": false,
                 "command_id": 1,
                 "source_id": "agogo.driver",
                 "time_domain": "rt_buffer",
                 "deadline_buffer": 1,
-                "reason": "late_deadline",
+                "reason": "unsupported_command_class",
             })
         );
         assert_eq!(consumer.try_pop(), None);

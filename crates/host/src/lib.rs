@@ -21,8 +21,9 @@ pub mod snapshot;
 
 pub use bridge::{
     AdmissionMetadata, AdmissionOutcome, AdmissionRejectReason, AdmissionStatus, BridgeError,
-    CoalesceKey, CommandDeadline, CommandEnvelope, CommandId, CommandTimeDomain, ControlCommand,
-    ControlConsumer, ControlParams, ControlProducer, RtCommandDrain, SourceId, spsc,
+    CoalesceKey, CommandApplyReport, CommandDeadline, CommandEnvelope, CommandId,
+    CommandTimeDomain, ControlCommand, ControlConsumer, ControlParams, ControlProducer,
+    RtCommandDrain, SourceId, apply_control_to_playhead, spsc,
 };
 pub use driver::{AgogoDriver, AgogoDriverConfig, Tool};
 pub use snapshot::{AgogoSnapshot, SnapshotSlot};
