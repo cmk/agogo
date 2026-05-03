@@ -14,8 +14,8 @@
 //!   `{ n: TBase, t: bool, q: bool }`, with named consts (`T16`,
 //!   `T16T`, `T8Q`, `T2P`, …) and component-wise meet / join /
 //!   Heyting implication.
-//! - Four Galois connections built on `connections::Conn<A, B>`:
-//!   `ticks`, `rat_tick`, `time`, `grid`.
+//! - Time conversion helpers: `TICKTIME`, `TIMETIME`, `GRIDGRID`,
+//!   plus `Tick` ↔ sample frames.
 //! - `Tick` (960 PPQN master counter) and `Time::At { beats, base }`
 //!   / `Time::End`.
 //! - Integer-valued swing on a binary resolution with alignment

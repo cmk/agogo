@@ -13,7 +13,6 @@
 //! without forcing the rest of the workspace to compile proptest.
 
 use connections::extended::Extended;
-use num_rational::Rational64;
 use proptest::prelude::*;
 
 use crate::conn::fixed::{FD00, FD01, FD02, FD03, FD06, FD09, FD12, HasResolution, Pico};
@@ -58,21 +57,6 @@ pub fn arb_jitter_sigma() -> impl Strategy<Value = Pico> {
         5 => (0i64..50_000_000).prop_map(Pico),          // 0..50 µs in ps
         2 => (50_000_000i64..200_000_000).prop_map(Pico),
         1 => (200_000_000i64..500_000_000).prop_map(Pico),
-    ]
-}
-
-// ── Whole-note rationals (used by time::conn proptests) ───────────
-
-/// Non-negative whole-note rational. Lives in conn::arb because the
-/// type itself is a num-rational reusable scalar — the
-/// `time::conn::WHOLTICK` Conn over it is the only rationale for
-/// putting it adjacent to `time/`.
-pub fn arb_rational_nonneg() -> impl Strategy<Value = Rational64> {
-    prop_oneof![
-        1 => Just(Rational64::new(0, 1)),
-        1 => Just(Rational64::new(1, 4)),
-        1 => Just(Rational64::new(1, 1)),
-        4 => (0i64..=10_000, 1i64..=3840).prop_map(|(n, d)| Rational64::new(n, d)),
     ]
 }
 
