@@ -330,7 +330,35 @@ mod tests {
                 "coalesce_key": "tempo",
             })
         );
-        assert_eq!(consumer.snapshot().tempo, Tempo::from_bpm_integer(140));
+        assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(140));
+    }
+
+    #[test]
+    fn tempo_set_rejects_non_tempo_coalesce_key() {
+        let (driver, consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let out = driver
+            .handle_call(
+                Tool::TempoSet.name(),
+                json!({ "bpm": 140, "coalesce_key": "transport" }),
+            )
+            .expect("rejected admission response");
+
+        assert_eq!(
+            out,
+            json!({
+                "status": "rejected",
+                "accepted": false,
+                "command_id": 1,
+                "source_id": "agogo.driver",
+                "time_domain": "rt_buffer",
+                "deadline_buffer": 1,
+                "coalesce_key": "transport",
+                "reason": "unsupported_command_class",
+            })
+        );
+        assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(120));
     }
 
     #[test]
