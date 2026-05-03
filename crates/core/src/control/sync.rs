@@ -8,10 +8,10 @@
 //! - [`detect`] — peak detector with parabolic sub-sample interpolation.
 //! - [`pll`]    — Type-II (PI) second-order phase-locked loop.
 //! - [`pulse`]  — synthetic Hann-bell signal generator for tests
-//!                and `cli/sync_trace` (was `pulse_train.rs` before
-//!                Plan 2026-04-29-01 T6).
+//!   and `cli/sync_trace` (was `pulse_train.rs` before
+//!   Plan 2026-04-29-01 T6).
 //! - [`source`] — `PhaseSource` enum unifying internal-clock vs.
-//!                external-PLL phase queries.
+//!   external-PLL phase queries.
 
 pub mod detect;
 pub mod pll;

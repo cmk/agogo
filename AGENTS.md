@@ -78,7 +78,7 @@ workflow-sensitive actions:
 
 ```
 Cargo.toml              — workspace root
-rust-toolchain.toml     — pinned Rust version (1.85) + components for local and CI
+rust-toolchain.toml     — pinned Rust version (1.92) + components for local and CI
 rustfmt.toml            — formatter config (edition 2024)
 deny.toml               — cargo-deny license/advisory/source policy
 crates/
@@ -88,7 +88,7 @@ crates/
 
 The active Rust toolchain is pinned via `rust-toolchain.toml`; `rustup`
 reads it automatically when you `cd` into the repo, and CI installs
-the same channel via `dtolnay/rust-toolchain@1.85.0`. Bumping MSRV
+the same channel via `dtolnay/rust-toolchain@1.92.0`. Bumping MSRV
 means updating `rust-version` in `Cargo.toml`, the channel in
 `rust-toolchain.toml`, and the action ref in `.github/workflows/ci.yml`
 together.

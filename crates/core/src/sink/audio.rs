@@ -211,7 +211,7 @@ pub fn render_audio_click_block(
                 if offset >= writable {
                     continue;
                 }
-                let accent = *click_counter % AUDIO_CLICK_ACCENT_EVERY == 0;
+                let accent = (*click_counter).is_multiple_of(AUDIO_CLICK_ACCENT_EVERY);
                 *click_counter = click_counter.wrapping_add(1);
                 render_one_click(offset, accent, io.sample_rate, &mut io.output[..writable]);
             }
@@ -238,7 +238,7 @@ fn render_one_click(start: usize, accent: bool, sample_rate: u32, output: &mut [
             break;
         };
         let envelope = (len - i) as i32;
-        let signed = if (i / half_period) % 2 == 0 {
+        let signed = if (i / half_period).is_multiple_of(2) {
             amp
         } else {
             -amp

@@ -92,7 +92,7 @@ pub fn from_ticks_floor(n: Tick) -> Option<Time> {
 fn nicest_from_tick_count(n: u64) -> Option<Time> {
     for g in Grid::ALL {
         let tc = u64::from(g.tick_count());
-        if n % tc == 0 {
+        if n.is_multiple_of(tc) {
             let beats = n / tc;
             return u32::try_from(beats)
                 .ok()
@@ -131,7 +131,11 @@ fn time_divides(a: Time, b: Time) -> bool {
         _ => {
             let ta = time_to_tick(a).0;
             let tb = time_to_tick(b).0;
-            if ta == 0 { tb == 0 } else { tb % ta == 0 }
+            if ta == 0 {
+                tb == 0
+            } else {
+                tb.is_multiple_of(ta)
+            }
         }
     }
 }
@@ -418,9 +422,11 @@ mod tests {
                 unreachable!("from_ticks returns only finite Time::At values");
             };
             for g in Grid::ALL {
-                if g == base { break; }
+                if g == base {
+                    break;
+                }
                 prop_assert!(
-                    aligned % u64::from(g.tick_count()) != 0,
+                    !aligned.is_multiple_of(u64::from(g.tick_count())),
                     "{g:?} (tc={}) also divides {aligned}; should have been picked before {:?} (tc={})",
                     g.tick_count(), base, base.tick_count()
                 );

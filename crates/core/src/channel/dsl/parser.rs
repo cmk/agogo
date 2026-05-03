@@ -46,11 +46,11 @@ impl<'a> Parser<'a> {
     }
 
     fn eat(&mut self, kind: &TokenKind) -> bool {
-        if let Some(tok) = self.peek() {
-            if std::mem::discriminant(&tok.kind) == std::mem::discriminant(kind) {
-                self.pos += 1;
-                return true;
-            }
+        if let Some(tok) = self.peek()
+            && std::mem::discriminant(&tok.kind) == std::mem::discriminant(kind)
+        {
+            self.pos += 1;
+            return true;
         }
         false
     }
@@ -127,28 +127,28 @@ impl<'a> Parser<'a> {
 
     /// unary := '!' unary | primary
     fn parse_unary(&mut self) -> Result<Expr, DslError> {
-        if let Some(tok) = self.peek() {
-            if matches!(tok.kind, TokenKind::Bang) {
-                let start = tok.span.start;
-                self.advance();
-                self.depth += 1;
-                if self.depth > MAX_DEPTH {
-                    return Err(self.err(
-                        DslErrorKind::NestingTooDeep,
-                        Span {
-                            start,
-                            end: start + 1,
-                        },
-                    ));
-                }
-                let inner = self.parse_unary()?;
-                self.depth -= 1;
-                let span = Span {
-                    start,
-                    end: inner.span().end,
-                };
-                return Ok(Expr::Neg(Box::new(inner), span));
+        if let Some(tok) = self.peek()
+            && matches!(tok.kind, TokenKind::Bang)
+        {
+            let start = tok.span.start;
+            self.advance();
+            self.depth += 1;
+            if self.depth > MAX_DEPTH {
+                return Err(self.err(
+                    DslErrorKind::NestingTooDeep,
+                    Span {
+                        start,
+                        end: start + 1,
+                    },
+                ));
             }
+            let inner = self.parse_unary()?;
+            self.depth -= 1;
+            let span = Span {
+                start,
+                end: inner.span().end,
+            };
+            return Ok(Expr::Neg(Box::new(inner), span));
         }
         self.parse_primary()
     }
