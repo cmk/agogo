@@ -381,7 +381,7 @@ pub fn render_midi_click_block(
     let ch_byte: u8 = cfg.ch.into();
     for ev in events {
         let (n, v) = match cfg.accent {
-            Some(a) if *counter % a.every.get() == 0 => (a.note, a.vel),
+            Some(a) if (*counter).is_multiple_of(a.every.get()) => (a.note, a.vel),
             _ => (cfg.note, cfg.vel),
         };
         sink.send_at(
@@ -1041,7 +1041,7 @@ mod tests {
             let recs = sink.records();
             for i in 0..event_count {
                 let on = &recs[i * 2];
-                let is_accent = (i as u32) % n == 0;
+                let is_accent = (i as u32).is_multiple_of(n);
                 let expected_note = if is_accent { 38 } else { 37 };
                 let expected_vel = if is_accent { 120 } else { 70 };
                 prop_assert_eq!(

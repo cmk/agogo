@@ -2,7 +2,7 @@
 name = "agogo-host-link"
 edition = "2024"
 version = "0.1.0"
-rust-version = "1.85"
+rust-version = "1.92"
 license = "MIT"
 publish = false
 

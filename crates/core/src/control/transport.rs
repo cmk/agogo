@@ -509,7 +509,7 @@ impl<R> Playhead<R> {
                 let counter = &mut self.bar_counters[idx];
                 let m = m.get() as u32;
                 self.events_pool.retain(|_| {
-                    let keep = *counter % m == 0;
+                    let keep = (*counter).is_multiple_of(m);
                     *counter = counter.wrapping_add(1);
                     keep
                 });
@@ -1131,7 +1131,7 @@ mod tests {
             let expected: Vec<u64> = on_un
                 .iter()
                 .enumerate()
-                .filter_map(|(i, &s)| (i as u64 % bars as u64 == 0).then_some(s))
+                .filter_map(|(i, &s)| (i as u64).is_multiple_of(bars as u64).then_some(s))
                 .collect();
             prop_assert_eq!(on_fi, expected,
                 "divider={:?}, mode_is_click={}, bars={}, n_buffers={}",

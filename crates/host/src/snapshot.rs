@@ -45,19 +45,14 @@ impl AgogoSnapshot {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportState {
+    #[default]
     Stopped,
     Running,
     Paused,
     Locating,
-}
-
-impl Default for TransportState {
-    fn default() -> Self {
-        Self::Stopped
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
@@ -68,19 +63,14 @@ pub struct TransportSnapshot {
     pub tick: u32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SyncSource {
+    #[default]
     Internal,
     Link,
     MidiClock,
     AudioPulse,
-}
-
-impl Default for SyncSource {
-    fn default() -> Self {
-        Self::Internal
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Default)]
@@ -97,19 +87,14 @@ pub struct AudioSnapshot {
     pub load: DecimalU32<SCALE_MICRO>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelOutput {
     Midi,
     Cv,
     Mtc,
+    #[default]
     Disabled,
-}
-
-impl Default for ChannelOutput {
-    fn default() -> Self {
-        Self::Disabled
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -203,7 +188,11 @@ pub struct RtSnapshotWriter {
 impl RtSnapshotWriter {
     pub fn write(&self, frame: &RtSnapshotFrame<'_>) -> u64 {
         let epoch = self.inner.write_epoch.load(Ordering::SeqCst);
-        let begin_epoch = if epoch % 2 == 0 { epoch + 1 } else { epoch + 2 };
+        let begin_epoch = if epoch.is_multiple_of(2) {
+            epoch + 1
+        } else {
+            epoch + 2
+        };
         self.inner.write_epoch.store(begin_epoch, Ordering::SeqCst);
         // Single-writer seqlock: the odd epoch must become visible
         // before any payload store can be observed, and the final even
@@ -277,7 +266,7 @@ impl SnapshotReader {
     pub fn snapshot(&self) -> AgogoSnapshot {
         loop {
             let begin_epoch = self.inner.write_epoch.load(Ordering::SeqCst);
-            if begin_epoch % 2 != 0 {
+            if !begin_epoch.is_multiple_of(2) {
                 std::hint::spin_loop();
                 continue;
             }

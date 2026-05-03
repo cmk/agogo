@@ -351,10 +351,8 @@ fn select_f32_channels_at_rate(
         });
     }
 
-    if allow_channel_fallback {
-        if let Some(channels) = fallback_channels {
-            return Ok(channels);
-        }
+    if allow_channel_fallback && let Some(channels) = fallback_channels {
+        return Ok(channels);
     }
     if !any_rate {
         return Err(AudioHostError::UnsupportedSampleRate(sample_rate));

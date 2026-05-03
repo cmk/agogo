@@ -43,7 +43,7 @@ pub struct SwingConfig {
 /// resolution grid AND its step index must be odd.
 pub fn is_swung_step(t: Tick, cfg: &SwingConfig) -> bool {
     let tc = u64::from(cfg.resolution.tick_count());
-    t.0 % tc == 0 && (t.0 / tc) & 1 == 1
+    t.0.is_multiple_of(tc) && (t.0 / tc) & 1 == 1
 }
 
 /// Tick after applying the swing offset. Off-beats (per
@@ -66,7 +66,7 @@ pub fn effective_tick(cfg: &SwingConfig, t: Tick) -> Tick {
 /// Is the tick aligned to the `g` grid? Works for any `Grid` element
 /// (binary, triplet, quintuplet, p-track) — not just binary.
 pub fn is_aligned(t: Tick, g: Grid) -> bool {
-    t.0 % u64::from(g.tick_count()) == 0
+    t.0.is_multiple_of(u64::from(g.tick_count()))
 }
 
 #[cfg(test)]
