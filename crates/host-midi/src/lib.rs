@@ -11,7 +11,7 @@
 //! `MidirSink` reports
 //! [`MidiTimingCapability`](agogo::core::sink::midi::MidiTimingCapability)
 //! as immediate best-effort dispatch. Platform-native MIDI sinks that
-//! tighten this side (CoreMIDI's `MIDITimeStamp` for sub-us scheduling,
+//! tighten this side (CoreMIDI's `MIDITimeStamp` for sub-µs scheduling,
 //! JACK's frame-indexed sends, WinMM, ALSA-MIDI) live in their own
 //! sibling crates.
 

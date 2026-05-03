@@ -199,6 +199,9 @@ pub struct DiagnosticSummary {
 /// times and byte payloads in FIFO order; tests or soft-side tooling
 /// may also supply an observed drain sample to compute delay outside
 /// the realtime callback path.
+///
+/// Not RT-safe: each record takes a `Mutex`. Use `RtProducer` from
+/// `agogo-host-cpal` on the audio callback path.
 #[derive(Debug)]
 pub struct DiagnosticSink {
     capability: MidiTimingCapability,
