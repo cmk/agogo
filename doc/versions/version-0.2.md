@@ -76,12 +76,17 @@ callback stalls or corrupted snapshots.
 ### S4 - Timestamped Output Backend Spike
 
 - Introduce sink classes:
-  - `BestEffortMidiSink` for current midir behavior.
-  - `TimestampedMidiSink` for a first native scheduled backend.
-  - `DiagnosticSink` for intended-vs-sent timing measurement.
+  - `MidiTimingCapability` for explicit backend timing claims.
+  - `DiagnosticSink` for intended-vs-drained timing measurement.
+  - future native timestamped sinks for CoreMIDI, JACK, or similar.
 - Preserve `at_sample` through the drain path and prove whether the backend can
   honor it.
 - Add a per-backend timing capability report.
+
+Plan 2026-05-03-04 landed the first S4 slice: current midir and SPSC/test
+wrappers report immediate best-effort dispatch, `at_sample` is preserved as
+metadata, and diagnostics can measure delay outside the callback path. Native
+timestamped backends remain a later S4/v0.3 follow-up.
 
 Verifies: agogo can distinguish "internally sample accurate" from "externally
 timestamped" from "best effort".

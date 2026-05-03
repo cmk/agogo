@@ -1,6 +1,6 @@
 //! `MidirSink` — midir-backed [`MidiSink`] implementation.
 
-use agogo::core::sink::midi::MidiSink;
+use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
 use thiserror::Error;
 
 /// midir-backed [`MidiSink`]. Opens a single output port at
@@ -96,6 +96,12 @@ impl MidiSink for MidirSink {
     }
 }
 
+impl MidiTimingCapabilities for MidirSink {
+    fn timing_capability(&self) -> MidiTimingCapability {
+        MidiTimingCapability::best_effort("midir")
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum MidirSinkError {
     #[error("midir init: {0}")]
@@ -109,6 +115,7 @@ pub enum MidirSinkError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agogo::core::sink::midi::{AtSampleSupport, MidiLatencyCompensation, MidiSchedulingClass};
 
     /// `list_output_ports` should not panic. It may return an empty
     /// `Vec` on a host with no MIDI ports (typical for CI runners
@@ -122,6 +129,20 @@ mod tests {
         // host's MIDI subsystem is fundamentally unavailable, which
         // would also fail any subsequent open call.
         let _result = MidirSink::list_output_ports();
+    }
+
+    #[test]
+    fn midir_capability_is_best_effort() {
+        let capability = MidiTimingCapability::best_effort("midir");
+        assert_eq!(capability.backend_name, "midir");
+        assert_eq!(capability.scheduling, MidiSchedulingClass::Immediate);
+        assert_eq!(
+            capability.latency_compensation,
+            MidiLatencyCompensation::None
+        );
+        assert_eq!(capability.at_sample, AtSampleSupport::MetadataOnly);
+        assert!(!capability.honors_at_sample());
+        assert!(!capability.is_timestamped());
     }
 
     /// Opening a bogus port name surfaces `PortNotFound` (or
