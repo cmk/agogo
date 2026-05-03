@@ -1575,6 +1575,49 @@ mod tests {
     }
 
     #[test]
+    fn rt_command_application_no_realloc() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Internal {
+                start_emitted: true,
+            },
+        );
+        let cap_before = playhead.max_events_per_buffer();
+
+        assert_eq!(
+            producer
+                .admit_ordered(ControlCommand::Start, metadata(1, 1))
+                .status,
+            AdmissionStatus::Accepted
+        );
+        assert_eq!(
+            producer
+                .admit_ordered(ControlCommand::Stop, metadata(2, 1))
+                .status,
+            AdmissionStatus::Accepted
+        );
+        assert_eq!(
+            producer
+                .admit_ordered(ControlCommand::Start, metadata(3, 1))
+                .status,
+            AdmissionStatus::Accepted
+        );
+        assert_eq!(
+            producer
+                .admit_ordered(ControlCommand::Stop, metadata(4, 1))
+                .status,
+            AdmissionStatus::Accepted
+        );
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+
+        assert_eq!(report.applied_commands, 4);
+        assert_eq!(playhead.max_events_per_buffer(), cap_before);
+    }
+
+    #[test]
     fn late_ordered_command_reports_fault() {
         let bpm = Tempo::from_bpm_integer(120);
         let (producer, mut consumer) = spsc(4, bpm);
