@@ -125,3 +125,39 @@ Review comment:
 ---
 
 The admission envelope, deadline checks, driver JSON responses, and compatibility paths appear consistent with the stated v0.2 contract, and the relevant host/workspace tests pass. I did not find any discrete correctness issues introduced by this patch.
+
+<!-- gh-id: 3177550002 -->
+### Copilot on [`crates/host/src/bridge.rs:738`](https://github.com/cmk/agogo/pull/63#discussion_r3177550002) (2026-05-03 03:07 UTC)
+
+`begin_buffer()` uses `AtomicU64::fetch_add(1)` to advance `buffer_epoch`. If `buffer_epoch` ever reaches `u64::MAX`, `fetch_add` will wrap the stored epoch back to 0 (even though the returned `epoch` saturates to `u64::MAX`), causing the producer/consumer epochs to diverge and potentially making stale deadlines appear admissible. Consider using a saturating update (e.g., `fetch_update` that keeps `u64::MAX` pinned) or otherwise preventing wraparound in the stored atomic value.
+
+<!-- gh-id: 3177550006 -->
+### Copilot on [`crates/host/src/driver.rs:184`](https://github.com/cmk/agogo/pull/63#discussion_r3177550006) (2026-05-03 03:07 UTC)
+
+`parse_metadata()` allows callers to supply an explicit `command_id`, but it does not advance `next_command_id` in that case. This means a later call that omits `command_id` can reuse an id that was previously supplied explicitly, producing duplicate ids in admission responses/logs. Consider updating `next_command_id` when an explicit id is provided (e.g., bump to at least `provided_id + 1`, with saturation) or documenting/enforcing that explicit ids must not overlap the driver-generated range.
+
+<!-- gh-id: 4215810274 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 03:07 UTC](https://github.com/cmk/agogo/pull/63#pullrequestreview-4215810274))
+
+## Pull request overview
+
+Adds the v0.2 command admission envelope to `agogo-host`, introducing structured admission metadata/outcomes for both scalar (tempo) and ordered commands, and updating the driver surface to return structured admission JSON without adding a direct `stdio-core` dependency.
+
+**Changes:**
+- Introduces admission metadata types (`CommandId`, `SourceId`, `CommandDeadline`, `CoalesceKey`, etc.) and wraps ordered commands in `CommandEnvelope` with deadline-aware RT draining.
+- Updates `AgogoDriver` tool handling to parse optional admission metadata and return structured admission JSON (`status`, ids, deadline, optional `reason`).
+- Adds a `rust-fsm`-backed tempo-slot state machine to make scalar tempo admission truthfulness explicit under buffer-boundary races.
+
+### Reviewed changes
+
+Copilot reviewed 7 out of 8 changed files in this pull request and generated 2 comments.
+
+<!-- gh-id: 3177680582 -->
+#### Reply from cmk ([2026-05-03 05:36 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177680582))
+
+Fixed. `begin_buffer()` now advances `buffer_epoch` with a saturating `fetch_update`, so the stored epoch remains pinned at `u64::MAX` instead of wrapping to zero. Added `begin_buffer_saturates_stored_epoch_at_u64_max` to cover the boundary.
+
+<!-- gh-id: 3177680762 -->
+#### Reply from cmk ([2026-05-03 05:36 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177680762))
+
+Fixed. Explicit `command_id` values now reserve the driver's generated-id range via `reserve_generated_ids_through`, and generated ids advance with a saturating atomic update. Added `explicit_command_id_advances_generated_ids` for the explicit 42 then generated 43 case.
