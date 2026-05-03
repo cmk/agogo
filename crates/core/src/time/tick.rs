@@ -30,9 +30,11 @@ pub struct Tick(pub u64);
 /// Musical time as either a finite `(count × grid)` value or `End`,
 /// the synthetic top value above every finite time.
 ///
-/// Equality and ordering are by tick count, so distinct
-/// finite `(beats, base)` pairs denoting the same duration are equal.
-/// Use [`from_ticks`] to get the canonical finite representation.
+/// Equality is by tick count, so distinct finite `(beats, base)` pairs
+/// denoting the same duration are equal. The partial order is the same
+/// divisibility lattice used by [`Grid`]: `a <= b` iff `a`'s tick count
+/// divides `b`'s tick count, with [`Time::End`] as top. Use
+/// [`from_ticks`] to get the canonical finite representation.
 #[derive(Copy, Clone, Debug)]
 pub enum Time {
     At { beats: u32, base: Grid },
@@ -100,7 +102,8 @@ fn nicest_from_tick_count(n: u64) -> Option<Time> {
     unreachable!("Grid::T512P (tick_count = 1) divides every u64 value");
 }
 
-// Equality / ordering / hashing by tick count, not structurally.
+// Equality / hashing by tick count, not structurally. Ordering is the
+// divisibility lattice over tick counts, not tick magnitude.
 
 impl PartialEq for Time {
     fn eq(&self, other: &Self) -> bool {
@@ -112,13 +115,24 @@ impl Eq for Time {}
 
 impl PartialOrd for Time {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+        match (time_divides(*self, *other), time_divides(*other, *self)) {
+            (true, true) => Some(Ordering::Equal),
+            (true, false) => Some(Ordering::Less),
+            (false, true) => Some(Ordering::Greater),
+            (false, false) => None,
+        }
     }
 }
 
-impl Ord for Time {
-    fn cmp(&self, other: &Self) -> Ordering {
-        time_to_tick(*self).cmp(&time_to_tick(*other))
+fn time_divides(a: Time, b: Time) -> bool {
+    match (a, b) {
+        (_, Time::End) => true,
+        (Time::End, _) => false,
+        _ => {
+            let ta = time_to_tick(a).0;
+            let tb = time_to_tick(b).0;
+            if ta == 0 { tb == 0 } else { tb % ta == 0 }
+        }
     }
 }
 
@@ -309,6 +323,46 @@ mod tests {
                 base: Grid::T8
             }
         );
+    }
+
+    #[test]
+    fn time_partial_ord_uses_divisibility_not_magnitude() {
+        let sixteenth = Time::At {
+            beats: 1,
+            base: Grid::T16,
+        };
+        let eighth = Time::At {
+            beats: 1,
+            base: Grid::T8,
+        };
+
+        assert_eq!(sixteenth.partial_cmp(&eighth), Some(Ordering::Less));
+        assert_eq!(eighth.partial_cmp(&sixteenth), Some(Ordering::Greater));
+    }
+
+    #[test]
+    fn time_partial_ord_has_incomparables() {
+        let sixteenth = Time::At {
+            beats: 1,
+            base: Grid::T16,
+        };
+        let triplet_sixteenth = Time::At {
+            beats: 1,
+            base: Grid::T16T,
+        };
+
+        assert_eq!(sixteenth.partial_cmp(&triplet_sixteenth), None);
+    }
+
+    #[test]
+    fn time_end_is_partial_ord_top() {
+        let finite = Time::At {
+            beats: 1,
+            base: Grid::T1,
+        };
+
+        assert_eq!(finite.partial_cmp(&Time::End), Some(Ordering::Less));
+        assert_eq!(Time::End.partial_cmp(&finite), Some(Ordering::Greater));
     }
 
     // ── Property tests ───────────────────────────────────────────

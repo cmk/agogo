@@ -24,14 +24,12 @@
 //! built from bare `fn` pointers.
 //!
 //! **Orientation of `timetime` and `gridgrid`.** These are lattice
-//! connections: the pair side carries the divisibility product order,
-//! not magnitude. Following the Haskell convention,
-//! `ceil = meet (GCD)` and `floor = join (LCM)`. The generic
-//! adjoint-law tests from `connections/src/conn.rs` use a single
-//! `PartialOrd` and therefore need a *divisibility* `≤` on the
-//! input/output side — `Time`'s and `Grid`'s magnitude order would
-//! give a non-adjoint structure. The tests below build ad-hoc
-//! `*_refine_le` helpers for that reason.
+//! connections over the same divisibility order used by the channel
+//! DSL: `meet` / `&` is GCD, and `join` / `|` is LCM. `TIMETIME` and
+//! `GRIDGRID` therefore use `ceil = join (LCM)` and
+//! `floor = meet (GCD)`. `TICKTIME` is different: it is a magnitude
+//! connection between `Tick` and `Time`, so tests that need magnitude
+//! comparison use [`TICKTIME::inner`] explicitly.
 
 use connections::conn::{ViewL, ViewR};
 use connections::fixed::u64::U128U064;
@@ -153,8 +151,9 @@ fn timetime_ceil(ab: (Time, Time)) -> Time {
     if matches!(a, Time::End) || matches!(b, Time::End) {
         return Time::End;
     }
-    let g = gcd_u64(time_to_tick(a).0, time_to_tick(b).0);
-    from_ticks(Tick(g)).unwrap_or(Time::End)
+    checked_lcm_u64(time_to_tick(a).0, time_to_tick(b).0)
+        .and_then(|l| from_ticks(Tick(l)))
+        .unwrap_or(Time::End)
 }
 
 fn timetime_inner(t: Time) -> (Time, Time) {
@@ -168,22 +167,15 @@ fn timetime_floor(ab: (Time, Time)) -> Time {
         (Time::End, finite) | (finite, Time::End) => return finite,
         _ => {}
     }
-    checked_lcm_u64(time_to_tick(a).0, time_to_tick(b).0)
-        .and_then(|l| from_ticks(Tick(l)))
-        .unwrap_or(Time::At {
-            beats: 0,
-            base: Grid::T1,
-        })
+    let g = gcd_u64(time_to_tick(a).0, time_to_tick(b).0);
+    from_ticks(Tick(g)).unwrap_or(Time::End)
 }
 
 // Divisibility-lattice connection on `Time`.
 //
-// `ceil = meet (GCD)`, `floor = join (LCM)`, `inner = diagonal`.
-// Following Haskell convention — the relevant order here is
-// divisibility of tick counts, not magnitude.
-//
-// `Time::End` is the refinement top. LCM overflow or finite-horizon
-// misses map to the existing refinement bottom, finite zero.
+// `ceil = join (LCM)`, `floor = meet (GCD)`, `inner = diagonal`.
+// `Time::End` is top. LCM overflow or finite-horizon misses map to
+// `End`, making the upper adjoint total instead of hiding the gap.
 connections::triple! {
     #[allow(non_camel_case_types)]
     #[derive(Copy, Clone, Debug, Default)]
@@ -212,7 +204,7 @@ impl TIMETIME {
 
 fn gridgrid_ceil(ab: (Grid, Grid)) -> Grid {
     let (a, b) = ab;
-    a.meet(&b)
+    a.join(&b)
 }
 
 fn gridgrid_inner(t: Grid) -> (Grid, Grid) {
@@ -221,11 +213,11 @@ fn gridgrid_inner(t: Grid) -> (Grid, Grid) {
 
 fn gridgrid_floor(ab: (Grid, Grid)) -> Grid {
     let (a, b) = ab;
-    a.join(&b)
+    a.meet(&b)
 }
 
-// Divisibility-lattice connection on `Grid`. `ceil = meet (GCD of
-// tick counts)`, `floor = join (LCM)`, `inner = diagonal`.
+// Divisibility-lattice connection on `Grid`. `ceil = join (LCM of
+// tick counts)`, `floor = meet (GCD)`, `inner = diagonal`.
 connections::triple! {
     #[allow(non_camel_case_types)]
     #[derive(Copy, Clone, Debug, Default)]
@@ -422,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn timetime_ceil_gcd_of_t4_t8() {
+    fn timetime_ceil_lcm_of_t4_t8() {
         let c = TIMETIME;
         let a = Time::At {
             beats: 1,
@@ -432,18 +424,18 @@ mod tests {
             beats: 1,
             base: Grid::T8,
         }; // 480 ticks
-        // gcd(960, 480) = 480 → Time 1 T8
+        // lcm(960, 480) = 960 → Time 1 T4
         assert_eq!(
             c.ceil((a, b)),
             Time::At {
                 beats: 1,
-                base: Grid::T8
+                base: Grid::T4
             }
         );
     }
 
     #[test]
-    fn timetime_floor_lcm_of_t16_and_t16t() {
+    fn timetime_floor_gcd_of_t16_and_t16t() {
         let c = TIMETIME;
         let a = Time::At {
             beats: 1,
@@ -453,12 +445,12 @@ mod tests {
             beats: 1,
             base: Grid::T16T,
         }; // 160 ticks
-        // lcm(240, 160) = 480 → Time 1 T8
+        // gcd(240, 160) = 80 → Time 1 T32T
         assert_eq!(
             c.floor((a, b)),
             Time::At {
                 beats: 1,
-                base: Grid::T8
+                base: Grid::T32T
             }
         );
     }
@@ -490,20 +482,24 @@ mod tests {
     }
 
     #[test]
-    fn gridgrid_ceil_meet_of_t4_t8() {
+    fn gridgrid_ceil_join_of_t4_t8() {
         let c = GRIDGRID;
-        // gcd of tick counts: gcd(960, 480) = 480 = T8.
-        assert_eq!(c.ceil((Grid::T4, Grid::T8)), Grid::T8);
+        // lcm of tick counts: lcm(960, 480) = 960 = T4.
+        assert_eq!(c.ceil((Grid::T4, Grid::T8)), Grid::T4);
     }
 
     #[test]
-    fn gridgrid_floor_join_of_t4_t8t() {
+    fn gridgrid_floor_meet_of_t4_t8t() {
         let c = GRIDGRID;
-        // T4 = 960, T8T = 320; lcm(960, 320) = 960 = T4.
-        assert_eq!(c.floor((Grid::T4, Grid::T8T)), Grid::T4);
+        // T4 = 960, T8T = 320; gcd(960, 320) = 320 = T8T.
+        assert_eq!(c.floor((Grid::T4, Grid::T8T)), Grid::T8T);
     }
 
     // ── Generic connections-tests laws for magnitude connections ──
+
+    fn ticktime_magnitude_le(a: Time, b: Time) -> bool {
+        TICKTIME.inner(a) <= TICKTIME.inner(b)
+    }
 
     proptest! {
         // ── ticktime ─────────────────────────────────────────────
@@ -511,7 +507,7 @@ mod tests {
         #[test]
         fn ticktime_adjoint(a in arb_any_tick(), b in arb_time()) {
             let c = TICKTIME;
-            let lhs = c.ceil(a) <= b;
+            let lhs = ticktime_magnitude_le(c.ceil(a), b);
             let rhs = a <= c.inner(b);
             prop_assert_eq!(lhs, rhs);
         }
@@ -520,7 +516,7 @@ mod tests {
         fn ticktime_floor_adjoint(a in arb_any_tick(), b in arb_time()) {
             let c = TICKTIME;
             let lhs = c.inner(b) <= a;
-            let rhs = b <= c.floor(a);
+            let rhs = ticktime_magnitude_le(b, c.floor(a));
             prop_assert_eq!(lhs, rhs);
         }
 
@@ -533,7 +529,7 @@ mod tests {
         #[test]
         fn ticktime_kernel(b in arb_time()) {
             let c = TICKTIME;
-            prop_assert!(c.ceil(c.inner(b)) <= b);
+            prop_assert!(ticktime_magnitude_le(c.ceil(c.inner(b)), b));
         }
 
         #[test]
@@ -543,10 +539,10 @@ mod tests {
         ) {
             let c = TICKTIME;
             if a1 <= a2 {
-                prop_assert!(c.ceil(a1) <= c.ceil(a2));
-                prop_assert!(c.floor(a1) <= c.floor(a2));
+                prop_assert!(ticktime_magnitude_le(c.ceil(a1), c.ceil(a2)));
+                prop_assert!(ticktime_magnitude_le(c.floor(a1), c.floor(a2)));
             }
-            if b1 <= b2 {
+            if c.inner(b1) <= c.inner(b2) {
                 prop_assert!(c.inner(b1) <= c.inner(b2));
             }
         }
@@ -572,30 +568,20 @@ mod tests {
 
     // ── Lattice-connection laws for `TIMETIME` and `GRIDGRID` ────
     //
-    // The adjoint structure `join ⊣ diag ⊣ meet` holds under the
-    // "refine-to" order: `a ≤ b ⟺ tc(b) divides tc(a)` (i.e. "b is at
-    // least as fine as a"). The standard divisibility `PartialOrd`
-    // for `Grid` orients the other way around and would give a non-
-    // adjoint structure here, so we use ad-hoc `refine_le` helpers.
+    // These laws use the same divisibility order as `Grid::PartialOrd`
+    // and `Time::PartialOrd`: `a ≤ b` iff `a`'s tick count divides
+    // `b`'s tick count.
 
-    fn gridgrid_refine_le(a: Grid, b: Grid) -> bool {
-        a.tick_count() % b.tick_count() == 0
+    fn gridgrid_le(a: Grid, b: Grid) -> bool {
+        a <= b
     }
 
-    fn timetime_refine_le(a: Time, b: Time) -> bool {
-        if matches!(b, Time::End) {
-            return true;
-        }
-        if matches!(a, Time::End) {
-            return false;
-        }
-        let ta = time_to_tick(a).0;
-        let tb = time_to_tick(b).0;
-        if tb == 0 { ta == 0 } else { ta % tb == 0 }
+    fn timetime_le(a: Time, b: Time) -> bool {
+        a <= b
     }
 
-    fn timetime_pair_refine_le(a: (Time, Time), b: (Time, Time)) -> bool {
-        timetime_refine_le(a.0, b.0) && timetime_refine_le(a.1, b.1)
+    fn timetime_pair_le(a: (Time, Time), b: (Time, Time)) -> bool {
+        timetime_le(a.0, b.0) && timetime_le(a.1, b.1)
     }
 
     macro_rules! law_battery_with_order {
@@ -684,8 +670,8 @@ mod tests {
         mod timetime_law_battery,
         fine: (arb_time(), arb_time()),
         coarse: arb_time(),
-        fine_le: timetime_pair_refine_le,
-        coarse_le: timetime_refine_le,
+        fine_le: timetime_pair_le,
+        coarse_le: timetime_le,
         ceil: timetime_ceil,
         inner: timetime_inner,
         floor: timetime_floor,
@@ -695,15 +681,15 @@ mod tests {
         // ── gridgrid connection ──────────────────────────────────
 
         #[test]
-        fn gridgrid_ceil_is_meet(a in arb_grid(), b in arb_grid()) {
+        fn gridgrid_ceil_is_join(a in arb_grid(), b in arb_grid()) {
             let c = GRIDGRID;
-            prop_assert_eq!(c.ceil((a, b)), a.meet(&b));
+            prop_assert_eq!(c.ceil((a, b)), a.join(&b));
         }
 
         #[test]
-        fn gridgrid_floor_is_join(a in arb_grid(), b in arb_grid()) {
+        fn gridgrid_floor_is_meet(a in arb_grid(), b in arb_grid()) {
             let c = GRIDGRID;
-            prop_assert_eq!(c.floor((a, b)), a.join(&b));
+            prop_assert_eq!(c.floor((a, b)), a.meet(&b));
         }
 
         #[test]
@@ -717,8 +703,8 @@ mod tests {
             a in arb_grid(), b in arb_grid(), z in arb_grid(),
         ) {
             let c = GRIDGRID;
-            let lhs = gridgrid_refine_le(c.ceil((a, b)), z);
-            let rhs = gridgrid_refine_le(a, z) && gridgrid_refine_le(b, z);
+            let lhs = gridgrid_le(c.ceil((a, b)), z);
+            let rhs = gridgrid_le(a, z) && gridgrid_le(b, z);
             prop_assert_eq!(lhs, rhs);
         }
 
@@ -726,14 +712,14 @@ mod tests {
         fn gridgrid_closed(a in arb_grid(), b in arb_grid()) {
             let c = GRIDGRID;
             let (x, y) = c.inner(c.ceil((a, b)));
-            prop_assert!(gridgrid_refine_le(a, x));
-            prop_assert!(gridgrid_refine_le(b, y));
+            prop_assert!(gridgrid_le(a, x));
+            prop_assert!(gridgrid_le(b, y));
         }
 
         #[test]
         fn gridgrid_kernel(z in arb_grid()) {
             let c = GRIDGRID;
-            prop_assert!(gridgrid_refine_le(c.ceil(c.inner(z)), z));
+            prop_assert!(gridgrid_le(c.ceil(c.inner(z)), z));
         }
 
         #[test]
@@ -743,14 +729,14 @@ mod tests {
             z1 in arb_grid(), z2 in arb_grid(),
         ) {
             let c = GRIDGRID;
-            if gridgrid_refine_le(a1, a2) && gridgrid_refine_le(b1, b2) {
-                prop_assert!(gridgrid_refine_le(c.ceil((a1, b1)), c.ceil((a2, b2))));
+            if gridgrid_le(a1, a2) && gridgrid_le(b1, b2) {
+                prop_assert!(gridgrid_le(c.ceil((a1, b1)), c.ceil((a2, b2))));
             }
-            if gridgrid_refine_le(z1, z2) {
+            if gridgrid_le(z1, z2) {
                 let (x1, y1) = c.inner(z1);
                 let (x2, y2) = c.inner(z2);
-                prop_assert!(gridgrid_refine_le(x1, x2));
-                prop_assert!(gridgrid_refine_le(y1, y2));
+                prop_assert!(gridgrid_le(x1, x2));
+                prop_assert!(gridgrid_le(y1, y2));
             }
         }
 
@@ -765,26 +751,26 @@ mod tests {
         // ── timetime connection ──────────────────────────────────
 
         #[test]
-        fn timetime_ceil_is_gcd_on_ticks(
-            a in arb_small_time(), b in arb_small_time(),
-        ) {
-            let c = TIMETIME;
-            let ta = time_to_tick(a).0;
-            let tb = time_to_tick(b).0;
-            prop_assert_eq!(time_to_tick(c.ceil((a, b))).0, gcd_u64(ta, tb));
-        }
-
-        #[test]
-        fn timetime_floor_is_lcm_on_ticks(
+        fn timetime_ceil_is_lcm_on_ticks(
             a in arb_small_time(), b in arb_small_time(),
         ) {
             let c = TIMETIME;
             let ta = time_to_tick(a).0;
             let tb = time_to_tick(b).0;
             prop_assert_eq!(
-                time_to_tick(c.floor((a, b))).0,
+                time_to_tick(c.ceil((a, b))).0,
                 checked_lcm_u64(ta, tb).expect("small Time LCM fits in u64")
             );
+        }
+
+        #[test]
+        fn timetime_floor_is_gcd_on_ticks(
+            a in arb_small_time(), b in arb_small_time(),
+        ) {
+            let c = TIMETIME;
+            let ta = time_to_tick(a).0;
+            let tb = time_to_tick(b).0;
+            prop_assert_eq!(time_to_tick(c.floor((a, b))).0, gcd_u64(ta, tb));
         }
 
         #[test]
@@ -798,8 +784,8 @@ mod tests {
             a in arb_time(), b in arb_time(), z in arb_time(),
         ) {
             let c = TIMETIME;
-            let lhs = timetime_refine_le(c.ceil((a, b)), z);
-            let rhs = timetime_refine_le(a, z) && timetime_refine_le(b, z);
+            let lhs = timetime_le(c.ceil((a, b)), z);
+            let rhs = timetime_le(a, z) && timetime_le(b, z);
             prop_assert_eq!(lhs, rhs);
         }
 
@@ -807,14 +793,14 @@ mod tests {
         fn time_closed(a in arb_time(), b in arb_time()) {
             let c = TIMETIME;
             let (x, y) = c.inner(c.ceil((a, b)));
-            prop_assert!(timetime_refine_le(a, x));
-            prop_assert!(timetime_refine_le(b, y));
+            prop_assert!(timetime_le(a, x));
+            prop_assert!(timetime_le(b, y));
         }
 
         #[test]
         fn time_kernel(z in arb_time()) {
             let c = TIMETIME;
-            prop_assert!(timetime_refine_le(c.ceil(c.inner(z)), z));
+            prop_assert!(timetime_le(c.ceil(c.inner(z)), z));
         }
 
         #[test]
@@ -832,16 +818,16 @@ mod tests {
             z1 in arb_time(), z2 in arb_time(),
         ) {
             let c = TIMETIME;
-            if timetime_refine_le(a1, a2) && timetime_refine_le(b1, b2) {
+            if timetime_le(a1, a2) && timetime_le(b1, b2) {
                 prop_assert!(
-                    timetime_refine_le(c.ceil((a1, b1)), c.ceil((a2, b2)))
+                    timetime_le(c.ceil((a1, b1)), c.ceil((a2, b2)))
                 );
             }
-            if timetime_refine_le(z1, z2) {
+            if timetime_le(z1, z2) {
                 let (x1, y1) = c.inner(z1);
                 let (x2, y2) = c.inner(z2);
-                prop_assert!(timetime_refine_le(x1, x2));
-                prop_assert!(timetime_refine_le(y1, y2));
+                prop_assert!(timetime_le(x1, x2));
+                prop_assert!(timetime_le(y1, y2));
             }
         }
     }
