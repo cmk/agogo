@@ -12,7 +12,7 @@ use std::sync::{Arc, PoisonError};
 
 use agogo::core::conn::sample::SampleTime;
 use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::Playhead;
+use agogo::core::control::{Playhead, TransportCommandApply};
 use rust_fsm::state_machine;
 
 pub const MAX_SOURCE_ID_LEN: usize = 64;
@@ -324,6 +324,8 @@ pub struct CommandApplyReport {
     pub applied_commands: u32,
     pub missed_deadlines: u32,
     pub unsupported_commands: u32,
+    pub transport_queue_full: u32,
+    pub teardown_rejected_commands: u32,
 }
 
 /// Per-buffer scalar snapshot read by the audio callback.
@@ -977,6 +979,8 @@ pub fn apply_control_to_playhead<R: SampleTime>(
         applied_commands: 0,
         missed_deadlines: 0,
         unsupported_commands: 0,
+        transport_queue_full: 0,
+        teardown_rejected_commands: 0,
     };
 
     while let Some(drain) = consumer.drain_due_command() {
@@ -986,18 +990,10 @@ pub fn apply_control_to_playhead<R: SampleTime>(
             }
             RtCommandDrain::Command(envelope) => match envelope.command {
                 ControlCommand::Start => {
-                    if playhead.apply_transport_start() {
-                        report.applied_commands = report.applied_commands.saturating_add(1);
-                    } else {
-                        report.unsupported_commands = report.unsupported_commands.saturating_add(1);
-                    }
+                    report.record_transport_apply(playhead.apply_transport_start());
                 }
                 ControlCommand::Stop => {
-                    if playhead.apply_transport_stop() {
-                        report.applied_commands = report.applied_commands.saturating_add(1);
-                    } else {
-                        report.unsupported_commands = report.unsupported_commands.saturating_add(1);
-                    }
+                    report.record_transport_apply(playhead.apply_transport_stop());
                 }
                 ControlCommand::ChannelConfigure { .. } | ControlCommand::Locate { .. } => {
                     report.unsupported_commands = report.unsupported_commands.saturating_add(1);
@@ -1007,6 +1003,25 @@ pub fn apply_control_to_playhead<R: SampleTime>(
     }
 
     report
+}
+
+impl CommandApplyReport {
+    fn record_transport_apply(&mut self, result: TransportCommandApply) {
+        match result {
+            TransportCommandApply::Applied => {
+                self.applied_commands = self.applied_commands.saturating_add(1);
+            }
+            TransportCommandApply::UnsupportedPolicy => {
+                self.unsupported_commands = self.unsupported_commands.saturating_add(1);
+            }
+            TransportCommandApply::QueueFull => {
+                self.transport_queue_full = self.transport_queue_full.saturating_add(1);
+            }
+            TransportCommandApply::TeardownRequested => {
+                self.teardown_rejected_commands = self.teardown_rejected_commands.saturating_add(1);
+            }
+        }
+    }
 }
 
 fn tempo_slot_transition(state: TempoSlotState, event: TempoSlotEvent) -> TempoSlotState {
@@ -1575,6 +1590,59 @@ mod tests {
     }
 
     #[test]
+    fn transport_queue_full_reports_separately() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(129, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Internal {
+                start_emitted: true,
+            },
+        );
+
+        for id in 1..=129 {
+            assert_eq!(
+                producer
+                    .admit_ordered(ControlCommand::Start, metadata(id, 1))
+                    .status,
+                AdmissionStatus::Accepted
+            );
+        }
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+
+        assert_eq!(report.applied_commands, 128);
+        assert_eq!(report.transport_queue_full, 1);
+        assert_eq!(report.unsupported_commands, 0);
+        assert_eq!(report.teardown_rejected_commands, 0);
+    }
+
+    #[test]
+    fn teardown_requested_reports_without_staging_command() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Internal {
+                start_emitted: true,
+            },
+        );
+        playhead.stop_handle().request_stop();
+
+        let start = producer.admit_ordered(ControlCommand::Start, metadata(1, 1));
+        let stop = producer.admit_ordered(ControlCommand::Stop, metadata(2, 1));
+        assert_eq!(start.status, AdmissionStatus::Accepted);
+        assert_eq!(stop.status, AdmissionStatus::Accepted);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+
+        assert_eq!(report.applied_commands, 0);
+        assert_eq!(report.teardown_rejected_commands, 2);
+        assert_eq!(report.transport_queue_full, 0);
+        assert_eq!(report.unsupported_commands, 0);
+    }
+
+    #[test]
     fn rt_command_application_no_realloc() {
         let bpm = Tempo::from_bpm_integer(120);
         let (producer, mut consumer) = spsc(4, bpm);
@@ -1614,6 +1682,8 @@ mod tests {
         let report = apply_control_to_playhead(&mut consumer, &mut playhead);
 
         assert_eq!(report.applied_commands, 4);
+        assert_eq!(report.transport_queue_full, 0);
+        assert_eq!(report.teardown_rejected_commands, 0);
         assert_eq!(playhead.max_events_per_buffer(), cap_before);
     }
 
