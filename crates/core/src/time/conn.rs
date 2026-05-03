@@ -579,7 +579,6 @@ mod tests {
     use crate::time::arb::arb_grid;
     use crate::time::arb::{arb_any_tick, arb_small_time, arb_tick, arb_time};
     use proptest::prelude::*;
-    use std::cmp::Ordering;
 
     // ── Spot checks ──────────────────────────────────────────────
 
@@ -1023,77 +1022,101 @@ mod tests {
         if tb == 0 { ta == 0 } else { ta % tb == 0 }
     }
 
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    struct RefinedTime(Time);
+    fn timetime_pair_refine_le(a: (Time, Time), b: (Time, Time)) -> bool {
+        timetime_refine_le(a.0, b.0) && timetime_refine_le(a.1, b.1)
+    }
 
-    impl PartialOrd for RefinedTime {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            match (
-                timetime_refine_le(self.0, other.0),
-                timetime_refine_le(other.0, self.0),
-            ) {
-                (true, true) => Some(Ordering::Equal),
-                (true, false) => Some(Ordering::Less),
-                (false, true) => Some(Ordering::Greater),
-                (false, false) => None,
+    macro_rules! law_battery_with_order {
+        (
+            mod $m:ident,
+            fine: $fine:expr,
+            coarse: $coarse:expr,
+            fine_le: $fine_le:path,
+            coarse_le: $coarse_le:path,
+            ceil: $ceil:path,
+            inner: $inner:path,
+            floor: $floor:path $(,)?
+        ) => {
+            mod $m {
+                use super::*;
+
+                proptest! {
+                    #[test]
+                    fn galois_l(a in $fine, b in $coarse) {
+                        prop_assert_eq!($coarse_le($ceil(a), b), $fine_le(a, $inner(b)));
+                    }
+
+                    #[test]
+                    fn galois_r(a in $fine, b in $coarse) {
+                        prop_assert_eq!($fine_le($inner(b), a), $coarse_le(b, $floor(a)));
+                    }
+
+                    #[test]
+                    fn closure_l(a in $fine) {
+                        prop_assert!($fine_le(a, $inner($ceil(a))));
+                    }
+
+                    #[test]
+                    fn closure_r(a in $fine) {
+                        prop_assert!($fine_le($inner($floor(a)), a));
+                    }
+
+                    #[test]
+                    fn kernel_l(b in $coarse) {
+                        prop_assert!($coarse_le($ceil($inner(b)), b));
+                    }
+
+                    #[test]
+                    fn kernel_r(b in $coarse) {
+                        prop_assert!($coarse_le(b, $floor($inner(b))));
+                    }
+
+                    #[test]
+                    fn monotone_l(a1 in $fine, a2 in $fine) {
+                        if $fine_le(a1, a2) {
+                            prop_assert!($coarse_le($ceil(a1), $ceil(a2)));
+                        }
+                    }
+
+                    #[test]
+                    fn monotone_r(b1 in $coarse, b2 in $coarse) {
+                        if $coarse_le(b1, b2) {
+                            prop_assert!($fine_le($inner(b1), $inner(b2)));
+                        }
+                    }
+
+                    #[test]
+                    fn idempotent(a in $fine) {
+                        let once = $inner($ceil(a));
+                        let twice = $inner($ceil(once));
+                        prop_assert_eq!(once, twice);
+                    }
+
+                    #[test]
+                    fn floor_le_ceil(a in $fine) {
+                        prop_assert!($coarse_le($floor(a), $ceil(a)));
+                    }
+
+                    #[test]
+                    fn order_reflecting(b1 in $coarse, b2 in $coarse) {
+                        if $fine_le($inner(b1), $inner(b2)) {
+                            prop_assert!($coarse_le(b1, b2));
+                        }
+                    }
+                }
             }
-        }
+        };
     }
 
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    struct RefinedTimePair(RefinedTime, RefinedTime);
-
-    impl RefinedTimePair {
-        fn product_le(self, other: Self) -> bool {
-            self.0 <= other.0 && self.1 <= other.1
-        }
-    }
-
-    impl PartialOrd for RefinedTimePair {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            match (self.product_le(*other), other.product_le(*self)) {
-                (true, true) => Some(Ordering::Equal),
-                (true, false) => Some(Ordering::Less),
-                (false, true) => Some(Ordering::Greater),
-                (false, false) => None,
-            }
-        }
-    }
-
-    fn refined_timetime_ceil(ab: RefinedTimePair) -> RefinedTime {
-        RefinedTime(TIMETIME.ceil((ab.0.0, ab.1.0)))
-    }
-
-    fn refined_timetime_inner(t: RefinedTime) -> RefinedTimePair {
-        let (a, b) = TIMETIME.inner(t.0);
-        RefinedTimePair(RefinedTime(a), RefinedTime(b))
-    }
-
-    fn refined_timetime_floor(ab: RefinedTimePair) -> RefinedTime {
-        RefinedTime(TIMETIME.floor((ab.0.0, ab.1.0)))
-    }
-
-    fn arb_refined_time() -> impl Strategy<Value = RefinedTime> {
-        arb_time().prop_map(RefinedTime)
-    }
-
-    fn arb_refined_time_pair() -> impl Strategy<Value = RefinedTimePair> {
-        (arb_time(), arb_time()).prop_map(|(a, b)| RefinedTimePair(RefinedTime(a), RefinedTime(b)))
-    }
-
-    connections::triple! {
-        RefinedTimeTime : RefinedTimePair => RefinedTime {
-            ceil: refined_timetime_ceil,
-            inner: refined_timetime_inner,
-            floor: refined_timetime_floor,
-        }
-    }
-
-    connections::law_battery! {
+    law_battery_with_order! {
         mod timetime_law_battery,
-        conn: RefinedTimeTime,
-        fine: arb_refined_time_pair(),
-        coarse: arb_refined_time(),
+        fine: (arb_time(), arb_time()),
+        coarse: arb_time(),
+        fine_le: timetime_pair_refine_le,
+        coarse_le: timetime_refine_le,
+        ceil: timetime_ceil,
+        inner: timetime_inner,
+        floor: timetime_floor,
     }
 
     /// True when `quantize_at(g).ceil(n)` fits back through
