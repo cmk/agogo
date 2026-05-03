@@ -101,3 +101,14 @@ Review comment:
 
 - [P2] Make forced audit runs cover the full pathspec — scripts/audit.py:294-294
   When a pin exists and there are any changed files, `scripts/audit.py run <name> --force` still passes only the `since-last` delta into Codex because the full-pathspec `git ls-files` branch runs only when `not changed`. This contradicts the `--force` help text and prevents a manual full audit after a partial change; use `args.force` to select the full pathspec regardless of whether the delta is empty.
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-02-09
+**Commits:** 16 (origin/main..plan-2026-05-02-09)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The changes compile, the full workspace test suite passes, and clippy reports no warnings. I did not find any discrete actionable defects introduced by this patch.
+
