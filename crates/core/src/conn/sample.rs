@@ -48,6 +48,11 @@
 //!
 //! Plus one `Conn<FD12, Sxx>` per rate connecting the sample tier to
 //! the decimal SI-time tier from [`crate::conn::fixed`].
+//! Each `Sxx` type also has an explicit transparent iso to
+//! `FixedI64<U16>` (`S048Q016`) and a composed left connection to
+//! whole `i64` sample counts (`S048I064`). Call sites that need a
+//! semantic sample-count conversion use those named conns; raw Q48.16
+//! representation access stays on the newtype.
 //!
 //! # Galois semantics for lossy `inner`
 //!
@@ -65,11 +70,13 @@
 
 use crate::conn::fixed::FD12;
 use connections::conn::{ViewL, ViewR};
+use connections::fixed::i64::{Q000I064, Q016Q000};
 use fixed::FixedI64;
-use fixed::types::extra::U16;
+use fixed::types::extra::{U0, U16};
 
 /// Q48.16 samples. Alias for clarity; all rate newtypes wrap this.
 pub type Q48_16 = FixedI64<U16>;
+pub type Q64_0 = FixedI64<U0>;
 
 /// Rates in audio samples per second.
 pub trait SampleRate {
@@ -307,67 +314,47 @@ pico_conn!(FD12S176, S176, 9_765_625, 112_896);
 pico_conn!(FD12S192, S192, 1_953_125, 24_576);
 
 // ────────────────────────────────────────────────────────────────────
-// SampleTime — agogo-local convenience trait over the rate types.
-//
-// Provides uniform `from_bits` / `to_bits` / `from_sample` / `sample`
-// methods so generic code (notably `arb::pulse_train` and `sync::*`)
-// can construct and read any rate type without a match arm.
-// Moved here from `crate::fxp` (Plan 2026-04-28-03 T2): the trait is
-// rate-typed and lives over the `Sxxx` family defined above.
+// Rate ↔ Q16 / i64 connections
 // ────────────────────────────────────────────────────────────────────
 
-/// Common Q48.16-bits interface over the `Sxxx` rate types from
-/// [`crate::conn::sample`]. Lets generic DSP code accept an arbitrary
-/// `R: SampleTime` rather than committing to a single rate.
-pub trait SampleTime: SampleRate + Copy + Default + Ord + core::fmt::Debug {
-    /// Construct from raw Q48.16 bits.
-    fn from_bits_q48_16(bits: i64) -> Self;
-    /// Extract raw Q48.16 bits.
-    fn to_bits_q48_16(self) -> i64;
-
-    /// Construct from an integer sample count.
-    fn from_sample(n: i64) -> Self {
-        Self::from_bits_q48_16(n << 16)
-    }
-
-    /// Integer sample part (arithmetic shift, rounds toward −∞ for negatives).
-    fn sample(self) -> i64 {
-        self.to_bits_q48_16() >> 16
-    }
-
-    /// Q48.16 sample position as `f64` — integer sample count plus
-    /// sub-sample fraction. The `bits / 2^16` arithmetic is the
-    /// standard binary-fixed → float conversion; the `1u64 << 16`
-    /// divisor is intrinsic to the Q48.16 representation, not an
-    /// SI unit shift, so it doesn't fall under the M-family
-    /// "open-coded unit arithmetic" prohibition. Wrapped here as a
-    /// named method so call sites read as intent ("fractional sample
-    /// position") rather than open-coded scale division.
-    fn samples_f64(self) -> f64 {
-        // PI-exempt: Q48.16 → f64 (binary scale, not SI).
-        self.to_bits_q48_16() as f64 / (1u64 << 16) as f64
-    }
-}
-
-macro_rules! impl_sample_time {
-    ($Rate:ident) => {
-        impl SampleTime for $Rate {
-            fn from_bits_q48_16(bits: i64) -> Self {
-                <$Rate>::from_bits(bits)
-            }
-            fn to_bits_q48_16(self) -> i64 {
-                self.to_bits()
+macro_rules! sample_q016_conn {
+    ($CONN:ident, $Rate:ident) => {
+        connections::iso! {
+            pub $CONN : $Rate => Q48_16 {
+                forward: |s: $Rate| s.0,
+                back:    |q: Q48_16| $Rate(q),
             }
         }
     };
 }
 
-impl_sample_time!(S044);
-impl_sample_time!(S048);
-impl_sample_time!(S088);
-impl_sample_time!(S096);
-impl_sample_time!(S176);
-impl_sample_time!(S192);
+macro_rules! sample_i064_conn {
+    ($CONN:ident, $Rate:ident, $Q016:ident) => {
+        pub struct $CONN;
+
+        impl ViewL<$Rate, i64> for $CONN {
+            const L: connections::conn::ConnL<$Rate, i64> = connections::compose_l!(
+                <$Q016 as ViewL<$Rate, Q48_16>>::L,
+                <Q016Q000 as ViewL<Q48_16, Q64_0>>::L,
+                <Q000I064 as ViewL<Q64_0, i64>>::L,
+            );
+        }
+    };
+}
+
+macro_rules! sample_whole_conn {
+    ($Q016:ident, $I064:ident, $Rate:ident) => {
+        sample_q016_conn!($Q016, $Rate);
+        sample_i064_conn!($I064, $Rate, $Q016);
+    };
+}
+
+sample_whole_conn!(S044Q016, S044I064, S044);
+sample_whole_conn!(S048Q016, S048I064, S048);
+sample_whole_conn!(S088Q016, S088I064, S088);
+sample_whole_conn!(S096Q016, S096I064, S096);
+sample_whole_conn!(S176Q016, S176I064, S176);
+sample_whole_conn!(S192Q016, S192I064, S192);
 
 #[cfg(test)]
 mod tests {
@@ -399,6 +386,15 @@ mod tests {
         let s = S048::from_bits((1 << 16) | 0x4000);
         assert_eq!(s.sample(), 1);
         assert_eq!(s.sub_q16(), 0x4000);
+    }
+
+    #[test]
+    fn s048_i064_spots() {
+        assert_eq!(S048I064.inner(0).to_bits(), 0);
+        assert_eq!(S048I064.inner(1).to_bits(), 1 << 16);
+        assert_eq!(S048I064.ceil(S048::from_bits((1 << 16) - 1)), 1);
+        assert_eq!(S048I064.ceil(S048::from_bits(-1)), 0);
+        assert_eq!(S048I064.ceil(S048::from_bits(-(1 << 16) - 1)), -1);
     }
 
     #[test]
@@ -688,6 +684,35 @@ mod tests {
     props_for_pico_conn!(p_fd12s096, FD12S096, S096, 1_953_125, 12_288);
     props_for_pico_conn!(p_fd12s176, FD12S176, S176, 9_765_625, 112_896);
     props_for_pico_conn!(p_fd12s192, FD12S192, S192, 1_953_125, 24_576);
+
+    macro_rules! props_for_sample_whole_conn {
+        ($iso_mod:ident, $l_mod:ident, $iso:ident, $whole:ident, $Rate:ident) => {
+            connections::law_battery! {
+                mod $iso_mod,
+                conn: $iso,
+                fine: any::<i64>().prop_map($Rate::from_bits),
+                coarse: any::<i64>().prop_map(Q48_16::from_bits),
+                subset: iso_only,
+                cases: 64,
+            }
+
+            connections::law_battery! {
+                mod $l_mod,
+                conn: $whole,
+                fine: any::<i64>().prop_map($Rate::from_bits),
+                coarse: any::<i64>(),
+                subset: l_only,
+                cases: 64,
+            }
+        };
+    }
+
+    props_for_sample_whole_conn!(p_s044q016, p_s044i064, S044Q016, S044I064, S044);
+    props_for_sample_whole_conn!(p_s048q016, p_s048i064, S048Q016, S048I064, S048);
+    props_for_sample_whole_conn!(p_s088q016, p_s088i064, S088Q016, S088I064, S088);
+    props_for_sample_whole_conn!(p_s096q016, p_s096i064, S096Q016, S096I064, S096);
+    props_for_sample_whole_conn!(p_s176q016, p_s176i064, S176Q016, S176I064, S176);
+    props_for_sample_whole_conn!(p_s192q016, p_s192i064, S192Q016, S192I064, S192);
 
     // Sanity-check the FD12↔sample rate against the transcendental
     // definition: inner(Sxx::from_sample(1)) should be within 0.5 ps

@@ -1,10 +1,12 @@
 //! Unified phase source: internal free-running clock or external PLL.
 
 use crate::conn::phase::Phase;
-use crate::conn::sample::SampleTime;
+use crate::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate};
 use crate::conn::tempo::Tempo;
-use crate::control::sync::detect::PeakDetector;
+use crate::control::sync::detect::{Peak, PeakDetector};
 use crate::control::sync::pll::Pll;
+
+type DetectorProcess<R> = fn(&mut PeakDetector<R>, &[f32], u64) -> Vec<Peak<R>>;
 
 /// Extension trait for user-provided phase sources.
 ///
@@ -33,11 +35,11 @@ pub trait PhaseSourceImpl: Send {
 /// (Ableton Link, DIN sync, etc.) that live in sibling crates to
 /// keep their build dependencies out of `agogo-core`.
 ///
-/// Rate-parameterised via `R: SampleTime` so the `PeakDetector` and
+/// Rate-parameterised by a concrete sample type so the `PeakDetector` and
 /// `Pll` share one rate — mixing rates is a type error. (The
 /// `Custom` variant is rate-opaque; its implementor is responsible
 /// for matching the host rate however its backend defines it.)
-pub enum PhaseSource<R: SampleTime> {
+pub enum PhaseSource<R> {
     /// Free-running internal clock. Phase is deterministic from
     /// `(bpm, R::HZ, n)` — no state, no drift, no jitter.
     Internal { bpm: Tempo },
@@ -53,64 +55,102 @@ pub enum PhaseSource<R: SampleTime> {
     Custom(Box<dyn PhaseSourceImpl + Send>),
 }
 
-impl<R: SampleTime> PhaseSource<R> {
-    /// Phase in cycles [0, 1) at the given absolute sample index `n`.
-    ///
-    /// `Internal` computes deterministically from `(bpm, R::HZ, n)`.
-    ///
-    /// `External` delegates to `Pll::predicted_phase_at`, which keeps
-    /// the f64 phase-advance contained inside the PI-exempt zone.
-    /// Returns `Phase::ZERO` if no pulse has been observed yet.
-    ///
-    /// `Custom` delegates to the boxed `PhaseSourceImpl`.
-    pub fn phase_at_sample(&mut self, n: u64) -> Phase {
+impl<R> PhaseSource<R> {
+    fn phase_at_sample_with(
+        &mut self,
+        n: u64,
+        sr: u32,
+        from_bits: fn(i64) -> R,
+        to_bits: fn(R) -> i64,
+        pll_project: fn(&Pll<R>, R) -> Phase,
+    ) -> Phase
+    where
+        R: Copy,
+    {
         match self {
             PhaseSource::Internal { bpm } => {
-                // Compute phase exactly (modulo the final u32 truncation)
-                // by keeping `n · bpm · 2^32` together in u128 before
-                // dividing, so rounding doesn't accumulate per-sample
-                // via a precomputed inc_q32.
                 let num: u128 = n as u128 * bpm.0 as u128 * (1u128 << 32);
-                let den: u128 = 60_000_000u128 * R::HZ as u128;
+                let den: u128 = 60_000_000u128 * sr as u128;
                 Phase((num / den) as u32)
             }
             PhaseSource::External { pll, .. } => match pll.last_pulse_sample() {
                 None => Phase::ZERO,
                 Some(last) => {
-                    // Elapsed samples since the last observed pulse,
-                    // represented in R's Q48.16. `n` is u64 but Q48.16
-                    // only covers i64 — panic if a caller feeds a
-                    // stream index past ~2⁴⁷ samples (93 000 years at
-                    // 48 kHz, never reached in practice).
-                    let last_bits = last.to_bits_q48_16();
+                    let last_bits = to_bits(last);
                     let n_bits = i64::try_from(n as i128 * 65_536)
                         .expect("sample index in Q48.16 must fit in i64");
                     let elapsed_bits = n_bits.wrapping_sub(last_bits);
-                    let elapsed = R::from_bits_q48_16(elapsed_bits);
-                    pll.predicted_phase_at(elapsed)
+                    pll_project(pll, from_bits(elapsed_bits))
                 }
             },
             PhaseSource::Custom(inner) => inner.phase_at_sample(n),
         }
     }
 
-    /// Feed a block of audio samples into the clock. No-op for
-    /// `Internal`; routes to detector → PLL for `External`; delegates
-    /// to the `PhaseSourceImpl` for `Custom`. Silent blocks leave the
-    /// PLL untouched — [`Self::phase_at_sample`] projects analytically from
-    /// the last observed pulse.
-    pub fn feed_samples(&mut self, samples: &[f32], start: u64) {
+    fn feed_samples_with(
+        &mut self,
+        samples: &[f32],
+        start: u64,
+        detector_process: DetectorProcess<R>,
+        pll_step: fn(&mut Pll<R>, Option<R>) -> crate::control::sync::pll::PllOutput,
+    ) {
         match self {
             PhaseSource::Internal { .. } => {}
             PhaseSource::External { detector, pll } => {
-                for p in detector.process(samples, start) {
-                    pll.step(Some(p.sample_index));
+                for p in detector_process(detector, samples, start) {
+                    pll_step(pll, Some(p.sample_index));
                 }
             }
             PhaseSource::Custom(inner) => inner.feed_samples(samples, start),
         }
     }
 }
+
+macro_rules! impl_phase_source_rate {
+    ($Rate:ident) => {
+        impl PhaseSource<$Rate> {
+            /// Phase in cycles [0, 1) at the given absolute sample index `n`.
+            ///
+            /// `Internal` computes deterministically from `(bpm, R::HZ, n)`.
+            ///
+            /// `External` delegates to `Pll::predicted_phase_at`, which keeps
+            /// the f64 phase-advance contained inside the PI-exempt zone.
+            /// Returns `Phase::ZERO` if no pulse has been observed yet.
+            ///
+            /// `Custom` delegates to the boxed `PhaseSourceImpl`.
+            pub fn phase_at_sample(&mut self, n: u64) -> Phase {
+                self.phase_at_sample_with(
+                    n,
+                    $Rate::HZ,
+                    $Rate::from_bits,
+                    $Rate::to_bits,
+                    Pll::<$Rate>::predicted_phase_at,
+                )
+            }
+
+            /// Feed a block of audio samples into the clock. No-op for
+            /// `Internal`; routes to detector → PLL for `External`; delegates
+            /// to the `PhaseSourceImpl` for `Custom`. Silent blocks leave the
+            /// PLL untouched — [`Self::phase_at_sample`] projects analytically from
+            /// the last observed pulse.
+            pub fn feed_samples(&mut self, samples: &[f32], start: u64) {
+                self.feed_samples_with(
+                    samples,
+                    start,
+                    PeakDetector::<$Rate>::process,
+                    Pll::<$Rate>::step,
+                )
+            }
+        }
+    };
+}
+
+impl_phase_source_rate!(S044);
+impl_phase_source_rate!(S048);
+impl_phase_source_rate!(S088);
+impl_phase_source_rate!(S096);
+impl_phase_source_rate!(S176);
+impl_phase_source_rate!(S192);
 
 #[cfg(test)]
 mod tests {
@@ -144,7 +184,7 @@ mod tests {
         });
         let pll = Pll::<S048>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
         let mut src = PhaseSource::<S048>::External { detector, pll };
-        let (samples, _): (Vec<f32>, Vec<S048>) = crate::control::sync::pulse::pulse_train::<S048>(
+        let (samples, _): (Vec<f32>, Vec<S048>) = crate::control::sync::pulse::pulse_train_s048(
             Tempo::from_bpm_integer(120),
             24,
             Pico(0),
@@ -166,10 +206,10 @@ mod tests {
         let mut src = PhaseSource::<S048>::External { detector, pll };
         let bpm = Tempo::from_bpm_integer(120);
         let (samples, peaks): (Vec<f32>, Vec<S048>) =
-            crate::control::sync::pulse::pulse_train::<S048>(bpm, 24, Pico(0), 4, 1);
+            crate::control::sync::pulse::pulse_train_s048(bpm, 24, Pico(0), 4, 1);
         src.feed_samples(&samples, 0);
 
-        let last_samples = peaks.last().unwrap().to_bits_q48_16() as f64 / 65_536.0;
+        let last_samples = peaks.last().unwrap().to_bits() as f64 / 65_536.0;
         let spacing = S048::HZ as f64 / (120.0 * 24.0 / 60.0);
         let halfway = (last_samples + spacing * 0.5) as u64;
         let p_half = src.phase_at_sample(halfway);
