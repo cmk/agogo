@@ -115,3 +115,13 @@ Review comment:
 
 - [P2] Preserve pending tempo while publishing a replacement — crates/host/src/bridge.rs:393-393
   When a second `agogo.tempo.set` starts just before `begin_buffer()` while an earlier accepted tempo is still pending for that same buffer, this write marks the seqlock odd and the RT side returns `None` instead of consuming the older value. If the new write then observes the advanced epoch and returns `late`, it clears the slot, so the earlier accepted tempo is silently dropped and never affects the deadline buffer.
+
+## Local review (2026-05-02)
+
+**Branch:** plan-2026-05-02-08
+**Commits:** 8 (origin/main..plan-2026-05-02-08)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The admission envelope, deadline checks, driver JSON responses, and compatibility paths appear consistent with the stated v0.2 contract, and the relevant host/workspace tests pass. I did not find any discrete correctness issues introduced by this patch.
