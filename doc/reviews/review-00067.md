@@ -120,3 +120,28 @@ Copilot reviewed 22 out of 22 changed files in this pull request and generated 5
 ### Copilot on [`crates/core/src/control/event.rs:98`](https://github.com/cmk/agogo/pull/67#discussion_r3178745410) (2026-05-03 20:46 UTC)
 
 `tick_stream` is a public API, but this early return now turns an unsupported sample rate or `Tempo::ZERO` into an ordinary empty schedule. That makes "invalid scheduling parameters" indistinguishable from "this buffer legitimately has no events", so downstream callers lose the precise boundary error this PR is trying to enforce and will just fail silently.
+
+<!-- gh-id: 3178789141 -->
+#### ↳ cmk ([2026-05-03 21:20 UTC](https://github.com/cmk/agogo/pull/67#discussion_r3178789141))
+
+Addressed in 4940335: transform now returns Result<Vec<ScheduledEvent>, ScheduleError> and validates unsupported sample rates, zero tempo, and the global T512P/sample-rate tempo envelope instead of returning an empty schedule.
+
+<!-- gh-id: 3178789142 -->
+#### ↳ cmk ([2026-05-03 21:20 UTC](https://github.com/cmk/agogo/pull/67#discussion_r3178789142))
+
+Addressed in 4940335 by making this configuration invalid rather than coalescing same-sample events: scheduling now rejects tempos above the global T512P-at-sample-rate envelope. The lower-bound helper still uses the emitted-sample lower inverse, so public scheduler math remains conservative inside the declared domain.
+
+<!-- gh-id: 3178789143 -->
+#### ↳ cmk ([2026-05-03 21:20 UTC](https://github.com/cmk/agogo/pull/67#discussion_r3178789143))
+
+Addressed in 4940335: tick_stream and tick_stream_into now return Result and surface invalid scheduling parameters as ScheduleError instead of treating them as an ordinary empty event window.
+
+<!-- gh-id: 3178789150 -->
+#### ↳ cmk ([2026-05-03 21:20 UTC](https://github.com/cmk/agogo/pull/67#discussion_r3178789150))
+
+Addressed in 4940335: the public tick_to_sxxx helpers now return Option<Sxxx>, so Tempo::ZERO produces None instead of a saturated far-future timestamp. The whole-sample and inverse dispatch APIs continue to reject zero tempo as None.
+
+<!-- gh-id: 3178789165 -->
+#### ↳ cmk ([2026-05-03 21:20 UTC](https://github.com/cmk/agogo/pull/67#discussion_r3178789165))
+
+Addressed in 4940335: the review record now states that the clean local-review conclusion was superseded by post-push findings, and records that this round fixes the invalid-param APIs and rejects tempos outside the global T512P/sample-rate envelope.
