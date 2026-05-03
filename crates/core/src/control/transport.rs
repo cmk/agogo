@@ -361,9 +361,12 @@ impl<R: SampleTime> Playhead<R> {
         true
     }
 
-    /// Apply a command-driven transport start. The next
-    /// [`Self::on_buffer`] call emits the start byte for internal
-    /// transport and resumes clock output.
+    /// Try to stage a command-driven transport start.
+    ///
+    /// [`TransportCommandApply::Applied`] means the start byte was
+    /// queued for internal transport; the next [`Self::on_buffer`]
+    /// call emits it and resumes clock output unless teardown is
+    /// requested first. Other results do not stage a command.
     pub fn apply_transport_start(&mut self) -> TransportCommandApply {
         if self.stop_flag.load(Ordering::Acquire) {
             return TransportCommandApply::TeardownRequested;
@@ -378,10 +381,14 @@ impl<R: SampleTime> Playhead<R> {
         }
     }
 
-    /// Apply a command-driven transport stop. The next
-    /// [`Self::on_buffer`] call emits Stop and suppresses subsequent
-    /// clock output unless a later queued command starts transport
-    /// again in FIFO order.
+    /// Try to stage a command-driven transport stop.
+    ///
+    /// [`TransportCommandApply::Applied`] means the stop byte was
+    /// queued for internal transport; the next [`Self::on_buffer`]
+    /// call emits it and suppresses subsequent clock output unless a
+    /// later queued command starts transport again in FIFO order.
+    /// Other results do not stage a command. If teardown is requested
+    /// before rendering, teardown wins and clears staged commands.
     pub fn apply_transport_stop(&mut self) -> TransportCommandApply {
         if self.stop_flag.load(Ordering::Acquire) {
             return TransportCommandApply::TeardownRequested;

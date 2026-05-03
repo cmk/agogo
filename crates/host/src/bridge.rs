@@ -395,6 +395,7 @@ impl fmt::Debug for ControlProducer {
 pub struct ControlConsumer {
     shared: Arc<SharedControlParams>,
     consumer: rtrb::Consumer<CommandEnvelope>,
+    deferred_command: Option<CommandEnvelope>,
 }
 
 impl fmt::Debug for ControlConsumer {
@@ -435,7 +436,11 @@ pub fn spsc(capacity: usize, initial_tempo: Tempo) -> (ControlProducer, ControlC
             tempo_producer: Mutex::new(()),
             producer: Mutex::new(producer),
         },
-        ControlConsumer { shared, consumer },
+        ControlConsumer {
+            shared,
+            consumer,
+            deferred_command: None,
+        },
     )
 }
 
@@ -940,7 +945,9 @@ impl ControlConsumer {
     /// Drain one ordered command envelope. Non-blocking and
     /// allocation-free.
     pub fn try_pop(&mut self) -> Option<CommandEnvelope> {
-        self.consumer.pop().ok()
+        self.deferred_command
+            .take()
+            .or_else(|| self.consumer.pop().ok())
     }
 
     /// Compatibility helper for callers that only care about the
@@ -949,14 +956,21 @@ impl ControlConsumer {
         self.try_pop().map(|envelope| envelope.command)
     }
 
-    /// Drain one command and report whether it missed its deadline
-    /// before the callback reached it.
+    /// Drain one command that is due at the current buffer boundary.
+    ///
+    /// A FIFO head with a future deadline is retained inside the
+    /// consumer and reported on a later call once its deadline is due
+    /// or missed.
     pub fn drain_due_command(&mut self) -> Option<RtCommandDrain> {
         let envelope = self.try_pop()?;
-        if envelope.metadata.deadline.buffer < self.current_buffer_epoch() {
-            Some(RtCommandDrain::MissedDeadline(envelope))
-        } else {
-            Some(RtCommandDrain::Command(envelope))
+        let current_epoch = self.current_buffer_epoch();
+        match envelope.metadata.deadline.buffer.cmp(&current_epoch) {
+            std::cmp::Ordering::Greater => {
+                self.deferred_command = Some(envelope);
+                None
+            }
+            std::cmp::Ordering::Less => Some(RtCommandDrain::MissedDeadline(envelope)),
+            std::cmp::Ordering::Equal => Some(RtCommandDrain::Command(envelope)),
         }
     }
 }
@@ -1529,6 +1543,33 @@ mod tests {
         let mut io = AudioIo::new(&input, &mut output, 24_000, 48_000, 24_000);
         playhead.on_buffer(&mut io, &sink);
         assert!(playhead.is_running());
+    }
+
+    #[test]
+    fn future_deadline_waits_until_declared_buffer() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Internal {
+                start_emitted: true,
+            },
+        );
+
+        let outcome = producer.admit_ordered(ControlCommand::Start, metadata(1, 3));
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+        assert_eq!(report.params.buffer_epoch, 1);
+        assert_eq!(report.applied_commands, 0);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+        assert_eq!(report.params.buffer_epoch, 2);
+        assert_eq!(report.applied_commands, 0);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+        assert_eq!(report.params.buffer_epoch, 3);
+        assert_eq!(report.applied_commands, 1);
     }
 
     #[test]
