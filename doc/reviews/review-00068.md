@@ -36,3 +36,41 @@ Validation:
 ---
 
 No actionable correctness issues were found in the diff. The channel-selection and mono fan-out changes are covered by focused tests, and the host-cpal tests and clippy gate pass locally.
+
+<!-- gh-id: 4216849612 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 21:13 UTC](https://github.com/cmk/agogo/pull/68#pullrequestreview-4216849612))
+
+Copilot reviewed 4 out of 4 changed files in this pull request and generated 2 comments.
+
+<!-- gh-id: 3178780997 -->
+### Copilot on [`crates/host-cpal/src/cpal.rs:219`](https://github.com/cmk/agogo/pull/68#discussion_r3178780997) (2026-05-03 21:13 UTC)
+
+The output callback now sizes its scratch buffer from `cfg.buffer_frames`, but `Config::buffer_frames` is only a target and back-ends may round it to a different size. If cpal delivers a larger buffer than requested, `writable_frames` truncates the core render to the scratch length, leaves the tail of the device buffer silent, and still advances `next_start` by the full callback length. That will drop audio/click events and skew timing on hosts that round the buffer size up.
+
+<!-- gh-id: 3178781009 -->
+### Copilot on [`doc/reviews/review-00068.md:38`](https://github.com/cmk/agogo/pull/68#discussion_r3178781009) (2026-05-03 21:13 UTC)
+
+This review note is no longer accurate: the diff does introduce a correctness issue in the output callback path when the host delivers a larger buffer than `buffer_frames`. Keeping the review record saying there are no actionable correctness issues will mislead future readers about the state of this PR.
+
+## Review round response (2026-05-03)
+
+- `crates/host-cpal/src/cpal.rs`: fixed the rounded-up output-buffer issue by rendering the physical callback in scratch-sized mono chunks. Each chunk receives its own `AudioIo` with the correct `buffer_start_sample`, fans out only to the matching interleaved frame range, and `next_start` advances by the full physical frame count.
+- `crates/host-cpal/src/cpal.rs`: added `oversized_output_callback_is_rendered_in_scratch_chunks` to cover callbacks larger than the requested `buffer_frames`.
+- `doc/reviews/review-00068.md`: mirrored the GitHub comments and this response so the local review note remains historical rather than the final state.
+
+Validation:
+
+- `cargo test --manifest-path crates/host-cpal/Cargo.toml`
+- `cargo test -p agogo-cli --features run`
+- `cargo clippy --manifest-path crates/host-cpal/Cargo.toml --all-targets -- -D warnings`
+- `cargo clippy -p agogo-cli --features run --all-targets -- -D warnings`
+
+<!-- gh-id: 3178789603 -->
+#### ↳ cmk ([2026-05-03 21:21 UTC](https://github.com/cmk/agogo/pull/68#discussion_r3178789603))
+
+Fixed in the follow-up patch. The output callback now processes the physical buffer in scratch-sized mono chunks instead of truncating to `cfg.buffer_frames`: each chunk gets its own `AudioIo` with the correct `buffer_start_sample`, is fanned out to the corresponding interleaved frame range, and `next_start` advances by the full physical callback frame count. Added `oversized_output_callback_is_rendered_in_scratch_chunks` to cover the rounded-up-buffer case.
+
+<!-- gh-id: 3178789675 -->
+#### ↳ cmk ([2026-05-03 21:21 UTC](https://github.com/cmk/agogo/pull/68#discussion_r3178789675))
+
+Fixed by mirroring the GitHub review comments into `review-00068.md` and adding a round response that supersedes the earlier local-review note. The original local review remains as history, but the record now names the discovered issue and the corrective patch.
