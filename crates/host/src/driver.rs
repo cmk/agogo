@@ -176,7 +176,7 @@ impl AgogoDriver {
         default_coalesce_key: Option<CoalesceKey>,
     ) -> Result<AdmissionMetadata, String> {
         let object = json_object(args)?;
-        let command_id = match object.get("command_id") {
+        let explicit_command_id = match object.get("command_id") {
             Some(value) => {
                 let id = value
                     .as_u64()
@@ -184,11 +184,9 @@ impl AgogoDriver {
                 if id == u64::MAX {
                     return Err("field `command_id` must be less than u64::MAX".to_owned());
                 }
-                let command_id = CommandId(id);
-                self.reserve_generated_ids_through(command_id);
-                command_id
+                Some(CommandId(id))
             }
-            None => self.next_generated_command_id()?,
+            None => None,
         };
         let source_id = match object.get("source_id") {
             Some(value) => {
@@ -227,6 +225,13 @@ impl AgogoDriver {
                 })?)
             }
             None => default_coalesce_key,
+        };
+        let command_id = match explicit_command_id {
+            Some(command_id) => {
+                self.reserve_generated_ids_through(command_id);
+                command_id
+            }
+            None => self.next_generated_command_id()?,
         };
 
         Ok(AdmissionMetadata {
@@ -573,6 +578,33 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err, "field `source_id` must be a string");
+    }
+
+    #[test]
+    fn malformed_metadata_does_not_consume_command_ids() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let err = driver
+            .handle_call(Tool::Start.name(), json!({ "source_id": 7 }))
+            .unwrap_err();
+        let first = driver
+            .handle_call(Tool::Stop.name(), json!({}))
+            .expect("generated id still starts at one");
+        let err_after_explicit = driver
+            .handle_call(
+                Tool::Start.name(),
+                json!({ "command_id": u64::MAX - 1, "source_id": 7 }),
+            )
+            .unwrap_err();
+        let second = driver
+            .handle_call(Tool::Stop.name(), json!({}))
+            .expect("malformed explicit id did not exhaust generated ids");
+
+        assert_eq!(err, "field `source_id` must be a string");
+        assert_eq!(first["command_id"], json!(1));
+        assert_eq!(err_after_explicit, "field `source_id` must be a string");
+        assert_eq!(second["command_id"], json!(2));
     }
 
     #[test]

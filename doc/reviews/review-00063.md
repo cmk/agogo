@@ -215,3 +215,20 @@ Fixed. `try_push()` now documents the compatibility-path errors it can surface: 
 #### Reply from cmk ([2026-05-03 06:22 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177720228))
 
 Fixed. Caller-supplied `command_id = u64::MAX` is now rejected before reserving generated ids, and `reserve_generated_ids_through()` uses `checked_add` under that invariant. Added `explicit_command_id_rejects_u64_max` to cover that the rejection does not advance the generated-id counter.
+
+<!-- gh-id: 3177731268 -->
+### Copilot on [`crates/host/src/driver.rs:190`](https://github.com/cmk/agogo/pull/63#discussion_r3177731268) (2026-05-03 06:33 UTC)
+
+`parse_metadata()` mutates `next_command_id` (via `reserve_generated_ids_through`) immediately after parsing an explicit `command_id`, before validating the rest of the metadata fields. This means a malformed request (e.g., bad `source_id` type/length) can still permanently advance or even exhaust the generated-id range, causing subsequent valid calls to fail with "generated command id range exhausted". Consider parsing/validating all fields first without side effects, then reserving/allocating the command id only after the full metadata object has been validated (or alternatively rolling back on error).
+
+<!-- gh-id: 4215974221 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 06:33 UTC](https://github.com/cmk/agogo/pull/63#pullrequestreview-4215974221))
+
+## Pull request overview
+
+Copilot reviewed 7 out of 8 changed files in this pull request and generated 1 comment.
+
+<!-- gh-id: 3177735654 -->
+#### Reply from cmk ([2026-05-03 06:38 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177735654))
+
+Fixed. `parse_metadata()` now validates the full metadata object before any command-id side effect: explicit ids are only reserved after all fields validate, and generated ids are only allocated after validation. Added `malformed_metadata_does_not_consume_command_ids` to cover both malformed generated-id requests and malformed explicit-id requests near `u64::MAX`.
