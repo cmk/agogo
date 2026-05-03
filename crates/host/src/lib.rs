@@ -17,6 +17,7 @@ pub(crate) mod core {
 
 pub mod bridge;
 pub mod driver;
+pub mod runtime;
 pub mod snapshot;
 
 pub use bridge::{
@@ -26,4 +27,5 @@ pub use bridge::{
     RtCommandDrain, SourceId, apply_control_to_playhead, spsc,
 };
 pub use driver::{AgogoDriver, AgogoDriverConfig, Tool};
+pub use runtime::{Runtime, RuntimeStepReport, RuntimeSurface, RuntimeToolMetadata};
 pub use snapshot::{AgogoSnapshot, SnapshotSlot};
