@@ -177,12 +177,15 @@ impl AgogoDriver {
     ) -> Result<AdmissionMetadata, String> {
         let object = json_object(args)?;
         let command_id = match object.get("command_id") {
-            Some(value) => CommandId(
-                value
-                    .as_u64()
-                    .ok_or_else(|| "field `command_id` must be an unsigned integer".to_owned())?,
-            ),
-            None => CommandId(self.next_command_id.fetch_add(1, Ordering::Relaxed)),
+            Some(value) => {
+                let command_id =
+                    CommandId(value.as_u64().ok_or_else(|| {
+                        "field `command_id` must be an unsigned integer".to_owned()
+                    })?);
+                self.reserve_generated_ids_through(command_id);
+                command_id
+            }
+            None => self.next_generated_command_id(),
         };
         let source_id = match object.get("source_id") {
             Some(value) => {
@@ -232,6 +235,25 @@ impl AgogoDriver {
             },
             coalesce_key,
         })
+    }
+
+    fn next_generated_command_id(&self) -> CommandId {
+        CommandId(
+            self.next_command_id
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    Some(current.saturating_add(1))
+                })
+                .expect("command id update closure always returns Some"),
+        )
+    }
+
+    fn reserve_generated_ids_through(&self, command_id: CommandId) {
+        let next = command_id.get().saturating_add(1);
+        let _ =
+            self.next_command_id
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    (current < next).then_some(next)
+                });
     }
 }
 
@@ -579,6 +601,22 @@ mod tests {
         assert_eq!(envelope.command, ControlCommand::Start);
         assert_eq!(envelope.metadata.command_id.get(), 42);
         assert_eq!(envelope.metadata.source_id.as_str(), "stdio-core");
+    }
+
+    #[test]
+    fn explicit_command_id_advances_generated_ids() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let explicit = driver
+            .handle_call(Tool::Start.name(), json!({ "command_id": 42 }))
+            .expect("accepted explicit id response");
+        let generated = driver
+            .handle_call(Tool::Stop.name(), json!({}))
+            .expect("accepted generated id response");
+
+        assert_eq!(explicit["command_id"], json!(42));
+        assert_eq!(generated["command_id"], json!(43));
     }
 
     #[test]

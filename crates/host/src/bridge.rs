@@ -735,7 +735,10 @@ impl ControlConsumer {
         let epoch = self
             .shared
             .buffer_epoch
-            .fetch_add(1, Ordering::AcqRel)
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                Some(current.saturating_add(1))
+            })
+            .expect("buffer epoch update closure always returns Some")
             .saturating_add(1);
         let tempo = self
             .consume_pending_tempo(epoch)
@@ -1219,6 +1222,20 @@ mod tests {
             .store(u64::MAX, Ordering::Release);
 
         assert_eq!(producer.default_deadline_buffer(), u64::MAX);
+    }
+
+    #[test]
+    fn begin_buffer_saturates_stored_epoch_at_u64_max() {
+        let (_producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        consumer
+            .shared
+            .buffer_epoch
+            .store(u64::MAX - 1, Ordering::Release);
+
+        assert_eq!(consumer.begin_buffer().buffer_epoch, u64::MAX);
+        assert_eq!(consumer.current_buffer_epoch(), u64::MAX);
+        assert_eq!(consumer.begin_buffer().buffer_epoch, u64::MAX);
+        assert_eq!(consumer.current_buffer_epoch(), u64::MAX);
     }
 
     proptest! {
