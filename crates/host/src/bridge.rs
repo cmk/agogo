@@ -6,7 +6,6 @@
 //! side never locks and never allocates.
 
 use std::fmt;
-use std::hint;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError};
@@ -15,6 +14,8 @@ use agogo::core::conn::tempo::Tempo;
 
 pub const MAX_SOURCE_ID_LEN: usize = 64;
 pub const MAX_COALESCE_KEY_LEN: usize = 64;
+const NO_PENDING_TEMPO: u64 = 0;
+const CLAIMED_TEMPO_BIT: u64 = 1 << 63;
 
 /// Ordered commands that must not silently coalesce.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -280,11 +281,11 @@ pub struct ControlParams {
 #[derive(Debug)]
 struct SharedControlParams {
     tempo_raw: AtomicU32,
+    pending_tempo_seq: AtomicU64,
     pending_tempo_raw: AtomicU32,
     pending_tempo_deadline: AtomicU64,
-    pending_tempo_generation: AtomicU64,
+    pending_tempo_state: AtomicU64,
     next_tempo_generation: AtomicU64,
-    applied_tempo_generation: AtomicU64,
     buffer_epoch: AtomicU64,
 }
 
@@ -292,11 +293,11 @@ impl SharedControlParams {
     fn new(tempo: Tempo) -> Self {
         Self {
             tempo_raw: AtomicU32::new(tempo.0),
+            pending_tempo_seq: AtomicU64::new(0),
             pending_tempo_raw: AtomicU32::new(tempo.0),
             pending_tempo_deadline: AtomicU64::new(0),
-            pending_tempo_generation: AtomicU64::new(0),
+            pending_tempo_state: AtomicU64::new(NO_PENDING_TEMPO),
             next_tempo_generation: AtomicU64::new(1),
-            applied_tempo_generation: AtomicU64::new(0),
             buffer_epoch: AtomicU64::new(0),
         }
     }
@@ -389,6 +390,7 @@ impl ControlProducer {
         }
 
         let generation = self.next_tempo_generation();
+        let write_seq = self.begin_tempo_write();
         self.shared
             .pending_tempo_raw
             .store(tempo.0, Ordering::Release);
@@ -396,19 +398,27 @@ impl ControlProducer {
             .pending_tempo_deadline
             .store(metadata.deadline.buffer, Ordering::Release);
         self.shared
-            .pending_tempo_generation
+            .pending_tempo_state
             .store(generation, Ordering::Release);
+        self.publish_tempo_write(write_seq);
 
         if metadata.deadline.buffer <= self.current_buffer_epoch() {
             if self
                 .shared
-                .pending_tempo_generation
-                .compare_exchange(generation, 0, Ordering::AcqRel, Ordering::Acquire)
+                .pending_tempo_state
+                .compare_exchange(
+                    generation,
+                    NO_PENDING_TEMPO,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
                 .is_ok()
             {
                 return AdmissionOutcome::late(metadata);
             }
-            if !self.tempo_generation_was_applied(generation) {
+            if self.shared.pending_tempo_state.load(Ordering::Acquire)
+                != claimed_tempo_state(generation)
+            {
                 return AdmissionOutcome::late(metadata);
             }
         }
@@ -491,7 +501,7 @@ impl ControlProducer {
                 Some(
                     current
                         .checked_add(1)
-                        .filter(|next| *next != 0)
+                        .filter(|next| *next != 0 && *next < CLAIMED_TEMPO_BIT)
                         .unwrap_or(1),
                 )
             },
@@ -501,14 +511,19 @@ impl ControlProducer {
             .max(1)
     }
 
-    fn tempo_generation_was_applied(&self, generation: u64) -> bool {
-        for _ in 0..64 {
-            if self.shared.applied_tempo_generation.load(Ordering::Acquire) == generation {
-                return true;
-            }
-            hint::spin_loop();
-        }
-        false
+    fn begin_tempo_write(&self) -> u64 {
+        let seq = self.shared.pending_tempo_seq.load(Ordering::Acquire);
+        let write_seq = seq.wrapping_add(1) | 1;
+        self.shared
+            .pending_tempo_seq
+            .store(write_seq, Ordering::Release);
+        write_seq
+    }
+
+    fn publish_tempo_write(&self, write_seq: u64) {
+        self.shared
+            .pending_tempo_seq
+            .store(write_seq.wrapping_add(1), Ordering::Release);
     }
 }
 
@@ -559,35 +574,49 @@ impl ControlConsumer {
     }
 
     fn consume_pending_tempo(&self, epoch: u64) -> Option<Tempo> {
-        let generation = self.shared.pending_tempo_generation.load(Ordering::Acquire);
-        if generation == 0 {
-            return None;
-        }
-        let deadline = self.shared.pending_tempo_deadline.load(Ordering::Acquire);
-        if deadline < epoch {
-            let _ = self.shared.pending_tempo_generation.compare_exchange(
-                generation,
-                0,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            );
-            return None;
-        }
-        if self
-            .shared
-            .pending_tempo_generation
-            .compare_exchange(generation, 0, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return None;
+        for _ in 0..2 {
+            let seq_before = self.shared.pending_tempo_seq.load(Ordering::Acquire);
+            if seq_before % 2 == 1 {
+                return None;
+            }
+            let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
+            if state == NO_PENDING_TEMPO || tempo_state_is_claimed(state) {
+                return None;
+            }
+            let deadline = self.shared.pending_tempo_deadline.load(Ordering::Acquire);
+            let tempo = Tempo(self.shared.pending_tempo_raw.load(Ordering::Acquire));
+            let seq_after = self.shared.pending_tempo_seq.load(Ordering::Acquire);
+            if seq_before != seq_after || seq_after % 2 == 1 {
+                continue;
+            }
+            if deadline < epoch {
+                let _ = self.shared.pending_tempo_state.compare_exchange(
+                    state,
+                    NO_PENDING_TEMPO,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                );
+                return None;
+            }
+            if self
+                .shared
+                .pending_tempo_state
+                .compare_exchange(
+                    state,
+                    claimed_tempo_state(state),
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_err()
+            {
+                continue;
+            }
+
+            self.shared.tempo_raw.store(tempo.0, Ordering::Release);
+            return Some(tempo);
         }
 
-        let tempo = Tempo(self.shared.pending_tempo_raw.load(Ordering::Acquire));
-        self.shared.tempo_raw.store(tempo.0, Ordering::Release);
-        self.shared
-            .applied_tempo_generation
-            .store(generation, Ordering::Release);
-        Some(tempo)
+        None
     }
 
     /// Drain one ordered command envelope. Non-blocking and
@@ -612,6 +641,14 @@ impl ControlConsumer {
             Some(RtCommandDrain::Command(envelope))
         }
     }
+}
+
+const fn claimed_tempo_state(generation: u64) -> u64 {
+    generation | CLAIMED_TEMPO_BIT
+}
+
+const fn tempo_state_is_claimed(state: u64) -> bool {
+    state & CLAIMED_TEMPO_BIT != 0
 }
 
 #[cfg(test)]

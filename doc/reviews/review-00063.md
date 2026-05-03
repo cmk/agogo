@@ -82,3 +82,21 @@ Full review comments:
 
 - [P2] Cover the full deadline domain in proptests — crates/host/src/bridge.rs:709-709
   This deadline strategy only samples `0..8`, and the other new deadline properties use similarly tiny ranges, so the proptests never exercise the `u64` boundary values used by `CommandDeadline` and the epoch arithmetic. The repo's proptest rule requires the full input domain or a documented bound with explicit boundary spot checks; otherwise regressions around saturation or wrap at `u64::MAX` will not be caught.
+
+## Local review (2026-05-02)
+
+**Branch:** plan-2026-05-02-08
+**Commits:** 6 (origin/main..plan-2026-05-02-08)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The patch still has scalar tempo admission races that can report `late` for commands that actually affect the RT side, breaking the new admission truthfulness guarantee.
+
+Full review comments:
+
+- [P2] Don't overwrite a pending tempo before publishing its generation — crates/host/src/bridge.rs:392-400
+  With a previous tempo still pending, a second admission writes `pending_tempo_raw` and `pending_tempo_deadline` before publishing its own generation. If the RT callback begins in that window, it can claim the old generation but read the new tempo/deadline; then this admission's deadline recheck clears the new generation and returns `late`, even though the new tempo already affected the callback and is attributed to the prior command id. This breaks the declared admission metadata for back-to-back tempo writes near a buffer boundary.
+
+- [P2] Don't time out after the RT side claims a tempo — crates/host/src/bridge.rs:504-511
+  Under a boundary race where `begin_buffer()` has already claimed this pending tempo by CASing `pending_tempo_generation` to 0 but is preempted before it stores `applied_tempo_generation`, this fixed 64-spin wait can return false and make `admit_tempo` report `late`. The callback then resumes and applies the tempo, so the admission result says the command missed its deadline even though it affected the RT buffer.
