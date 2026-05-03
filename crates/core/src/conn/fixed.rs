@@ -31,7 +31,7 @@
 //! intentional different convention. (Haskell `ratfix`'s `h` is a
 //! plain `div`, matching this port.)
 
-use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
+use connections::conn::{ViewL, ViewR};
 
 macro_rules! def_fixed {
     ($name:ident, $prec:expr) => {
@@ -97,14 +97,19 @@ pub use FD12 as Pico;
 
 macro_rules! fix_fix {
     ($const_name:ident, $Fine:ident, $Coarse:ident, $prec:expr) => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone, Debug, Default)]
-        pub struct $const_name;
+        connections::triple! {
+            #[allow(non_camel_case_types)]
+            #[derive(Copy, Clone, Debug, Default)]
+            pub $const_name : $Fine => $Coarse {
+                ceil:  $const_name::ceil_fn,
+                inner: $const_name::inner_fn,
+                floor: $const_name::floor_fn,
+            }
+        }
 
+        #[allow(non_camel_case_types)]
         impl $const_name {
             const PREC: i64 = $prec;
-            const L: ConnL<$Fine, $Coarse> = Conn::new_l(Self::ceil_fn, Self::inner_fn);
-            const R: ConnR<$Fine, $Coarse> = Conn::new_r(Self::inner_fn, Self::floor_fn);
 
             fn ceil_fn(x: $Fine) -> $Coarse {
                 let q = x.0.div_euclid(Self::PREC);
@@ -124,24 +129,16 @@ macro_rules! fix_fix {
             }
 
             pub fn ceil(self, x: $Fine) -> $Coarse {
-                Self::L.ceil(x)
+                <Self as ViewL<$Fine, $Coarse>>::L.ceil(x)
             }
 
             pub fn inner(self, x: $Coarse) -> $Fine {
-                Self::L.inner(x)
+                <Self as ViewL<$Fine, $Coarse>>::L.inner(x)
             }
 
             pub fn floor(self, x: $Fine) -> $Coarse {
-                Self::R.floor(x)
+                <Self as ViewR<$Fine, $Coarse>>::R.floor(x)
             }
-        }
-
-        impl ViewL<$Fine, $Coarse> for $const_name {
-            const L: ConnL<$Fine, $Coarse> = Self::L;
-        }
-
-        impl ViewR<$Fine, $Coarse> for $const_name {
-            const R: ConnR<$Fine, $Coarse> = Self::R;
         }
     };
 }

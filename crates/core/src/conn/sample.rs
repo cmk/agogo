@@ -64,7 +64,7 @@
 //! ratios (`DEN = 1`) it collapses to the familiar `floor_div(x, NUM)`.
 
 use crate::conn::fixed::FD12;
-use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
+use connections::conn::{ViewL, ViewR};
 use fixed::FixedI64;
 use fixed::types::extra::U16;
 
@@ -143,15 +143,20 @@ def_rate!(S192, 192_000);
 
 macro_rules! rate_conn {
     ($CONN:ident, $Fine:ident, $Coarse:ident, $num:expr, $den:expr) => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone, Debug, Default)]
-        pub struct $CONN;
+        connections::triple! {
+            #[allow(non_camel_case_types)]
+            #[derive(Copy, Clone, Debug, Default)]
+            pub $CONN : $Fine => $Coarse {
+                ceil:  $CONN::ceil_fn,
+                inner: $CONN::inner_fn,
+                floor: $CONN::floor_fn,
+            }
+        }
 
+        #[allow(non_camel_case_types)]
         impl $CONN {
             const NUM: i128 = $num;
             const DEN: i128 = $den;
-            const L: ConnL<$Fine, $Coarse> = Conn::new_l(Self::ceil_fn, Self::inner_fn);
-            const R: ConnR<$Fine, $Coarse> = Conn::new_r(Self::inner_fn, Self::floor_fn);
 
             fn ceil_fn(x: $Fine) -> $Coarse {
                 // ceil(x) = ceil_div(x · DEN, NUM)
@@ -177,24 +182,16 @@ macro_rules! rate_conn {
             }
 
             pub fn ceil(self, x: $Fine) -> $Coarse {
-                Self::L.ceil(x)
+                <Self as ViewL<$Fine, $Coarse>>::L.ceil(x)
             }
 
             pub fn inner(self, x: $Coarse) -> $Fine {
-                Self::L.inner(x)
+                <Self as ViewL<$Fine, $Coarse>>::L.inner(x)
             }
 
             pub fn floor(self, x: $Fine) -> $Coarse {
-                Self::R.floor(x)
+                <Self as ViewR<$Fine, $Coarse>>::R.floor(x)
             }
-        }
-
-        impl ViewL<$Fine, $Coarse> for $CONN {
-            const L: ConnL<$Fine, $Coarse> = Self::L;
-        }
-
-        impl ViewR<$Fine, $Coarse> for $CONN {
-            const R: ConnR<$Fine, $Coarse> = Self::R;
         }
     };
 }
@@ -246,10 +243,17 @@ rate_conn!(S192S176, S192, S176, 160, 147);
 
 macro_rules! pico_conn {
     ($CONN:ident, $Rate:ident, $num:expr, $den:expr) => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone, Debug, Default)]
-        pub struct $CONN;
+        connections::triple! {
+            #[allow(non_camel_case_types)]
+            #[derive(Copy, Clone, Debug, Default)]
+            pub $CONN : FD12 => $Rate {
+                ceil:  $CONN::ceil_fn,
+                inner: $CONN::inner_fn,
+                floor: $CONN::floor_fn,
+            }
+        }
 
+        #[allow(non_camel_case_types)]
         impl $CONN {
             // Conn<Fine=FD12, Coarse=Sxx>:
             //   inner: Coarse → Fine. inner(s: Sxx) = floor_div(s_bits · NUM, DEN) picoseconds
@@ -261,8 +265,6 @@ macro_rules! pico_conn {
             // when `DEN = 1`.
             const NUM: i128 = $num;
             const DEN: i128 = $den;
-            const L: ConnL<FD12, $Rate> = Conn::new_l(Self::ceil_fn, Self::inner_fn);
-            const R: ConnR<FD12, $Rate> = Conn::new_r(Self::inner_fn, Self::floor_fn);
 
             fn ceil_fn(p: FD12) -> $Rate {
                 let n: i128 = p.0 as i128 * Self::DEN;
@@ -283,24 +285,16 @@ macro_rules! pico_conn {
             }
 
             pub fn ceil(self, x: FD12) -> $Rate {
-                Self::L.ceil(x)
+                <Self as ViewL<FD12, $Rate>>::L.ceil(x)
             }
 
             pub fn inner(self, x: $Rate) -> FD12 {
-                Self::L.inner(x)
+                <Self as ViewL<FD12, $Rate>>::L.inner(x)
             }
 
             pub fn floor(self, x: FD12) -> $Rate {
-                Self::R.floor(x)
+                <Self as ViewR<FD12, $Rate>>::R.floor(x)
             }
-        }
-
-        impl ViewL<FD12, $Rate> for $CONN {
-            const L: ConnL<FD12, $Rate> = Self::L;
-        }
-
-        impl ViewR<FD12, $Rate> for $CONN {
-            const R: ConnR<FD12, $Rate> = Self::R;
         }
     };
 }
