@@ -7,7 +7,7 @@
 //!
 //! Distinct types per rate prevent accidental rate mixing at compile
 //! time: you cannot add an `S044` to an `S048`. To cross rates, apply the
-//! appropriate Galois [`Conn`], which expresses the rounding semantics
+//! appropriate Galois [`Conn`](connections::conn::Conn), which expresses the rounding semantics
 //! explicitly.
 //!
 //! # Precision
@@ -21,7 +21,7 @@
 //!
 //! For every ordered pair `(Fine, Coarse)` where `Fine` has the
 //! higher Q48.16-bits-per-second rate, a
-//! [`Conn`]`<Fine, Coarse>` constant `SXX_SYY` exists:
+//! [`Conn`](connections::conn::Conn)`<Fine, Coarse>` constant `SXX_SYY` exists:
 //!
 //! ```text
 //!   Fine────────────ratio──────────Coarse   exactness
