@@ -11,11 +11,45 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError};
 
 use agogo::core::conn::tempo::Tempo;
+use rust_fsm::state_machine;
 
 pub const MAX_SOURCE_ID_LEN: usize = 64;
 pub const MAX_COALESCE_KEY_LEN: usize = 64;
 const NO_PENDING_TEMPO: u64 = 0;
+const WRITING_TEMPO_BIT: u64 = 1 << 62;
 const CLAIMED_TEMPO_BIT: u64 = 1 << 63;
+const TEMPO_GENERATION_MASK: u64 = WRITING_TEMPO_BIT - 1;
+
+state_machine! {
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    tempo_slot_fsm(Empty)
+
+    Empty => {
+        BeginWrite => Writing,
+        MarkSnapshotEmpty => Empty,
+    },
+    Pending => {
+        BeginWrite => Writing,
+        Claim => Claimed,
+        ClearStale => Empty,
+    },
+    Writing => {
+        PublishReplacement => Pending,
+        AbortToEmpty => Empty,
+        AbortToPending => Pending,
+        ClaimBackup => Claimed,
+        MarkSnapshotEmpty => Empty,
+    },
+    Claimed => {
+        BeginWrite => Writing,
+        PublishReplacement => Pending,
+        AbortToEmpty => Empty,
+    },
+}
+
+type TempoSlotEvent = tempo_slot_fsm::Input;
+type TempoSlotFsm = tempo_slot_fsm::StateMachine;
+type TempoSlotState = tempo_slot_fsm::State;
 
 /// Ordered commands that must not silently coalesce.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -281,10 +315,14 @@ pub struct ControlParams {
 #[derive(Debug)]
 struct SharedControlParams {
     tempo_raw: AtomicU32,
-    pending_tempo_seq: AtomicU64,
     pending_tempo_raw: AtomicU32,
     pending_tempo_deadline: AtomicU64,
     pending_tempo_state: AtomicU64,
+    staged_tempo_raw: AtomicU32,
+    staged_tempo_deadline: AtomicU64,
+    backup_tempo_raw: AtomicU32,
+    backup_tempo_deadline: AtomicU64,
+    tempo_snapshot_epoch: AtomicU64,
     next_tempo_generation: AtomicU64,
     buffer_epoch: AtomicU64,
 }
@@ -293,14 +331,25 @@ impl SharedControlParams {
     fn new(tempo: Tempo) -> Self {
         Self {
             tempo_raw: AtomicU32::new(tempo.0),
-            pending_tempo_seq: AtomicU64::new(0),
             pending_tempo_raw: AtomicU32::new(tempo.0),
             pending_tempo_deadline: AtomicU64::new(0),
             pending_tempo_state: AtomicU64::new(NO_PENDING_TEMPO),
+            staged_tempo_raw: AtomicU32::new(tempo.0),
+            staged_tempo_deadline: AtomicU64::new(0),
+            backup_tempo_raw: AtomicU32::new(tempo.0),
+            backup_tempo_deadline: AtomicU64::new(0),
+            tempo_snapshot_epoch: AtomicU64::new(0),
             next_tempo_generation: AtomicU64::new(1),
             buffer_epoch: AtomicU64::new(0),
         }
     }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct TempoWriteGuard {
+    previous_generation: u64,
+    previous_state: u64,
+    writing_state: u64,
 }
 
 /// Async/control-side bridge handle.
@@ -389,40 +438,54 @@ impl ControlProducer {
             return outcome;
         }
 
-        let generation = self.next_tempo_generation();
-        let write_seq = self.begin_tempo_write();
         self.shared
-            .pending_tempo_raw
+            .staged_tempo_raw
             .store(tempo.0, Ordering::Release);
         self.shared
-            .pending_tempo_deadline
+            .staged_tempo_deadline
             .store(metadata.deadline.buffer, Ordering::Release);
-        self.shared
-            .pending_tempo_state
-            .store(generation, Ordering::Release);
-        self.publish_tempo_write(write_seq);
+        let generation = self.next_tempo_generation();
+        let write = self.begin_tempo_write();
+        if !self.publish_tempo_write(write, generation, tempo, metadata.deadline.buffer) {
+            self.abort_tempo_write(write);
+            return AdmissionOutcome::late(metadata);
+        }
 
-        if metadata.deadline.buffer <= self.current_buffer_epoch() {
-            if self
-                .shared
-                .pending_tempo_state
-                .compare_exchange(
-                    generation,
-                    NO_PENDING_TEMPO,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                )
-                .is_ok()
-            {
-                return AdmissionOutcome::late(metadata);
-            }
-            if self.shared.pending_tempo_state.load(Ordering::Acquire)
-                != claimed_tempo_state(generation)
-            {
-                return AdmissionOutcome::late(metadata);
-            }
+        if metadata.deadline.buffer <= self.current_buffer_epoch()
+            && !self.settle_published_tempo(generation, metadata.deadline.buffer)
+        {
+            return AdmissionOutcome::late(metadata);
         }
         AdmissionOutcome::accepted(metadata)
+    }
+
+    fn settle_published_tempo(&self, generation: u64, deadline: u64) -> bool {
+        loop {
+            let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
+            if state == claimed_tempo_state(generation) {
+                return true;
+            }
+            if state != generation {
+                return false;
+            }
+            if self.shared.tempo_snapshot_epoch.load(Ordering::Acquire) >= deadline {
+                if self
+                    .shared
+                    .pending_tempo_state
+                    .compare_exchange(
+                        generation,
+                        NO_PENDING_TEMPO,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    )
+                    .is_ok()
+                {
+                    return false;
+                }
+                continue;
+            }
+            std::hint::spin_loop();
+        }
     }
 
     /// Read the latest tempo from the async side. Mainly for
@@ -501,7 +564,7 @@ impl ControlProducer {
                 Some(
                     current
                         .checked_add(1)
-                        .filter(|next| *next != 0 && *next < CLAIMED_TEMPO_BIT)
+                        .filter(|next| *next != 0 && *next < WRITING_TEMPO_BIT)
                         .unwrap_or(1),
                 )
             },
@@ -511,19 +574,141 @@ impl ControlProducer {
             .max(1)
     }
 
-    fn begin_tempo_write(&self) -> u64 {
-        let seq = self.shared.pending_tempo_seq.load(Ordering::Acquire);
-        let write_seq = seq.wrapping_add(1) | 1;
-        self.shared
-            .pending_tempo_seq
-            .store(write_seq, Ordering::Release);
-        write_seq
+    fn begin_tempo_write(&self) -> TempoWriteGuard {
+        loop {
+            let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
+            let slot_state = tempo_slot_state(state);
+            if matches!(slot_state, TempoSlotState::Writing) {
+                std::hint::spin_loop();
+                continue;
+            }
+
+            let previous_generation = if matches!(slot_state, TempoSlotState::Pending) {
+                tempo_state_generation(state)
+            } else {
+                0
+            };
+            let previous_state = if previous_generation == 0 {
+                NO_PENDING_TEMPO
+            } else {
+                state
+            };
+            if previous_generation != 0 {
+                self.shared.backup_tempo_raw.store(
+                    self.shared.pending_tempo_raw.load(Ordering::Acquire),
+                    Ordering::Release,
+                );
+                self.shared.backup_tempo_deadline.store(
+                    self.shared.pending_tempo_deadline.load(Ordering::Acquire),
+                    Ordering::Release,
+                );
+            }
+
+            let next = tempo_slot_transition(slot_state, TempoSlotEvent::BeginWrite);
+            debug_assert!(matches!(next, TempoSlotState::Writing));
+            let writing_state = writing_tempo_state(previous_generation);
+            if self
+                .shared
+                .pending_tempo_state
+                .compare_exchange(state, writing_state, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return TempoWriteGuard {
+                    previous_generation,
+                    previous_state,
+                    writing_state,
+                };
+            }
+        }
     }
 
-    fn publish_tempo_write(&self, write_seq: u64) {
+    fn publish_tempo_write(
+        &self,
+        write: TempoWriteGuard,
+        generation: u64,
+        tempo: Tempo,
+        deadline: u64,
+    ) -> bool {
         self.shared
-            .pending_tempo_seq
-            .store(write_seq.wrapping_add(1), Ordering::Release);
+            .pending_tempo_raw
+            .store(tempo.0, Ordering::Release);
+        self.shared
+            .pending_tempo_deadline
+            .store(deadline, Ordering::Release);
+
+        loop {
+            let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
+            if state == write.writing_state {
+                let next = tempo_slot_transition(
+                    TempoSlotState::Writing,
+                    TempoSlotEvent::PublishReplacement,
+                );
+                debug_assert!(matches!(next, TempoSlotState::Pending));
+                if self
+                    .shared
+                    .pending_tempo_state
+                    .compare_exchange(state, generation, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    return true;
+                }
+                continue;
+            }
+
+            if write.previous_generation != 0
+                && state == claimed_tempo_state(write.previous_generation)
+            {
+                if deadline <= self.current_buffer_epoch() {
+                    return false;
+                }
+                let next = tempo_slot_transition(
+                    TempoSlotState::Claimed,
+                    TempoSlotEvent::PublishReplacement,
+                );
+                debug_assert!(matches!(next, TempoSlotState::Pending));
+                if self
+                    .shared
+                    .pending_tempo_state
+                    .compare_exchange(state, generation, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    return true;
+                }
+                continue;
+            }
+
+            return false;
+        }
+    }
+
+    fn abort_tempo_write(&self, write: TempoWriteGuard) {
+        loop {
+            let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
+            if state != write.writing_state {
+                return;
+            }
+
+            let event = if write.previous_state == NO_PENDING_TEMPO {
+                TempoSlotEvent::AbortToEmpty
+            } else {
+                TempoSlotEvent::AbortToPending
+            };
+            let next = tempo_slot_transition(TempoSlotState::Writing, event);
+            debug_assert_eq!(next, tempo_slot_state(write.previous_state));
+            if self
+                .shared
+                .pending_tempo_state
+                .compare_exchange(
+                    state,
+                    write.previous_state,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                return;
+            }
+        }
     }
 }
 
@@ -555,6 +740,9 @@ impl ControlConsumer {
         let tempo = self
             .consume_pending_tempo(epoch)
             .unwrap_or_else(|| Tempo(self.shared.tempo_raw.load(Ordering::Acquire)));
+        self.shared
+            .tempo_snapshot_epoch
+            .store(epoch, Ordering::Release);
         ControlParams {
             tempo,
             buffer_epoch: epoch,
@@ -574,49 +762,112 @@ impl ControlConsumer {
     }
 
     fn consume_pending_tempo(&self, epoch: u64) -> Option<Tempo> {
-        for _ in 0..2 {
-            let seq_before = self.shared.pending_tempo_seq.load(Ordering::Acquire);
-            if seq_before % 2 == 1 {
-                return None;
-            }
+        for _ in 0..8 {
             let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
-            if state == NO_PENDING_TEMPO || tempo_state_is_claimed(state) {
-                return None;
-            }
-            let deadline = self.shared.pending_tempo_deadline.load(Ordering::Acquire);
-            let tempo = Tempo(self.shared.pending_tempo_raw.load(Ordering::Acquire));
-            let seq_after = self.shared.pending_tempo_seq.load(Ordering::Acquire);
-            if seq_before != seq_after || seq_after % 2 == 1 {
-                continue;
-            }
-            if deadline < epoch {
-                let _ = self.shared.pending_tempo_state.compare_exchange(
-                    state,
-                    NO_PENDING_TEMPO,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                );
-                return None;
-            }
-            if self
-                .shared
-                .pending_tempo_state
-                .compare_exchange(
-                    state,
-                    claimed_tempo_state(state),
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                )
-                .is_err()
-            {
-                continue;
-            }
+            match tempo_slot_state(state) {
+                TempoSlotState::Empty | TempoSlotState::Claimed => return None,
+                TempoSlotState::Pending => {
+                    let deadline = self.shared.pending_tempo_deadline.load(Ordering::Acquire);
+                    let tempo = Tempo(self.shared.pending_tempo_raw.load(Ordering::Acquire));
+                    if deadline < epoch {
+                        let next = tempo_slot_transition(
+                            TempoSlotState::Pending,
+                            TempoSlotEvent::ClearStale,
+                        );
+                        debug_assert!(matches!(next, TempoSlotState::Empty));
+                        if self
+                            .shared
+                            .pending_tempo_state
+                            .compare_exchange(
+                                state,
+                                NO_PENDING_TEMPO,
+                                Ordering::AcqRel,
+                                Ordering::Acquire,
+                            )
+                            .is_ok()
+                        {
+                            return None;
+                        }
+                        continue;
+                    }
+                    let next =
+                        tempo_slot_transition(TempoSlotState::Pending, TempoSlotEvent::Claim);
+                    debug_assert!(matches!(next, TempoSlotState::Claimed));
+                    if self
+                        .shared
+                        .pending_tempo_state
+                        .compare_exchange(
+                            state,
+                            claimed_tempo_state(tempo_state_generation(state)),
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_err()
+                    {
+                        continue;
+                    }
 
-            self.shared.tempo_raw.store(tempo.0, Ordering::Release);
-            return Some(tempo);
+                    self.shared.tempo_raw.store(tempo.0, Ordering::Release);
+                    return Some(tempo);
+                }
+                TempoSlotState::Writing => {
+                    let staged_deadline = self.shared.staged_tempo_deadline.load(Ordering::Acquire);
+                    let previous_generation = tempo_state_generation(state);
+                    if previous_generation == 0 {
+                        if staged_deadline <= epoch {
+                            if self.mark_writing_snapshot_empty(state) {
+                                return None;
+                            }
+                            continue;
+                        }
+                        return None;
+                    }
+
+                    let deadline = self.shared.backup_tempo_deadline.load(Ordering::Acquire);
+                    let tempo = Tempo(self.shared.backup_tempo_raw.load(Ordering::Acquire));
+                    if deadline < epoch {
+                        if staged_deadline <= epoch {
+                            if self.mark_writing_snapshot_empty(state) {
+                                return None;
+                            }
+                            continue;
+                        }
+                        return None;
+                    }
+                    let next =
+                        tempo_slot_transition(TempoSlotState::Writing, TempoSlotEvent::ClaimBackup);
+                    debug_assert!(matches!(next, TempoSlotState::Claimed));
+                    if self
+                        .shared
+                        .pending_tempo_state
+                        .compare_exchange(
+                            state,
+                            claimed_tempo_state(previous_generation),
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_err()
+                    {
+                        continue;
+                    }
+
+                    self.shared.tempo_raw.store(tempo.0, Ordering::Release);
+                    return Some(tempo);
+                }
+            }
         }
 
         None
+    }
+
+    fn mark_writing_snapshot_empty(&self, state: u64) -> bool {
+        let next =
+            tempo_slot_transition(TempoSlotState::Writing, TempoSlotEvent::MarkSnapshotEmpty);
+        debug_assert!(matches!(next, TempoSlotState::Empty));
+        self.shared
+            .pending_tempo_state
+            .compare_exchange(state, NO_PENDING_TEMPO, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
     }
 
     /// Drain one ordered command envelope. Non-blocking and
@@ -643,12 +894,35 @@ impl ControlConsumer {
     }
 }
 
-const fn claimed_tempo_state(generation: u64) -> u64 {
-    generation | CLAIMED_TEMPO_BIT
+fn tempo_slot_transition(state: TempoSlotState, event: TempoSlotEvent) -> TempoSlotState {
+    let mut fsm = TempoSlotFsm::from_state(state);
+    fsm.consume(&event)
+        .expect("tempo slot transition is declared in rust-fsm");
+    fsm.state().clone()
 }
 
-const fn tempo_state_is_claimed(state: u64) -> bool {
-    state & CLAIMED_TEMPO_BIT != 0
+const fn tempo_state_generation(state: u64) -> u64 {
+    state & TEMPO_GENERATION_MASK
+}
+
+const fn writing_tempo_state(generation: u64) -> u64 {
+    WRITING_TEMPO_BIT | generation
+}
+
+const fn claimed_tempo_state(generation: u64) -> u64 {
+    CLAIMED_TEMPO_BIT | generation
+}
+
+fn tempo_slot_state(state: u64) -> TempoSlotState {
+    if state == NO_PENDING_TEMPO {
+        TempoSlotState::Empty
+    } else if state & CLAIMED_TEMPO_BIT != 0 {
+        TempoSlotState::Claimed
+    } else if state & WRITING_TEMPO_BIT != 0 {
+        TempoSlotState::Writing
+    } else {
+        TempoSlotState::Pending
+    }
 }
 
 #[cfg(test)]
@@ -672,6 +946,27 @@ mod tests {
             Just(CommandTimeDomain::Tick),
             Just(CommandTimeDomain::Link),
             Just(CommandTimeDomain::Unknown),
+        ]
+    }
+
+    fn tempo_slot_event_strategy() -> impl Strategy<Value = TempoSlotEvent> {
+        prop_oneof![
+            Just(TempoSlotEvent::BeginWrite),
+            Just(TempoSlotEvent::PublishReplacement),
+            Just(TempoSlotEvent::AbortToEmpty),
+            Just(TempoSlotEvent::AbortToPending),
+            Just(TempoSlotEvent::ClaimBackup),
+            Just(TempoSlotEvent::Claim),
+            Just(TempoSlotEvent::ClearStale),
+            Just(TempoSlotEvent::MarkSnapshotEmpty),
+        ]
+    }
+
+    fn tempo_generation_strategy() -> impl Strategy<Value = u64> {
+        prop_oneof![
+            any::<u64>().prop_map(|value| (value & TEMPO_GENERATION_MASK).max(1)),
+            Just(1),
+            Just(TEMPO_GENERATION_MASK),
         ]
     }
 
@@ -855,6 +1150,49 @@ mod tests {
     }
 
     #[test]
+    fn tempo_write_in_progress_preserves_prior_pending() {
+        let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let first = producer.admit_tempo(
+            Tempo::from_bpm_integer(130),
+            AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0),
+        );
+        assert_eq!(first.status, AdmissionStatus::Accepted);
+
+        producer
+            .shared
+            .staged_tempo_raw
+            .store(Tempo::from_bpm_integer(140).0, Ordering::Release);
+        producer
+            .shared
+            .staged_tempo_deadline
+            .store(1, Ordering::Release);
+        let write = producer.begin_tempo_write();
+
+        assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(130));
+        producer.abort_tempo_write(write);
+        assert_eq!(producer.tempo(), Tempo::from_bpm_integer(130));
+    }
+
+    #[test]
+    fn tempo_write_without_prior_pending_cannot_publish_after_snapshot() {
+        let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let generation = producer.next_tempo_generation();
+        producer
+            .shared
+            .staged_tempo_raw
+            .store(Tempo::from_bpm_integer(140).0, Ordering::Release);
+        producer
+            .shared
+            .staged_tempo_deadline
+            .store(1, Ordering::Release);
+        let write = producer.begin_tempo_write();
+
+        assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(120));
+        assert!(!producer.publish_tempo_write(write, generation, Tempo::from_bpm_integer(140), 1));
+        assert_eq!(producer.tempo(), Tempo::from_bpm_integer(120));
+    }
+
+    #[test]
     fn compatibility_push_late_outcome_is_error() {
         let outcome = AdmissionOutcome::late(metadata(1, 0));
         assert_eq!(bridge_result_for_outcome(outcome), Err(BridgeError::Late));
@@ -945,6 +1283,68 @@ mod tests {
                 _ => false,
             };
             prop_assert!(applied);
+        }
+
+        #[test]
+        fn tempo_slot_state_encoding_is_disjoint(generation in tempo_generation_strategy()) {
+            let pending = generation;
+            let writing = writing_tempo_state(generation);
+            let claimed = claimed_tempo_state(generation);
+
+            prop_assert_eq!(tempo_slot_state(NO_PENDING_TEMPO), TempoSlotState::Empty);
+            prop_assert_eq!(tempo_slot_state(pending), TempoSlotState::Pending);
+            prop_assert_eq!(tempo_slot_state(writing), TempoSlotState::Writing);
+            prop_assert_eq!(tempo_slot_state(claimed), TempoSlotState::Claimed);
+            prop_assert_eq!(tempo_state_generation(pending), generation);
+            prop_assert_eq!(tempo_state_generation(writing), generation);
+            prop_assert_eq!(tempo_state_generation(claimed), generation);
+            prop_assert_ne!(pending, writing);
+            prop_assert_ne!(pending, claimed);
+            prop_assert_ne!(writing, claimed);
+        }
+
+        #[test]
+        fn tempo_slot_fsm_is_deterministic(
+            events in proptest::collection::vec(tempo_slot_event_strategy(), 0..64),
+        ) {
+            let mut left = TempoSlotFsm::new();
+            let mut right = TempoSlotFsm::new();
+            for event in events {
+                let left_result = left.consume(&event);
+                let right_result = right.consume(&event);
+                prop_assert_eq!(left_result.is_ok(), right_result.is_ok());
+                prop_assert_eq!(left.state(), right.state());
+            }
+        }
+
+        #[test]
+        fn tempo_replacement_in_progress_preserves_prior_pending_property(
+            first_raw in any::<u32>(),
+            replacement_raw in any::<u32>(),
+        ) {
+            prop_assume!(first_raw != replacement_raw);
+            let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
+            let first_tempo = Tempo(first_raw);
+            let replacement_tempo = Tempo(replacement_raw);
+            let first = producer.admit_tempo(
+                first_tempo,
+                AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0),
+            );
+            prop_assert_eq!(first.status, AdmissionStatus::Accepted);
+
+            producer
+                .shared
+                .staged_tempo_raw
+                .store(replacement_tempo.0, Ordering::Release);
+            producer
+                .shared
+                .staged_tempo_deadline
+                .store(1, Ordering::Release);
+            let write = producer.begin_tempo_write();
+
+            prop_assert_eq!(consumer.begin_buffer().tempo, first_tempo);
+            producer.abort_tempo_write(write);
+            prop_assert_eq!(producer.tempo(), first_tempo);
         }
     }
 }

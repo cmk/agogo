@@ -100,3 +100,18 @@ Full review comments:
 
 - [P2] Don't time out after the RT side claims a tempo — crates/host/src/bridge.rs:504-511
   Under a boundary race where `begin_buffer()` has already claimed this pending tempo by CASing `pending_tempo_generation` to 0 but is preempted before it stores `applied_tempo_generation`, this fixed 64-spin wait can return false and make `admit_tempo` report `late`. The callback then resumes and applies the tempo, so the admission result says the command missed its deadline even though it affected the RT buffer.
+
+## Local review (2026-05-02)
+
+**Branch:** plan-2026-05-02-08
+**Commits:** 7 (origin/main..plan-2026-05-02-08)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The patch introduces a boundary race in scalar tempo admission where a later late write can prevent an earlier accepted pending tempo from being consumed. That violates the new admission truthfulness guarantee, so the patch should not be considered correct as-is.
+
+Review comment:
+
+- [P2] Preserve pending tempo while publishing a replacement — crates/host/src/bridge.rs:393-393
+  When a second `agogo.tempo.set` starts just before `begin_buffer()` while an earlier accepted tempo is still pending for that same buffer, this write marks the seqlock odd and the RT side returns `None` instead of consuming the older value. If the new write then observes the advanced epoch and returns `late`, it clears the slot, so the earlier accepted tempo is silently dropped and never affects the deadline buffer.
