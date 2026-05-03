@@ -56,6 +56,13 @@ STATE_SCRIPT = REPO_ROOT / "scripts" / "audit_state.sh"
 DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
+def strip_inline_comment(value: str) -> str:
+    hash_at = value.find("#")
+    if hash_at == -1:
+        return value.strip()
+    return value[:hash_at].rstrip()
+
+
 @dataclass
 class Audit:
     name: str
@@ -107,7 +114,7 @@ def parse_audit(path: Path) -> Audit:
             raise ValueError(f"{path}: front-matter line lacks ':' — {line!r}")
         key, _, val = line.partition(":")
         key = key.strip()
-        val = val.strip()
+        val = strip_inline_comment(val.strip())
         if val.startswith("[") and val.endswith("]"):
             items = [v.strip() for v in val[1:-1].split(",") if v.strip()]
             fm[key] = items
