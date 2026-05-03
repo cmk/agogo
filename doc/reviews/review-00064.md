@@ -86,3 +86,18 @@ Full review comments:
 
 - [P2] Constrain audit state names to basenames — scripts/audit_state.sh:64-66
   When the audit name passed from front matter or the CLI contains a slash or `..`, this path composition can escape `.git/audit-state`; for example `name: ../hooks/pre-commit` makes `mark` overwrite `.git/hooks/pre-commit` with the HEAD SHA. Validate names to a safe basename before using them as filesystem paths.
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-02-09
+**Commits:** 15 (origin/main..plan-2026-05-02-09)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The Rust changes and tests pass, but the new audit harness does not honor its forced full-audit mode whenever there is a non-empty delta, which can silently narrow manual audits.
+
+Review comment:
+
+- [P2] Make forced audit runs cover the full pathspec — scripts/audit.py:294-294
+  When a pin exists and there are any changed files, `scripts/audit.py run <name> --force` still passes only the `since-last` delta into Codex because the full-pathspec `git ls-files` branch runs only when `not changed`. This contradicts the `--force` help text and prevents a manual full audit after a partial change; use `args.force` to select the full pathspec regardless of whether the delta is empty.
