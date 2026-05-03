@@ -13,9 +13,11 @@
 //! where `f = fromIntegral . max 0` and `g = fromIntegral . min (f
 //! maxBound)`). Since `U7` / `U4` are unsigned, `max 0` is a no-op:
 //! `ceil` is the exact embedding into `u8`, and `inner` saturates a
-//! `u8` to the newtype's `MAX`.
+//! `u8` to the newtype's `MAX`. Agogo supplies the matching right
+//! adjoint too: `floor(MAX)` maps to `u8::MAX`, while lower values
+//! embed exactly.
 
-use connections::conn::{Conn, ConnL};
+use connections::conn::{ViewL, ViewR};
 
 // ── U7 — 7-bit unsigned (0..=127). ──
 
@@ -73,34 +75,86 @@ impl core::fmt::Display for U4 {
     }
 }
 
-// ── Saturating Galois connections (Haskell `Cast 'L`). ──
+// ── Saturating Galois connections. ──
 //
 // For each (narrow, u8) pair:
 // - `ceil:  Narrow → u8` is the exact embedding (the narrow type's
 //   domain is a subset of u8's, so no rounding is needed).
 // - `inner: u8 → Narrow` saturates to `Narrow::MAX`.
-// - `Conn::new_l` builds the one-sided `'L` shape; no `floor`
-//   operation is exposed because there is no right adjoint.
+// - `floor: Narrow → u8` embeds exactly below `MAX` and maps `MAX` to
+//   `u8::MAX`, making the right adjoint total.
 
-pub const U007U008: ConnL<U7, u8> = {
-    fn ceil(x: U7) -> u8 {
-        x.0
-    }
-    fn inner(x: u8) -> U7 {
-        U7(if x <= U7::MAX { x } else { U7::MAX })
-    }
-    Conn::new_l(ceil, inner)
-};
+fn u7u8_ceil(x: U7) -> u8 {
+    x.0
+}
 
-pub const U004U008: ConnL<U4, u8> = {
-    fn ceil(x: U4) -> u8 {
-        x.0
+fn u7u8_inner(x: u8) -> U7 {
+    U7(if x <= U7::MAX { x } else { U7::MAX })
+}
+
+fn u7u8_floor(x: U7) -> u8 {
+    if x.0 == U7::MAX { u8::MAX } else { x.0 }
+}
+
+connections::triple! {
+    #[allow(non_camel_case_types)]
+    #[derive(Copy, Clone, Debug, Default)]
+    pub U007U008 : U7 => u8 {
+        ceil:  u7u8_ceil,
+        inner: u7u8_inner,
+        floor: u7u8_floor,
     }
-    fn inner(x: u8) -> U4 {
-        U4(if x <= U4::MAX { x } else { U4::MAX })
+}
+
+impl U007U008 {
+    pub fn ceil(self, x: U7) -> u8 {
+        <Self as ViewL<U7, u8>>::L.ceil(x)
     }
-    Conn::new_l(ceil, inner)
-};
+
+    pub fn inner(self, x: u8) -> U7 {
+        <Self as ViewL<U7, u8>>::L.inner(x)
+    }
+
+    pub fn floor(self, x: U7) -> u8 {
+        <Self as ViewR<U7, u8>>::R.floor(x)
+    }
+}
+
+fn u4u8_ceil(x: U4) -> u8 {
+    x.0
+}
+
+fn u4u8_inner(x: u8) -> U4 {
+    U4(if x <= U4::MAX { x } else { U4::MAX })
+}
+
+fn u4u8_floor(x: U4) -> u8 {
+    if x.0 == U4::MAX { u8::MAX } else { x.0 }
+}
+
+connections::triple! {
+    #[allow(non_camel_case_types)]
+    #[derive(Copy, Clone, Debug, Default)]
+    pub U004U008 : U4 => u8 {
+        ceil:  u4u8_ceil,
+        inner: u4u8_inner,
+        floor: u4u8_floor,
+    }
+}
+
+impl U004U008 {
+    pub fn ceil(self, x: U4) -> u8 {
+        <Self as ViewL<U4, u8>>::L.ceil(x)
+    }
+
+    pub fn inner(self, x: u8) -> U4 {
+        <Self as ViewL<U4, u8>>::L.inner(x)
+    }
+
+    pub fn floor(self, x: U4) -> u8 {
+        <Self as ViewR<U4, u8>>::R.floor(x)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -142,11 +196,23 @@ mod tests {
     }
 
     #[test]
+    fn u7u8_floor_top_spans_saturating_region() {
+        assert_eq!(U007U008.floor(U7(126)), 126);
+        assert_eq!(U007U008.floor(U7(127)), u8::MAX);
+    }
+
+    #[test]
     fn u4u8_inner_at_max_u8_saturates() {
         assert_eq!(U004U008.inner(255), U4(15));
         assert_eq!(U004U008.inner(16), U4(15));
         assert_eq!(U004U008.inner(15), U4(15));
         assert_eq!(U004U008.inner(0), U4(0));
+    }
+
+    #[test]
+    fn u4u8_floor_top_spans_saturating_region() {
+        assert_eq!(U004U008.floor(U4(14)), 14);
+        assert_eq!(U004U008.floor(U4(15)), u8::MAX);
     }
 
     #[test]
@@ -211,13 +277,27 @@ mod tests {
         /// span (full U7, full u8) so the saturating region above
         /// 127 on the u8 side is exercised.
         #[test]
-        fn u7u8_galois_law(
+        fn u7u8_galois_law_l(
             a in 0u8..=U7::MAX,
             b in any::<u8>(),
         ) {
             let a = U7(a);
             let lhs = U007U008.ceil(a) <= b;
             let rhs = a.0 <= U007U008.inner(b).0;
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        /// Right-adjoint law: `inner(b) ≤ a ⟺ b ≤ floor(a)`.
+        /// The `a = U7::MAX` case must accept the whole u8 upper
+        /// region, which is why `floor(U7::MAX) = u8::MAX`.
+        #[test]
+        fn u7u8_galois_law_r(
+            a in 0u8..=U7::MAX,
+            b in any::<u8>(),
+        ) {
+            let a = U7(a);
+            let lhs = U007U008.inner(b).0 <= a.0;
+            let rhs = b <= U007U008.floor(a);
             prop_assert_eq!(lhs, rhs);
         }
 
@@ -237,13 +317,25 @@ mod tests {
 
         /// Galois adjoint law for U4.
         #[test]
-        fn u4u8_galois_law(
+        fn u4u8_galois_law_l(
             a in 0u8..=U4::MAX,
             b in any::<u8>(),
         ) {
             let a = U4(a);
             let lhs = U004U008.ceil(a) <= b;
             let rhs = a.0 <= U004U008.inner(b).0;
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        /// Right-adjoint law for U4.
+        #[test]
+        fn u4u8_galois_law_r(
+            a in 0u8..=U4::MAX,
+            b in any::<u8>(),
+        ) {
+            let a = U4(a);
+            let lhs = U004U008.inner(b).0 <= a.0;
+            let rhs = b <= U004U008.floor(a);
             prop_assert_eq!(lhs, rhs);
         }
     }
