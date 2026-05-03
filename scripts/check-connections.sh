@@ -28,8 +28,9 @@ fi
 # Temporary migration allowlist for Plan 2026-05-02-09. These sites are
 # known unresolved work in the active sprint:
 # - `conn/midi.rs` needs an upstream one-sided declaration macro.
-# - `time/conn.rs` has the motivating TICKTIME/quantize/TIMETIME audit
-#   and must be redesigned rather than mechanically wrapped.
+# - `time/conn.rs` still owns the local `def_conn_marker!` shim for
+#   static markers that have not yet been migrated to upstream macros.
+#   `quantize_at` is intentionally demoted from `Conn` to total rounder.
 #
 # The allowlist exists so this gate can land before those design
 # decisions are finished. It must shrink as the sprint progresses.
