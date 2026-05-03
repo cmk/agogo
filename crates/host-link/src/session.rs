@@ -184,8 +184,8 @@ impl LinkSession {
     /// longer touches `agogo::core::channel::Channel`.
     ///
     /// Link's host-time model and agogo's `Micro` lattice are both
-    /// microseconds, so no `SampleTickConn` is needed here —
-    /// `PicoSampleConn` is only required downstream in
+    /// microseconds, so no musical tick/sample bridge is needed here.
+    /// Decimal sample-rate conversion is only required downstream in
     /// `transform::micro_to_samples` when applying the sample rate.
     pub fn snap_offset_for(&mut self, snap: Option<Quantum>) -> Micro {
         match snap {

@@ -10,8 +10,6 @@
 use agogo::core::conn::fixed::Micro;
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::tick_stream;
-use agogo::core::time::conn::SampleTickConn;
-use agogo::core::time::tick::PPQN;
 
 use super::{checked_trace_frames, parse_grid_arg, straight_common, validate_audio_rate};
 
@@ -37,7 +35,6 @@ pub struct TraceRow {
 pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
     let grid = parse_grid_arg(&args.grid)?;
     validate_audio_rate(args.sr)?;
-    let stc = SampleTickConn::new(args.sr, args.bpm, PPQN);
     // channel trace operates only on the scheduler — it doesn't
     // construct full Channel variants, just the common field set.
     let common = straight_common(grid, args.delay);
@@ -45,7 +42,7 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
     let mut rows = Vec::new();
     for b in 0..args.buffers {
         let start = u64::from(b).checked_mul(frames_u64).expect("checked above");
-        for ev in tick_stream(&common, &stc, start, args.frames) {
+        for ev in tick_stream(&common, args.sr, args.bpm, start, args.frames) {
             rows.push(TraceRow {
                 buffer_index: b,
                 sample_index: ev.sample_index,

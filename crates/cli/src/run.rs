@@ -45,7 +45,6 @@ use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
 use agogo::core::control::{Playhead, PlayheadStopHandle, TransportPolicy};
 use agogo::core::sink::audio::{AudioHost, AudioIo, Config};
-use agogo::core::time::tick::PPQN;
 use agogo::host::cpal::CpalHost;
 use agogo::host::cpal::callback::CallbackState;
 use agogo::host::cpal::control::spsc;
@@ -58,7 +57,7 @@ use std::num::NonZeroU32;
 
 /// PLL pulse rate. `agogo run` external source feeds the detector +
 /// PLL at MIDI clock cadence (24 PPQ); the master tick stream
-/// scheduler uses [`PPQN`] (960).
+/// scheduler uses `agogo::core::time::tick::PPQN` (960).
 const PULSE_PPQ: u32 = 24;
 
 use crate::parsers::{parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats};
@@ -395,7 +394,6 @@ macro_rules! def_run_with_rate {
         phase_source,
         args.sr,
         bpm,
-        PPQN,
         transport,
         args.buffer_frames as usize,
     );

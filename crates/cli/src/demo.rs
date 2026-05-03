@@ -18,7 +18,6 @@ use agogo::core::sink::audio::{AudioHost, Config};
 use agogo::core::time::grid::Grid;
 use agogo::core::time::swing::SwingConfig;
 use agogo::core::time::tbase::TBase;
-use agogo::core::time::tick::PPQN;
 use agogo::host::cpal::CpalHost;
 use agogo::host::cpal::callback::CallbackState;
 use agogo::host::cpal::control::spsc;
@@ -231,7 +230,6 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         phase_source,
         args.sr,
         bpm,
-        PPQN,
         TransportPolicy::Scripted {
             schedule: VecDeque::new(),
         },

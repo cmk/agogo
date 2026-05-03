@@ -12,8 +12,6 @@ use agogo::core::conn::fixed::Micro;
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::event::tick_stream;
 use agogo::core::sink::midi::{MidiRtByte, TestSink, render_midi_channel};
-use agogo::core::time::conn::SampleTickConn;
-use agogo::core::time::tick::PPQN;
 
 use super::{checked_trace_frames, parse_grid_arg, straight_common, validate_audio_rate};
 
@@ -40,7 +38,6 @@ pub struct TraceRow {
 pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
     let grid = parse_grid_arg(&args.grid)?;
     validate_audio_rate(args.sr)?;
-    let stc = SampleTickConn::new(args.sr, args.bpm, PPQN);
     // MIDI trace dispatches the MIDI clock renderer directly —
     // no need to wrap in a full Channel::Midi variant.
     let common = straight_common(grid, Micro::ZERO);
@@ -63,7 +60,7 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
             (_, true) => Some(MidiRtByte::Stop),
             _ => None,
         };
-        let evs = tick_stream(&common, &stc, start_sample, args.frames);
+        let evs = tick_stream(&common, args.sr, args.bpm, start_sample, args.frames);
         render_midi_channel(&common, &role, &evs, transport, start_sample, None, &sink);
     }
     Ok(sink

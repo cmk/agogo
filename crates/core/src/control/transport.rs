@@ -31,7 +31,6 @@ use crate::control::event::tick_stream_into;
 use crate::control::sync::PhaseSource;
 use crate::sink::audio::{AudioIo, render_audio_click_block};
 use crate::sink::midi::{MidiRtByte, MidiSink, render_midi_channel};
-use crate::time::conn::SampleTickConn;
 
 const COMMAND_TRANSPORT_CAPACITY: usize = 128;
 
@@ -56,8 +55,10 @@ pub struct Playhead<R> {
     /// rate at compile time so the Internal/External arms inside
     /// `PhaseSource` can monomorphise.
     pub phase_source: PhaseSource<R>,
-    /// Sample↔Tick conversion shared across channels.
-    pub stc: SampleTickConn,
+    /// Validated sample rate shared across channels.
+    pub sr: u32,
+    /// Current tempo shared across channels.
+    pub bpm: Tempo,
     /// Transport policy + running flag.
     pub transport: TransportState,
     /// Reused per-channel scratch buffer. Pre-sized to
@@ -297,16 +298,15 @@ impl PlayheadStopHandle {
 }
 
 impl<R> Playhead<R> {
-    /// Construct a new [`Playhead`]. `bpm` and `ppqn` configure the
-    /// shared [`SampleTickConn`]; `buffer_frames` sizes the
-    /// preallocated scratch buffer so the per-channel render path
-    /// stays allocation-free.
+    /// Construct a new [`Playhead`]. `sr` and `bpm` configure the
+    /// fixed-PPQN tick/sample mapping; `buffer_frames` sizes the
+    /// preallocated scratch buffer so the per-channel render path stays
+    /// allocation-free.
     pub fn new(
         channels: Vec<Channel>,
         phase_source: PhaseSource<R>,
         sr: u32,
         bpm: Tempo,
-        ppqn: u32,
         transport: TransportPolicy,
         buffer_frames: usize,
     ) -> Self {
@@ -315,7 +315,8 @@ impl<R> Playhead<R> {
         Self {
             channels,
             phase_source,
-            stc: SampleTickConn::new(sr, bpm, ppqn),
+            sr,
+            bpm,
             transport: TransportState::new(transport),
             events_pool: Vec::with_capacity(cap),
             bar_counters: vec![0; n],
@@ -351,10 +352,10 @@ impl<R> Playhead<R> {
     /// command-bridge path: the host consumes admitted tempo metadata,
     /// then updates the runtime before scheduling the buffer.
     pub fn apply_tempo(&mut self, bpm: Tempo) -> bool {
-        if self.stc.bpm() == bpm {
+        if self.bpm == bpm {
             return false;
         }
-        self.stc = SampleTickConn::new(self.stc.sr(), bpm, self.stc.ppqn());
+        self.bpm = bpm;
         if let PhaseSource::Internal { bpm: source_bpm } = &mut self.phase_source {
             *source_bpm = bpm;
         }
@@ -485,7 +486,8 @@ impl<R> Playhead<R> {
             tick_stream_into(
                 &mut self.events_pool,
                 common,
-                &self.stc,
+                self.sr,
+                self.bpm,
                 io.buffer_start_sample,
                 io.frames,
             );
@@ -575,7 +577,6 @@ mod tests {
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
-    use crate::time::tick::PPQN;
     use proptest::prelude::*;
 
     fn zero_channel(divider: Grid) -> Channel {
@@ -622,7 +623,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Scripted {
                 schedule: VecDeque::new(),
             },
@@ -659,7 +659,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Internal {
                 start_emitted: false,
             },
@@ -723,7 +722,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Internal {
                 start_emitted: true,
             },
@@ -770,7 +768,6 @@ mod tests {
                 PhaseSource::Internal { bpm },
                 48_000,
                 bpm,
-                PPQN,
                 TransportPolicy::LinkDriven {
                     prev_playing: false,
                     query: Box::new(move || {
@@ -824,7 +821,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Scripted { schedule },
             4_096,
         );
@@ -874,7 +870,6 @@ mod tests {
                 PhaseSource::Internal { bpm },
                 48_000,
                 bpm,
-                PPQN,
                 TransportPolicy::Scripted {
                     schedule: VecDeque::new(),
                 },
@@ -903,7 +898,6 @@ mod tests {
                         PhaseSource::Internal { bpm },
                         48_000,
                         bpm,
-                        PPQN,
                         TransportPolicy::Scripted {
                             schedule: VecDeque::new(),
                         },
@@ -993,7 +987,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Scripted {
                 schedule: VecDeque::new(),
             },
@@ -1018,7 +1011,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Scripted {
                 schedule: VecDeque::new(),
             },
@@ -1108,14 +1100,14 @@ mod tests {
             let mut m_un = Playhead::<S048>::new(
                 vec![mk_channel(None)],
                 PhaseSource::Internal { bpm },
-                sr, bpm, PPQN,
+                sr, bpm,
                 TransportPolicy::Scripted { schedule: VecDeque::new() },
                 frames,
             );
             let mut m_fi = Playhead::<S048>::new(
                 vec![mk_channel(Some(NonZeroU16::new(bars).unwrap()))],
                 PhaseSource::Internal { bpm },
-                sr, bpm, PPQN,
+                sr, bpm,
                 TransportPolicy::Scripted { schedule: VecDeque::new() },
                 frames,
             );
@@ -1158,7 +1150,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Scripted {
                 schedule: VecDeque::new(),
             },
@@ -1205,7 +1196,7 @@ mod tests {
             let mut playhead = Playhead::<S048>::new(
                 vec![click_channel(divider, cfg, NonZeroU16::new(bars))],
                 PhaseSource::Internal { bpm },
-                48_000, bpm, PPQN,
+                48_000, bpm,
                 TransportPolicy::Scripted { schedule: VecDeque::new() },
                 24_000,
             );
@@ -1246,7 +1237,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Scripted {
                 schedule: VecDeque::new(),
             },
@@ -1295,7 +1285,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             TransportPolicy::Scripted {
                 schedule: VecDeque::new(),
             },

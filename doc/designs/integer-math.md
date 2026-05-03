@@ -35,9 +35,9 @@ what from the chat is load-bearing vs. decorative for that sprint.
   example everywhere is `phase: u64` with 32 fractional bits and a
   `wrapping_add(advance_per_sample)` hot loop. This is fine engineering
   for a monolithic clock, but agogo's architecture (agogo.md §2) keeps
-  time in `Tick(u32)` and converts to `Sample` only via
-  `SampleTickConn` at the output boundary. The accumulator pattern is
-  structurally the wrong shape for us. If a future sprint needs a
+  time in `Tick` and converts to rate-typed sample time only at the
+  output boundary. The accumulator pattern is structurally the wrong
+  shape for us. If a future sprint needs a
   sample-resolution phase inside one channel's renderer, revisit then.
 - **Scaling BPM as `bpm * 100`.** The chat's convenience trick for
   decimal BPMs. agogo carries BPM as an explicit `Tempo` type

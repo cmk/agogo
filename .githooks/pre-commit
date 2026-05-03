@@ -73,4 +73,10 @@ scripts/check-layers.sh
 step "scripts/check-connections.sh"
 scripts/check-connections.sh
 
+# 6. Boundary-panic gate — blocking. User-reachable invalid input must
+#    fail at CLI/config/host boundaries, not inside bridge/scheduler
+#    panic-like calls.
+step "scripts/check-boundary-panics.sh"
+scripts/check-boundary-panics.sh
+
 step "OK"
