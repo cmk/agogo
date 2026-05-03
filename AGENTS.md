@@ -589,6 +589,15 @@ One slug, three places.
    user's call. Then:
    - worktree: `git worktree add ../<repo>.plan-YYYY-MM-DD-NN -b plan/YYYY-MM-DD-NN`, `cd` into it.
    - branch: `git switch -c plan/YYYY-MM-DD-NN`.
+   If `git` reports `cannot lock ref` or `unable to create directory`
+   for the slash branch, first diagnose the ref shape with
+   `git show-ref --heads | grep 'refs/heads/plan'`. If a real
+   `refs/heads/plan` ref exists, or slash branches remain blocked,
+   fall back to the flat branch name `plan-YYYY-MM-DD-NN`. If no
+   conflicting ref exists, the failure may be a sandbox or Git-ref
+   write-permission issue; retry with the appropriate approval before
+   falling back. Keep the plan filename canonical either way, and note
+   any flat-branch fallback in the plan's **Review** section.
 3. **Write the plan** to `doc/plans/plan-YYYY-MM-DD-NN.md` on that branch.
    The plan's **Verification** table must list the property tests that
    must pass for the sprint to ship (e.g., "message round-trips through
