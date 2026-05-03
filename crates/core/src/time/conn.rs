@@ -1,25 +1,23 @@
-//! Marker-backed Galois connections for `Tick`, `Time`, `Rational`,
-//! and `Grid`.
+//! Marker-backed Galois connections for `Tick`, `Time`, and `Grid`.
 //!
-//! Four static marker values port the Haskell Cirklon conversions:
+//! Three static marker values port the Haskell Cirklon conversions:
 //!
 //! | Rust            | Haskell      | Public API                                |
 //! |-----------------|--------------|-------------------------------------------|
 //! | [`TICKTIME`]    | `ticks`      | marker with `ViewL<Tick, Time>` + `ViewR<Tick, Time>` |
-//! | [`WHOLTICK`]    | `ratTick`    | marker with `ViewL<Whole, Tick>` + `ViewR<Whole, Tick>` |
 //! | [`TIMETIME`]    | `time`       | marker with `ViewL<(Time, Time), Time>` + `ViewR<(Time, Time), Time>` |
 //! | [`GRIDGRID`]    | `tbase`      | marker with `ViewL<(Grid, Grid), Grid>` + `ViewR<(Grid, Grid), Grid>` |
 //!
 //! Naming: per CLAUDE.md, Conn accessors are 8-char identifiers
 //! built from two 4-char side names. Single-type-side Conns
-//! (`TICKTIME`, `WHOLTICK`) follow the rule directly. Pair-side Conns
+//! (`TICKTIME`) follow the rule directly. Pair-side Conns
 //! (`TIMETIME`, `GRIDGRID`) duplicate the side name. The Haskell
 //! `quantizeAt` helper is intentionally not ported as an agogo Conn:
 //! its laws require a `Time` codomain restricted to the selected grid,
 //! while agogo callers can use [`TICKTIME`] plus an explicit resolution
 //! [`Time`] when they need fixed-grid binning.
 //!
-//! The four static connections are zero-sized marker values matching
+//! The three static connections are zero-sized marker values matching
 //! upstream's triple API. Their inherent `.ceil()`, `.inner()`, and
 //! `.floor()` methods forward to kind-tagged
 //! [`connections::conn::ConnL`] / [`connections::conn::ConnR`] views
@@ -36,19 +34,12 @@
 //! `*_refine_le` helpers for that reason.
 
 use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
-use connections::fixed::u64::{I064U064, U128U064};
-use num_rational::Rational64;
+use connections::fixed::u64::U128U064;
 
 use crate::conn::tempo::Tempo;
 use crate::time::grid::Grid;
-use crate::time::tick::{PPQN, Tick, Time, from_ticks, time_to_tick};
+use crate::time::tick::{Tick, Time, from_ticks, time_to_tick};
 use connections::lattice::{Join, Meet};
-
-/// A rational whole-note duration. `Whole::new(1, 4)` = quarter note.
-pub type Whole = Rational64;
-
-/// Ticks per whole note at 960 PPQN. `4 * PPQN`.
-const TPW: i64 = (4 * PPQN) as i64;
 
 macro_rules! def_conn_marker {
     ($name:ident, $A:ty, $B:ty, $ceil:path, $inner:path, $floor:path) => {
@@ -154,51 +145,6 @@ def_conn_marker!(
     ticktime_ceil,
     ticktime_inner,
     ticktime_floor
-);
-
-// ── wholtick: Whole ↔ Tick marker ────────────────────────────────
-
-fn tpw_rational() -> Rational64 {
-    Rational64::new(TPW, 1)
-}
-
-// Clamp an `i64` into the non-negative `u64` range. Saturates at 0
-// so a negative rational produces `Tick(0)` rather than wrapping.
-// `i64::MAX` maps to `Tick(i64::MAX as u64)`, well inside Tick's u64
-// horizon.
-fn i64_to_tick(n: i64) -> Tick {
-    Tick(I064U064.ceil(n))
-}
-
-fn wholtick_ceil(r: Whole) -> Tick {
-    let ceil = (r * tpw_rational()).ceil().to_integer();
-    i64_to_tick(ceil)
-}
-
-fn wholtick_inner(n: Tick) -> Whole {
-    // Tick is u64; Whole's numerator is i64. Saturate at i64::MAX so
-    // Tick values past i64's positive range produce a finite (large)
-    // rational rather than wrapping. In practice arb_tick is capped
-    // well below i64::MAX.
-    let num = i64::try_from(n.0).unwrap_or(i64::MAX);
-    Rational64::new(num, TPW)
-}
-
-fn wholtick_floor(r: Whole) -> Tick {
-    let floor = (r * tpw_rational()).floor().to_integer();
-    i64_to_tick(floor)
-}
-
-// Galois connection between rational whole-note durations and ticks.
-// Floor rounds down, ceiling rounds up, embed is exact:
-// `wholtick_inner(Tick(n)) = n / 3840` at 960 PPQN.
-def_conn_marker!(
-    WHOLTICK,
-    Whole,
-    Tick,
-    wholtick_ceil,
-    wholtick_inner,
-    wholtick_floor
 );
 
 // ── timetime: (Time, Time) ↔ Time marker ─────────────────────────
@@ -388,9 +334,8 @@ impl SampleTickConn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::conn::arb::arb_rational_nonneg;
     use crate::time::arb::arb_grid;
-    use crate::time::arb::{arb_any_tick, arb_small_time, arb_tick, arb_time};
+    use crate::time::arb::{arb_any_tick, arb_small_time, arb_time};
     use proptest::prelude::*;
 
     // ── Spot checks ──────────────────────────────────────────────
@@ -462,28 +407,6 @@ mod tests {
                 base: Grid::T1,
             }
         );
-    }
-
-    #[test]
-    fn wholtick_quarter_is_960() {
-        let c = WHOLTICK;
-        assert_eq!(c.floor(Rational64::new(1, 4)), Tick(960));
-        assert_eq!(c.ceil(Rational64::new(1, 4)), Tick(960));
-    }
-
-    #[test]
-    fn wholtick_three_sixteenths_is_720() {
-        let c = WHOLTICK;
-        // 3/16 × 3840 = 720.
-        assert_eq!(c.floor(Rational64::new(3, 16)), Tick(720));
-    }
-
-    #[test]
-    fn wholtick_one_seventh_ceils_correctly() {
-        // 3840 / 7 = 548.57…, ceil = 549, floor = 548.
-        let c = WHOLTICK;
-        assert_eq!(c.ceil(Rational64::new(1, 7)), Tick(549));
-        assert_eq!(c.floor(Rational64::new(1, 7)), Tick(548));
     }
 
     #[test]
@@ -631,60 +554,6 @@ mod tests {
             let c = TICKTIME;
             let n = Tick(q * u64::from(Grid::T512P.tick_count()));
             prop_assert_eq!(c.inner(c.floor(n)), n);
-        }
-
-        // ── wholtick ─────────────────────────────────────────────
-
-        #[test]
-        fn wholtick_adjoint(a in arb_rational_nonneg(), b in arb_tick()) {
-            let c = WHOLTICK;
-            let lhs = c.ceil(a) <= b;
-            let rhs = a <= c.inner(b);
-            prop_assert_eq!(lhs, rhs);
-        }
-
-        #[test]
-        fn wholtick_closed(a in arb_rational_nonneg()) {
-            let c = WHOLTICK;
-            prop_assert!(a <= c.inner(c.ceil(a)));
-        }
-
-        #[test]
-        fn wholtick_kernel(b in arb_tick()) {
-            let c = WHOLTICK;
-            prop_assert!(c.ceil(c.inner(b)) <= b);
-        }
-
-        #[test]
-        fn wholtick_monotonic(
-            a1 in arb_rational_nonneg(), a2 in arb_rational_nonneg(),
-            b1 in arb_tick(), b2 in arb_tick(),
-        ) {
-            let c = WHOLTICK;
-            if a1 <= a2 {
-                prop_assert!(c.ceil(a1) <= c.ceil(a2));
-            }
-            if b1 <= b2 {
-                prop_assert!(c.inner(b1) <= c.inner(b2));
-            }
-        }
-
-        #[test]
-        fn wholtick_idempotent(a in arb_rational_nonneg()) {
-            let c = WHOLTICK;
-            let once = c.inner(c.ceil(a));
-            let twice = c.inner(c.ceil(once));
-            prop_assert_eq!(once, twice);
-        }
-
-        #[test]
-        fn wholtick_floor_monotone(
-            a in arb_rational_nonneg(), b in arb_rational_nonneg(),
-        ) {
-            let c = WHOLTICK;
-            if a <= b {
-                prop_assert!(c.floor(a) <= c.floor(b));
-            }
         }
 
     }

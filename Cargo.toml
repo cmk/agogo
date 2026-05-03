@@ -46,7 +46,6 @@ connections = { git = "https://gitlab.com/cmk/connections.git", rev = "3a0f8f23f
 # Shared dependencies
 bpaf = { version = "0.9", features = ["derive"] }
 fixed = "1"
-num-rational = "0.4"
 rand = "0.9"
 rand_distr = "0.5"
 rand_pcg = "0.9"

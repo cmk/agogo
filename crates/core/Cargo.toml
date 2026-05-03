@@ -15,7 +15,6 @@ testkit = ["dep:proptest"]
 [dependencies]
 connections = { workspace = true }
 fixed = { workspace = true }
-num-rational = { workspace = true }
 proptest = { workspace = true, optional = true }
 rand = { workspace = true }
 rand_distr = { workspace = true }
