@@ -542,8 +542,12 @@ impl ControlProducer {
         self.current_buffer_epoch().saturating_add(1)
     }
 
-    /// Push one ordered command without blocking. A full queue is a
-    /// caller-visible error; it is not a silent drop.
+    /// Push one ordered command without blocking.
+    ///
+    /// A full queue is a caller-visible error; it is not a silent
+    /// drop. This compatibility path can also report a poisoned
+    /// producer lock or a late default next-buffer deadline if the
+    /// RT side crosses the deadline during a boundary race.
     pub fn try_push(&self, command: ControlCommand) -> Result<(), BridgeError> {
         let metadata = AdmissionMetadata::next_buffer(
             CommandId(0),

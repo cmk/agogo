@@ -178,14 +178,17 @@ impl AgogoDriver {
         let object = json_object(args)?;
         let command_id = match object.get("command_id") {
             Some(value) => {
-                let command_id =
-                    CommandId(value.as_u64().ok_or_else(|| {
-                        "field `command_id` must be an unsigned integer".to_owned()
-                    })?);
+                let id = value
+                    .as_u64()
+                    .ok_or_else(|| "field `command_id` must be an unsigned integer".to_owned())?;
+                if id == u64::MAX {
+                    return Err("field `command_id` must be less than u64::MAX".to_owned());
+                }
+                let command_id = CommandId(id);
                 self.reserve_generated_ids_through(command_id);
                 command_id
             }
-            None => self.next_generated_command_id(),
+            None => self.next_generated_command_id()?,
         };
         let source_id = match object.get("source_id") {
             Some(value) => {
@@ -237,18 +240,20 @@ impl AgogoDriver {
         })
     }
 
-    fn next_generated_command_id(&self) -> CommandId {
-        CommandId(
-            self.next_command_id
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                    Some(current.saturating_add(1))
-                })
-                .expect("command id update closure always returns Some"),
-        )
+    fn next_generated_command_id(&self) -> Result<CommandId, String> {
+        self.next_command_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map(CommandId)
+            .map_err(|_| "generated command id range exhausted".to_owned())
     }
 
     fn reserve_generated_ids_through(&self, command_id: CommandId) {
-        let next = command_id.get().saturating_add(1);
+        let next = command_id
+            .get()
+            .checked_add(1)
+            .expect("caller rejects u64::MAX command id");
         let _ =
             self.next_command_id
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
@@ -617,6 +622,35 @@ mod tests {
 
         assert_eq!(explicit["command_id"], json!(42));
         assert_eq!(generated["command_id"], json!(43));
+    }
+
+    #[test]
+    fn explicit_command_id_rejects_u64_max() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let err = driver
+            .handle_call(Tool::Start.name(), json!({ "command_id": u64::MAX }))
+            .unwrap_err();
+        let generated = driver
+            .handle_call(Tool::Stop.name(), json!({}))
+            .expect("generated id still available");
+
+        assert_eq!(err, "field `command_id` must be less than u64::MAX");
+        assert_eq!(generated["command_id"], json!(1));
+    }
+
+    #[test]
+    fn generated_command_id_rejects_exhausted_range() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+        driver.next_command_id.store(u64::MAX, Ordering::Relaxed);
+
+        let err = driver
+            .handle_call(Tool::Start.name(), json!({}))
+            .unwrap_err();
+
+        assert_eq!(err, "generated command id range exhausted");
     }
 
     #[test]

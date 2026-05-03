@@ -188,3 +188,30 @@ Fixed. `settle_published_tempo()` now uses the named `TEMPO_PRODUCER_SETTLE_SPIN
 #### Reply from cmk ([2026-05-03 05:59 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177699586))
 
 Fixed. The RT retry budget is now the named `TEMPO_RT_CLAIM_RETRIES` constant with an RT-budget rationale. I also tightened the producer path so a replacement cannot publish over a prior pending tempo once that prior deadline buffer has started; `tempo_replacement_does_not_publish_over_due_backup` covers the skip-past-deadline case.
+
+<!-- gh-id: 3177713996 -->
+### Copilot on [`crates/host/src/bridge.rs:553`](https://github.com/cmk/agogo/pull/63#discussion_r3177713996) (2026-05-03 06:15 UTC)
+
+`try_push()` can now return `BridgeError::Late` (and other admission-related errors) due to the new epoch/deadline admissibility checks. The doc comment currently only mentions `QueueFull` as a caller-visible error; please update the documentation (or narrow the error mapping) so callers aren't surprised by `Late` on a boundary race.
+
+<!-- gh-id: 3177714004 -->
+### Copilot on [`crates/host/src/driver.rs:256`](https://github.com/cmk/agogo/pull/63#discussion_r3177714004) (2026-05-03 06:15 UTC)
+
+`reserve_generated_ids_through()` uses `saturating_add(1)`, which means an explicit `command_id = u64::MAX` only reserves up to `u64::MAX` and the next generated id will also be `u64::MAX`, creating duplicate ids. Consider rejecting `u64::MAX` for caller-supplied ids, or changing the reservation/generation scheme so uniqueness is preserved even at the upper boundary (or explicitly documenting the saturation behavior).
+
+<!-- gh-id: 4215958187 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 06:15 UTC](https://github.com/cmk/agogo/pull/63#pullrequestreview-4215958187))
+
+## Pull request overview
+
+Copilot reviewed 7 out of 8 changed files in this pull request and generated 2 comments.
+
+<!-- gh-id: 3177720178 -->
+#### Reply from cmk ([2026-05-03 06:21 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177720178))
+
+Fixed. `try_push()` now documents the compatibility-path errors it can surface: queue full, poisoned producer lock, and a late default next-buffer deadline during a boundary race.
+
+<!-- gh-id: 3177720228 -->
+#### Reply from cmk ([2026-05-03 06:22 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177720228))
+
+Fixed. Caller-supplied `command_id = u64::MAX` is now rejected before reserving generated ids, and `reserve_generated_ids_through()` uses `checked_add` under that invariant. Added `explicit_command_id_rejects_u64_max` to cover that the rejection does not advance the generated-id counter.
