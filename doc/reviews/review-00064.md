@@ -68,3 +68,21 @@ Review comment:
 
 - [P3] Strip inline YAML comments before parsing front matter — scripts/audit.py:110-111
   When someone follows the documented audit front-matter examples that include inline comments, e.g. `day: mon  # ...` or `paths: [crates/, tests/]  # ...`, this parser keeps the comment in `val`. That makes `day` fail the `DAY_NAMES` check and makes list fields stop matching `val.endswith("]")`, so `scripts/audit.py list`/`cron-tick` will fail as soon as a prompt is added with the advertised format. Strip inline comments or remove them from the documented schema.
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-02-09
+**Commits:** 14 (origin/main..plan-2026-05-02-09)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The core Rust changes compile and tests pass, but the newly added audit harness has configuration validation/path handling bugs that can silently disable audits or write outside its state directory.
+
+Full review comments:
+
+- [P2] Reject invalid audit cadences — scripts/audit.py:133-134
+  If an audit front matter has a typo such as `cadence: biweeky`, `parse_audit` accepts it and `is_due_today` later returns false for every date, so that audit silently never runs and `scripts/audit.py list` only shows `due today? no`. Please validate `cadence` against the documented `weekly | biweekly | monthly` set when loading the audit.
+
+- [P2] Constrain audit state names to basenames — scripts/audit_state.sh:64-66
+  When the audit name passed from front matter or the CLI contains a slash or `..`, this path composition can escape `.git/audit-state`; for example `name: ../hooks/pre-commit` makes `mark` overwrite `.git/hooks/pre-commit` with the HEAD SHA. Validate names to a safe basename before using them as filesystem paths.

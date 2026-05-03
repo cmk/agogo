@@ -39,6 +39,14 @@ usage() {
     exit 2
 }
 
+validate_name() {
+    local name=$1
+    if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        echo "audit_state.sh: audit name must be a safe basename: $name" >&2
+        exit 2
+    fi
+}
+
 if [ $# -lt 1 ]; then usage; fi
 
 cmd=$1
@@ -55,6 +63,7 @@ case "$cmd" in
     last)
         if [ $# -ne 1 ]; then usage; fi
         name=$1
+        validate_name "$name"
         pin_file="$state_dir/$name"
         [ -f "$pin_file" ] && cat "$pin_file" || true
         ;;
@@ -62,6 +71,7 @@ case "$cmd" in
     mark)
         if [ $# -ne 1 ]; then usage; fi
         name=$1
+        validate_name "$name"
         mkdir -p "$state_dir"
         pin_file="$state_dir/$name"
         head_sha=$(git rev-parse HEAD)
@@ -72,6 +82,7 @@ case "$cmd" in
     since-last)
         if [ $# -lt 1 ]; then usage; fi
         name=$1
+        validate_name "$name"
         shift
         # Remaining args are pathspecs. If empty, default to the
         # whole repo.

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -54,6 +55,8 @@ LOG_FILE = AUDITS_DIR / "log.md"
 STATE_SCRIPT = REPO_ROOT / "scripts" / "audit_state.sh"
 
 DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+CADENCES = {"weekly", "biweekly", "monthly"}
+AUDIT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def strip_inline_comment(value: str) -> str:
@@ -89,8 +92,7 @@ class Audit:
             return today.isocalendar()[1] % 2 == 0
         if self.cadence == "monthly":
             return today.day <= 7
-        # Unknown cadence → conservative no
-        return False
+        raise ValueError(f"unknown cadence after validation: {self.cadence!r}")
 
 
 def parse_audit(path: Path) -> Audit:
@@ -130,8 +132,12 @@ def parse_audit(path: Path) -> Audit:
         raise ValueError(f"{path}: name/day/cadence must be scalar strings")
     if not isinstance(paths, list):
         raise ValueError(f"{path}: paths must be a list")
+    if not AUDIT_NAME_RE.fullmatch(name):
+        raise ValueError(f"{path}: name={name!r} must be a safe basename")
     if day not in DAY_NAMES:
         raise ValueError(f"{path}: day={day!r} not one of {DAY_NAMES}")
+    if cadence not in CADENCES:
+        raise ValueError(f"{path}: cadence={cadence!r} not one of {sorted(CADENCES)}")
 
     return Audit(
         name=name,

@@ -52,6 +52,10 @@ cadence: weekly       # weekly (default) | biweekly | monthly
 <prompt body - handed to codex exec via stdin with a file-list preamble>
 ```
 
+Audit names must be safe basenames: ASCII letters/digits followed by
+letters, digits, `.`, `_`, or `-`. The name is used as the
+`.git/audit-state/<name>` pin filename.
+
 Prompts must instruct Codex to output `no findings` on a clean run.
 The harness uses that exact string to decide whether to append to the
 audit log.
