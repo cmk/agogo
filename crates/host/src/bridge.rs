@@ -10,7 +10,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError};
 
-use agogo::core::conn::sample::SampleTime;
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::{Playhead, TransportCommandApply};
 use rust_fsm::state_machine;
@@ -981,7 +980,7 @@ impl ControlConsumer {
 /// it at the top of the audio buffer, then render the buffer. The
 /// function does not allocate; it consumes the fixed-capacity bridge
 /// queue and reports anything it cannot apply.
-pub fn apply_control_to_playhead<R: SampleTime>(
+pub fn apply_control_to_playhead<R>(
     consumer: &mut ControlConsumer,
     playhead: &mut Playhead<R>,
 ) -> CommandApplyReport {

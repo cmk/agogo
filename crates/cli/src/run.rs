@@ -2,7 +2,7 @@
 //!
 //! Generalises the single-channel `agogo demo run` into:
 //!   - N channels via the docker-style repeatable `--ch` flag;
-//!   - All six SampleTime rates via a static `match args.sr`;
+//!   - All six typed sample rates via a static `match args.sr`;
 //!   - Three sources: `internal | external | link`. `link` plugs
 //!     `LinkSession` in via `PhaseSource::Custom`;
 //!   - Ctrl-C handling via the `ctrlc` crate;
@@ -40,7 +40,7 @@ use std::time::{Duration, Instant};
 use agogo::core::channel::Channel;
 use agogo::core::channel::spec::ChannelSpecRole;
 use agogo::core::conn::boundary::tempo_to_f64_bpm;
-use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate, SampleTime};
+use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate};
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::sync::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
 use agogo::core::control::{Playhead, PlayheadStopHandle, TransportPolicy};
@@ -170,7 +170,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     // Static rate dispatch.
     match args.sr {
-        rate if rate == S044::HZ => run_with_rate::<S044>(
+        rate if rate == S044::HZ => run_s044(
             args,
             bpm,
             specs,
@@ -178,7 +178,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S048::HZ => run_with_rate::<S048>(
+        rate if rate == S048::HZ => run_s048(
             args,
             bpm,
             specs,
@@ -186,7 +186,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S088::HZ => run_with_rate::<S088>(
+        rate if rate == S088::HZ => run_s088(
             args,
             bpm,
             specs,
@@ -194,7 +194,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S096::HZ => run_with_rate::<S096>(
+        rate if rate == S096::HZ => run_s096(
             args,
             bpm,
             specs,
@@ -202,7 +202,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S176::HZ => run_with_rate::<S176>(
+        rate if rate == S176::HZ => run_s176(
             args,
             bpm,
             specs,
@@ -210,7 +210,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S192::HZ => run_with_rate::<S192>(
+        rate if rate == S192::HZ => run_s192(
             args,
             bpm,
             specs,
@@ -225,8 +225,8 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     }
 }
 
-/// Rate-monomorphic body. `R: SampleTime` plumbs all the way down
-/// into `PhaseSource<R>` / `Playhead<R>` / `CallbackState<R>` so the
+/// Rate-monomorphic body. The concrete sample type plumbs all the way down
+/// into `PhaseSource<Sxxx>` / `Playhead<Sxxx>` / `CallbackState<Sxxx>` so the
 /// audio callback never branches on rate at runtime. The
 /// `Send + 'static` bound is what cpal's `data_callback` requires
 /// of the moved closure.
@@ -274,14 +274,16 @@ fn config_device_name(request: &str) -> Option<String> {
     (request != "default").then(|| request.to_string())
 }
 
-fn run_with_rate<R: SampleTime + Send + 'static>(
-    args: &RunArgs,
-    bpm: Tempo,
-    specs: Vec<agogo::core::channel::spec::ChannelSpec>,
-    mut channels: Vec<Channel>,
-    midi_port_request: Option<String>,
-    audio_output_request: Option<String>,
-) -> Result<(), String> {
+macro_rules! def_run_with_rate {
+    ($func:ident, $Rate:ty) => {
+        fn $func(
+            args: &RunArgs,
+            bpm: Tempo,
+            specs: Vec<agogo::core::channel::spec::ChannelSpec>,
+            mut channels: Vec<Channel>,
+            midi_port_request: Option<String>,
+            audio_output_request: Option<String>,
+        ) -> Result<(), String> {
     let mix = channel_mix(&channels);
     debug_assert_eq!(mix.has_midi, midi_port_request.is_some());
     debug_assert_eq!(mix.has_audio, audio_output_request.is_some());
@@ -326,15 +328,15 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
 
     // Build PhaseSource per --source. Link case mints a
     // LinkSessionHandle for the control thread.
-    let (phase_source, link_handle): (PhaseSource<R>, Option<LinkSessionHandle>) =
+    let (phase_source, link_handle): (PhaseSource<$Rate>, Option<LinkSessionHandle>) =
         match args.source.as_str() {
             "internal" => (PhaseSource::Internal { bpm }, None),
             "external" => {
-                let detector = PeakDetector::<R>::new(DetectorConfig {
+                let detector = PeakDetector::<$Rate>::new(DetectorConfig {
                     threshold_q15: 16_384, // 0.5 in Q0.15
                     hold_samples: args.sr / 4,
                 });
-                let pll = Pll::<R>::new(PllSettings::DEFAULT, bpm, PULSE_PPQ);
+                let pll = Pll::<$Rate>::new(PllSettings::DEFAULT, bpm, PULSE_PPQ);
                 (PhaseSource::External { detector, pll }, None)
             }
             "link" => {
@@ -392,7 +394,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
             start_emitted: false,
         }
     };
-    let playhead = Playhead::<R>::new(
+    let playhead = Playhead::<$Rate>::new(
         channels,
         phase_source,
         args.sr,
@@ -402,7 +404,7 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
         args.buffer_frames as usize,
     );
     let stop_handle = playhead.stop_handle();
-    let mut state = CallbackState::<R> { playhead, producer };
+    let mut state = CallbackState::<$Rate> { playhead, producer };
 
     // Open audio host. MIDI-only runs preserve the existing input
     // stream timing source; audio-click runs use output-only cpal so
@@ -517,7 +519,16 @@ fn run_with_rate<R: SampleTime + Send + 'static>(
     }
     eprintln!("agogo run: clean exit");
     Ok(())
+        }
+    };
 }
+
+def_run_with_rate!(run_s044, S044);
+def_run_with_rate!(run_s048, S048);
+def_run_with_rate!(run_s088, S088);
+def_run_with_rate!(run_s096, S096);
+def_run_with_rate!(run_s176, S176);
+def_run_with_rate!(run_s192, S192);
 
 fn install_ctrlc_handler(
     stop_flag: Arc<AtomicBool>,
@@ -758,7 +769,7 @@ mod tests {
         let args = args_with(vec!["dev=midi,grid=t32t,out=default"], 22_050);
         let err = run(&args).unwrap_err();
         // Parse succeeded — the failure must come from the
-        // SampleTime allowlist, not from spec/dev rejection.
+        // typed sample-rate allowlist, not from spec/dev rejection.
         assert!(
             err.contains("22050"),
             "expected rate-dispatch error indicating parse cleared, got: {err}"
@@ -769,7 +780,7 @@ mod tests {
         );
     }
 
-    /// Rates outside the SampleTime allowlist error before any
+    /// Rates outside the typed sample-rate allowlist error before any
     /// device opens, with the allowlist enumerated.
     #[test]
     fn run_rejects_unsupported_rate() {

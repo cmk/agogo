@@ -9,9 +9,9 @@
 //! 2026-04-28-05 T1).
 
 use agogo::core::conn::fixed::Pico;
-use agogo::core::conn::sample::{S048, SampleRate, SampleTime};
+use agogo::core::conn::sample::{S048, SampleRate};
 use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::sync::pulse::pulse_train;
+use agogo::core::control::sync::pulse::pulse_train_s048;
 use agogo::core::control::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
 
 /// CSV row — integer fields throughout. Peak position is emitted
@@ -34,8 +34,7 @@ pub struct TraceRow {
 }
 
 pub fn trace(bpm: Tempo, ppq: u32, jitter: Pico, pulses: u32, seed: u64) -> Vec<TraceRow> {
-    let (samples, _truth): (Vec<f32>, Vec<S048>) =
-        pulse_train::<S048>(bpm, ppq, jitter, pulses, seed);
+    let (samples, _truth): (Vec<f32>, Vec<S048>) = pulse_train_s048(bpm, ppq, jitter, pulses, seed);
     let pulse_rate_hz = agogo::core::conn::boundary::tempo_to_hz(bpm, ppq);
     let spacing_samples = (S048::HZ as f64 / pulse_rate_hz) as u32;
     let mut detector = PeakDetector::<S048>::new(DetectorConfig {
@@ -49,7 +48,7 @@ pub fn trace(bpm: Tempo, ppq: u32, jitter: Pico, pulses: u32, seed: u64) -> Vec<
         .map(|p| {
             let out = pll.step(Some(p.sample_index));
             TraceRow {
-                bits_q48_16: p.sample_index.to_bits_q48_16(),
+                bits_q48_16: p.sample_index.to_bits(),
                 tempo_ubpm: out.bpm.0,
                 phase_q32: out.phase.0,
             }

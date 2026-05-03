@@ -11,7 +11,7 @@
 //! integer arithmetic and one ring-buffer push per emitted event.
 
 use crate::cpal::control::RtProducer;
-use agogo::core::conn::sample::SampleTime;
+use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192};
 use agogo::core::control::Playhead;
 use agogo::core::sink::audio::AudioIo;
 
@@ -20,10 +20,10 @@ use agogo::core::sink::audio::AudioIo;
 /// callback closure, never touched from the control thread again
 /// except via [`Playhead::stop_handle`].
 ///
-/// The `R: SampleTime` parameter binds the [`Playhead`]'s rate at
+/// The concrete `Sxxx` parameter binds the [`Playhead`]'s rate at
 /// compile time. The CLI dispatches it via a static match on
 /// `--sr` (`S044 | S048 | S088 | S096 | S176 | S192`).
-pub struct CallbackState<R: SampleTime> {
+pub struct CallbackState<R> {
     /// N-channel orchestrator. Owns channels, phase source,
     /// transport policy, and the per-channel scratch buffer.
     pub playhead: Playhead<R>,
@@ -32,18 +32,29 @@ pub struct CallbackState<R: SampleTime> {
     pub producer: RtProducer,
 }
 
-impl<R: SampleTime> CallbackState<R> {
-    /// Per-buffer entry point. Called by `CpalHost`'s data callback
-    /// once per audio buffer. No allocation, no locks.
-    ///
-    /// Transport bytes are policy-driven inside [`Playhead`]; the
-    /// callback no longer takes a `transport: Option<MidiRtByte>`
-    /// parameter. `TransportPolicy` (Internal / LinkDriven / Scripted)
-    /// decides what byte (if any) to emit each buffer.
-    pub fn on_buffer(&mut self, io: &mut AudioIo) {
-        self.playhead.on_buffer(io, &self.producer);
-    }
+macro_rules! impl_callback_state_rate {
+    ($Rate:ident) => {
+        impl CallbackState<$Rate> {
+            /// Per-buffer entry point. Called by `CpalHost`'s data callback
+            /// once per audio buffer. No allocation, no locks.
+            ///
+            /// Transport bytes are policy-driven inside [`Playhead`]; the
+            /// callback no longer takes a `transport: Option<MidiRtByte>`
+            /// parameter. `TransportPolicy` (Internal / LinkDriven / Scripted)
+            /// decides what byte (if any) to emit each buffer.
+            pub fn on_buffer(&mut self, io: &mut AudioIo) {
+                self.playhead.on_buffer(io, &self.producer);
+            }
+        }
+    };
 }
+
+impl_callback_state_rate!(S044);
+impl_callback_state_rate!(S048);
+impl_callback_state_rate!(S088);
+impl_callback_state_rate!(S096);
+impl_callback_state_rate!(S176);
+impl_callback_state_rate!(S192);
 
 /// Re-export of the canonical helper. The implementation moved to
 /// [`agogo::core::control::event::max_events_for_buffer`] in

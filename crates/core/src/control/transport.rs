@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::channel::{Channel, ScheduledEvent};
-use crate::conn::sample::SampleTime;
+use crate::conn::sample::{S044, S048, S088, S096, S176, S192};
 use crate::conn::tempo::Tempo;
 use crate::control::event::tick_stream_into;
 use crate::control::sync::PhaseSource;
@@ -38,7 +38,7 @@ const COMMAND_TRANSPORT_CAPACITY: usize = 128;
 /// N-channel runtime state. Built on the control thread, moved into
 /// the audio callback closure, never mutated from the control thread
 /// thereafter except via the [`PlayheadStopHandle`].
-pub struct Playhead<R: SampleTime> {
+pub struct Playhead<R> {
     /// All channels share one PhaseSource and one tick→sample
     /// conversion. Per-channel divider/swing/delay live inside each
     /// [`Channel`].
@@ -52,7 +52,7 @@ pub struct Playhead<R: SampleTime> {
     /// the `Playhead`'s lifetime — matches the struct-level
     /// "never mutated from the control thread thereafter" contract.
     pub(crate) channels: Vec<Channel>,
-    /// Sample-rate-typed phase source. `R: SampleTime` binds the
+    /// Sample-rate-typed phase source. The concrete `Sxxx` type binds the
     /// rate at compile time so the Internal/External arms inside
     /// `PhaseSource` can monomorphise.
     pub phase_source: PhaseSource<R>,
@@ -296,7 +296,7 @@ impl PlayheadStopHandle {
     }
 }
 
-impl<R: SampleTime> Playhead<R> {
+impl<R> Playhead<R> {
     /// Construct a new [`Playhead`]. `bpm` and `ppqn` configure the
     /// shared [`SampleTickConn`]; `buffer_frames` sizes the
     /// preallocated scratch buffer so the per-channel render path
@@ -408,15 +408,19 @@ impl<R: SampleTime> Playhead<R> {
     /// same contract — `RtProducer` does; the `LinkSession`
     /// adapter takes a sub-µs `Mutex` once per buffer per
     /// `LinkPhaseSource`'s docs).
-    pub fn on_buffer(&mut self, io: &mut AudioIo, sink: &dyn MidiSink) {
+    fn on_buffer_with(
+        &mut self,
+        io: &mut AudioIo,
+        sink: &dyn MidiSink,
+        phase_feed: fn(&mut PhaseSource<R>, &[f32], u64),
+    ) {
         // Output buffers arrive with undefined content; when a host
         // opens output for audio-click rendering, write silence before
         // mixing scheduled clicks.
         io.output.fill(0.0_f32); // PCM ABI
 
         // 1. Feed PCM into the PhaseSource.
-        self.phase_source
-            .feed_samples(io.input, io.buffer_start_sample);
+        phase_feed(&mut self.phase_source, io.input, io.buffer_start_sample);
 
         // 2. Compute the per-buffer transport byte.
         let stop_pending = self.stop_flag.load(Ordering::Acquire);
@@ -539,6 +543,28 @@ impl<R: SampleTime> Playhead<R> {
     }
 }
 
+macro_rules! impl_playhead_rate {
+    ($Rate:ident) => {
+        impl Playhead<$Rate> {
+            /// Buffer-driven dispatch. RT-safe: no allocations, no locks
+            /// (assuming the `PhaseSource` and `MidiSink` impls obey the
+            /// same contract — `RtProducer` does; the `LinkSession`
+            /// adapter takes a sub-µs `Mutex` once per buffer per
+            /// `LinkPhaseSource`'s docs).
+            pub fn on_buffer(&mut self, io: &mut AudioIo, sink: &dyn MidiSink) {
+                self.on_buffer_with(io, sink, PhaseSource::<$Rate>::feed_samples);
+            }
+        }
+    };
+}
+
+impl_playhead_rate!(S044);
+impl_playhead_rate!(S048);
+impl_playhead_rate!(S088);
+impl_playhead_rate!(S096);
+impl_playhead_rate!(S176);
+impl_playhead_rate!(S192);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,8 +594,8 @@ mod tests {
         }
     }
 
-    fn drive_buffers<R: SampleTime>(
-        playhead: &mut Playhead<R>,
+    fn drive_buffers(
+        playhead: &mut Playhead<S048>,
         sink: &TestSink,
         n_buffers: u64,
         frames: usize,
