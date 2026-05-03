@@ -30,8 +30,8 @@ use crate::time::tick::{Tick, Time};
 // ── Grid ──────────────────────────────────────────────────────────
 
 /// Full 36-element [`Grid`] lattice strategy. Used wherever the
-/// channel divider or [`Time::base`](crate::time::tick::Time::base)
-/// crosses the test surface.
+/// channel divider or `base` field of [`Time::At`] crosses the test
+/// surface.
 pub fn arb_grid() -> impl Strategy<Value = Grid> {
     prop_oneof![
         1 => Just(Grid::T1),

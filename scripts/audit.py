@@ -336,7 +336,7 @@ def main() -> int:
 
     sub.add_parser("list", help="list configured audits and which are due today")
 
-    p_run = sub.add_parser("run", help="run one audit unconditionally")
+    p_run = sub.add_parser("run", help="run one audit if relevant files changed")
     p_run.add_argument("name", help="audit name (filename stem under doc/audits/)")
     p_run.add_argument(
         "--force", action="store_true",

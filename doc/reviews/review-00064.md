@@ -112,3 +112,17 @@ Review comment:
 
 The changes compile, the full workspace test suite passes, and clippy reports no warnings. I did not find any discrete actionable defects introduced by this patch.
 
+<!-- gh-id: 3177831610 -->
+### Copilot on [`crates/core/src/time/arb.rs:33`](https://github.com/cmk/agogo/pull/64#discussion_r3177831610) (2026-05-03 08:15 UTC)
+
+The rustdoc link `Time::base` is now invalid because `Time` is an enum (`Time::At { .. } | Time::End`). This will produce an unresolved rustdoc link warning/error in doc builds. Update the link target to something that exists (e.g., `Time::At` / `Grid`, or describe the `base` field on the `At` variant).
+
+<!-- gh-id: 3177831613 -->
+### Copilot on [`crates/core/src/time/conn.rs:29`](https://github.com/cmk/agogo/pull/64#discussion_r3177831613) (2026-05-03 08:15 UTC)
+
+The module-level docs say `timetime`/`gridgrid` have `ceil = join (GCD)` and `floor = meet (LCM)`, but the actual implementations and nearby comments define `ceil = meet` and `floor = join` (see TIMETIME/GRIDGRID sections). Please correct the top-level orientation description so it matches the code to avoid misleading future maintainers.
+
+<!-- gh-id: 3177831620 -->
+### Copilot on [`scripts/audit.py:344`](https://github.com/cmk/agogo/pull/64#discussion_r3177831620) (2026-05-03 08:15 UTC)
+
+The `run` subcommand help says it runs an audit "unconditionally", but `cmd_run` still early-exits when there are no changed files unless `--force` is passed. Please either adjust the help/README wording to reflect the actual behavior (conditional unless `--force`), or change `cmd_run` to always run the audit for `run`.
