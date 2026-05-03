@@ -24,6 +24,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::channel::time::validate_schedule_params;
 use crate::channel::{Channel, ScheduledEvent};
 use crate::conn::sample::{S044, S048, S088, S096, S176, S192};
 use crate::conn::tempo::Tempo;
@@ -355,6 +356,9 @@ impl<R> Playhead<R> {
         if self.bpm == bpm {
             return false;
         }
+        if validate_schedule_params(self.sr, bpm).is_err() {
+            return false;
+        }
         self.bpm = bpm;
         if let PhaseSource::Internal { bpm: source_bpm } = &mut self.phase_source {
             *source_bpm = bpm;
@@ -483,14 +487,18 @@ impl<R> Playhead<R> {
         for (idx, ch) in self.channels.iter().enumerate() {
             let common = ch.common();
             self.events_pool.clear();
-            tick_stream_into(
+            if tick_stream_into(
                 &mut self.events_pool,
                 common,
                 self.sr,
                 self.bpm,
                 io.buffer_start_sample,
                 io.frames,
-            );
+            )
+            .is_err()
+            {
+                continue;
+            }
             // Apply bar_multiplier filter pre-render (Plan
             // 2026-04-25-03 T3): keep only every Nth event from
             // this channel's tick stream, advancing the per-channel

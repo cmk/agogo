@@ -21,12 +21,75 @@ use crate::conn::boundary::pico_to_samples;
 use crate::conn::fixed::{FD12FD06, Micro};
 use crate::conn::tempo::Tempo;
 use crate::time::conn::tick_to_whole_samples;
+use crate::time::grid::Grid;
 use crate::time::swing;
-use crate::time::tick::Tick;
+use crate::time::tick::{PPQN, Tick};
 use connections::fixed::u64::I064U064;
+use core::fmt;
 
 /// Maximum positive delay before saturation: 300 ms = 300 000 µs.
 pub const MAX_DELAY: Micro = Micro(300_000);
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ScheduleError {
+    UnsupportedSampleRate(u32),
+    ZeroTempo,
+    TempoExceedsSampleRate {
+        sr: u32,
+        bpm: Tempo,
+        max_bpm_ubpm: u128,
+    },
+}
+
+impl fmt::Display for ScheduleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ScheduleError::UnsupportedSampleRate(sr) => {
+                write!(f, "unsupported sample rate {sr}")
+            }
+            ScheduleError::ZeroTempo => write!(f, "tempo must be positive"),
+            ScheduleError::TempoExceedsSampleRate {
+                sr,
+                bpm,
+                max_bpm_ubpm,
+            } => write!(
+                f,
+                "tempo {} µBPM exceeds sample-rate limit {} µBPM at {sr} Hz",
+                bpm.0, max_bpm_ubpm
+            ),
+        }
+    }
+}
+
+/// Global tempo ceiling for a sample rate.
+///
+/// The transport clock is shared across channels, so validate against
+/// the finest supported musical partition (`T512P`, one master tick)
+/// rather than the channel's own divider. Coarser channels might emit
+/// less frequently, but they still need to sync with the same master
+/// clock domain.
+pub fn max_bpm_ubpm_for_sample_rate(sr: u32) -> u128 {
+    u128::from(sr) * 60 * 1_000_000 * u128::from(Grid::T512P.tick_count()) / u128::from(PPQN)
+}
+
+pub fn validate_schedule_params(sr: u32, bpm: Tempo) -> Result<(), ScheduleError> {
+    match sr {
+        44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => {}
+        _ => return Err(ScheduleError::UnsupportedSampleRate(sr)),
+    }
+    if bpm.0 == 0 {
+        return Err(ScheduleError::ZeroTempo);
+    }
+    let max_bpm_ubpm = max_bpm_ubpm_for_sample_rate(sr);
+    if u128::from(bpm.0) > max_bpm_ubpm {
+        return Err(ScheduleError::TempoExceedsSampleRate {
+            sr,
+            bpm,
+            max_bpm_ubpm,
+        });
+    }
+    Ok(())
+}
 
 /// Per-channel configuration, sum-typed by routing target.
 ///
@@ -114,17 +177,17 @@ pub fn transform(
     common: &ChannelCommon,
     sr: u32,
     bpm: Tempo,
-) -> Vec<ScheduledEvent> {
+) -> Result<Vec<ScheduledEvent>, ScheduleError> {
+    validate_schedule_params(sr, bpm)?;
     let divisor = u64::from(common.divider.tick_count());
     let delay_clamped = Micro(common.delay.0.clamp(0, MAX_DELAY.0));
-    let Some(delay_samples) = micro_to_samples(delay_clamped, sr).map(|s| I064U064.ceil(s)) else {
-        return Vec::new();
-    };
-    let Some(offset_samples) = micro_to_samples(common.offset, sr) else {
-        return Vec::new();
-    };
+    let delay_samples = micro_to_samples(delay_clamped, sr)
+        .map(|s| I064U064.ceil(s))
+        .ok_or(ScheduleError::UnsupportedSampleRate(sr))?;
+    let offset_samples =
+        micro_to_samples(common.offset, sr).ok_or(ScheduleError::UnsupportedSampleRate(sr))?;
 
-    master_ticks
+    Ok(master_ticks
         .into_iter()
         .filter(|t| t.0 % divisor == 0)
         .filter_map(|t| {
@@ -141,7 +204,7 @@ pub fn transform(
                 tick: swung,
             })
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -178,6 +241,13 @@ mod tests {
         Channel::Midi {
             common: zero_common(divider),
             role: MidiRole::Clock,
+        }
+    }
+
+    fn valid<T>(result: Result<T, ScheduleError>) -> T {
+        match result {
+            Ok(value) => value,
+            Err(err) => panic!("valid schedule fixture failed: {err:?}"),
         }
     }
 
@@ -233,7 +303,7 @@ mod tests {
         // delay 0, offset 0 → samples 0, 24 000, 48 000, …
         let common = zero_common(Grid::T4);
         let master: Vec<Tick> = (0..=3840).map(Tick).collect();
-        let ev = transform(master, &common, SR_48K, BPM_120);
+        let ev = valid(transform(master, &common, SR_48K, BPM_120));
         let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
         assert_eq!(samples, vec![0, 24_000, 48_000, 72_000, 96_000]);
     }
@@ -243,7 +313,7 @@ mod tests {
         // delay = 10 ms at 48 kHz → +480 samples.
         let mut common = zero_common(Grid::T4);
         common.delay = Micro(10_000); // 10 ms
-        let ev = transform([Tick(0), Tick(960)], &common, SR_48K, BPM_120);
+        let ev = valid(transform([Tick(0), Tick(960)], &common, SR_48K, BPM_120));
         let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
         assert_eq!(samples, vec![480, 24_480]);
     }
@@ -254,7 +324,7 @@ mod tests {
         // [0, 1000]; only 0 and 960 survive the filter.
         let common = zero_common(Grid::T4);
         let master: Vec<Tick> = (0u64..=1000).map(Tick).collect();
-        let ev = transform(master, &common, SR_48K, BPM_120);
+        let ev = valid(transform(master, &common, SR_48K, BPM_120));
         let ticks: Vec<u64> = ev.iter().map(|e| e.tick.0).collect();
         assert_eq!(ticks, vec![0, 960]);
     }
@@ -265,7 +335,7 @@ mod tests {
         // [0, 1000] → ticks 0, 192, 384, 576, 768, 960.
         let common = zero_common(Grid::T8Q);
         let master: Vec<Tick> = (0u64..=1000).map(Tick).collect();
-        let ev = transform(master, &common, SR_48K, BPM_120);
+        let ev = valid(transform(master, &common, SR_48K, BPM_120));
         let ticks: Vec<u64> = ev.iter().map(|e| e.tick.0).collect();
         assert_eq!(ticks, vec![0, 192, 384, 576, 768, 960]);
     }
@@ -274,7 +344,7 @@ mod tests {
     fn delay_over_300ms_saturates() {
         let mut common = zero_common(Grid::T4);
         common.delay = Micro(1_000_000); // 1 s
-        let ev = transform([Tick(0)], &common, SR_48K, BPM_120);
+        let ev = valid(transform([Tick(0)], &common, SR_48K, BPM_120));
         // Clamped to 300 ms → 14 400 samples at 48 kHz.
         assert_eq!(ev[0].sample_index, 14_400);
     }
@@ -283,7 +353,7 @@ mod tests {
     fn negative_delay_clamped_to_zero() {
         let mut common = zero_common(Grid::T4);
         common.delay = Micro(-100_000); // -100 ms
-        let ev = transform([Tick(0), Tick(960)], &common, SR_48K, BPM_120);
+        let ev = valid(transform([Tick(0), Tick(960)], &common, SR_48K, BPM_120));
         assert_eq!(ev[0].sample_index, 0);
         assert_eq!(ev[1].sample_index, 24_000);
     }
@@ -292,8 +362,30 @@ mod tests {
     fn offset_negative_shifts_earlier() {
         let mut common = zero_common(Grid::T4);
         common.offset = Micro(-1_000); // -1 ms = -48 samples at 48 kHz.
-        let ev = transform([Tick(960)], &common, SR_48K, BPM_120);
+        let ev = valid(transform([Tick(960)], &common, SR_48K, BPM_120));
         assert_eq!(ev[0].sample_index, 24_000 - 48);
+    }
+
+    #[test]
+    fn transform_rejects_invalid_schedule_params() {
+        let common = zero_common(Grid::T4);
+        assert_eq!(
+            transform([Tick(0)], &common, 22_050, BPM_120),
+            Err(ScheduleError::UnsupportedSampleRate(22_050))
+        );
+        assert_eq!(
+            transform([Tick(0)], &common, SR_48K, Tempo::ZERO),
+            Err(ScheduleError::ZeroTempo)
+        );
+        assert!(matches!(
+            transform(
+                [Tick(0)],
+                &zero_common(Grid::T512P),
+                44_100,
+                Tempo::from_bpm_integer(4_294)
+            ),
+            Err(ScheduleError::TempoExceedsSampleRate { .. })
+        ));
     }
 
     // ── Property tests ───────────────────────────────────────────
@@ -340,7 +432,7 @@ mod tests {
                 bar_multiplier: None,
             };
             let master: Vec<Tick> = (0..=max_tick).map(Tick).collect();
-            let ev = transform(master, &common, SR_48K, BPM_120);
+            let ev = valid(transform(master, &common, SR_48K, BPM_120));
             for w in ev.windows(2) {
                 prop_assert!(
                     w[0].tick <= w[1].tick,
@@ -366,7 +458,7 @@ mod tests {
             let common = zero_common(divider);
             let span = beats * 960;
             let master: Vec<Tick> = (0..span).map(Tick).collect();
-            let ev = transform(master, &common, SR_48K, BPM_120);
+            let ev = valid(transform(master, &common, SR_48K, BPM_120));
             let expected = span.div_ceil(u64::from(divider.tick_count()));
             prop_assert_eq!(ev.len() as u64, expected);
         }
@@ -376,8 +468,12 @@ mod tests {
         fn delay_upper_clamp(delay_us in MAX_DELAY.0..=10_000_000_i64) {
             let mut common = zero_common(Grid::T4);
             common.delay = Micro(delay_us);
-            let ev = transform([Tick(960)], &common, SR_48K, BPM_120);
-            let cap_samples = super::micro_to_samples(MAX_DELAY, SR_48K).unwrap() as u64;
+            let ev = valid(transform([Tick(960)], &common, SR_48K, BPM_120));
+            let Some(cap_samples) = super::micro_to_samples(MAX_DELAY, SR_48K) else {
+                prop_assert!(false, "48 kHz is a supported sample rate");
+                return Ok(());
+            };
+            let cap_samples = cap_samples as u64;
             prop_assert_eq!(ev[0].sample_index, 24_000 + cap_samples);
         }
 
@@ -386,7 +482,7 @@ mod tests {
         fn delay_lower_clamp(delay_us in -10_000_000_i64..0) {
             let mut common = zero_common(Grid::T4);
             common.delay = Micro(delay_us);
-            let ev = transform([Tick(960)], &common, SR_48K, BPM_120);
+            let ev = valid(transform([Tick(960)], &common, SR_48K, BPM_120));
             prop_assert_eq!(ev[0].sample_index, 24_000);
         }
 
@@ -401,7 +497,7 @@ mod tests {
                 amount,
             };
             for step in [0u64, 480, 960, 1440] {
-                let ev = transform([Tick(step)], &common, SR_48K, BPM_120);
+                let ev = valid(transform([Tick(step)], &common, SR_48K, BPM_120));
                 prop_assert_eq!(ev[0].tick, Tick(step));
             }
         }

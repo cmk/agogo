@@ -524,6 +524,10 @@ mod tests {
                 buffer_start,
                 frames,
             );
+            let Ok(evs) = evs else {
+                prop_assert!(false, "valid schedule fixture failed: {evs:?}");
+                return Ok(());
+            };
             let sink = TestSink::new();
             render_midi_channel(&common, &role, &evs, None, buffer_start, None, &sink);
             let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();

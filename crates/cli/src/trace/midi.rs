@@ -60,7 +60,8 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
             (_, true) => Some(MidiRtByte::Stop),
             _ => None,
         };
-        let evs = tick_stream(&common, args.sr, args.bpm, start_sample, args.frames);
+        let evs = tick_stream(&common, args.sr, args.bpm, start_sample, args.frames)
+            .map_err(|e| format!("invalid scheduling parameters: {e}"))?;
         render_midi_channel(&common, &role, &evs, transport, start_sample, None, &sink);
     }
     Ok(sink

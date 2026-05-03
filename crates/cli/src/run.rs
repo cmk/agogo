@@ -39,6 +39,7 @@ use std::time::{Duration, Instant};
 
 use agogo::core::channel::Channel;
 use agogo::core::channel::spec::ChannelSpecRole;
+use agogo::core::channel::time::validate_schedule_params;
 use agogo::core::conn::boundary::tempo_to_f64_bpm;
 use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate};
 use agogo::core::conn::tempo::Tempo;
@@ -121,6 +122,8 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     // `args.bpm` is already `Tempo` — bpaf's `parse_bpm_to_tempo`
     // consumed the f64 at parse time.
     let bpm: Tempo = args.bpm;
+    validate_schedule_params(args.sr, bpm)
+        .map_err(|e| format!("invalid scheduling parameters: {e}"))?;
 
     // Parse all --ch specs eagerly (in order, so variable refs
     // resolve) before any device opens.

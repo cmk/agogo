@@ -248,14 +248,14 @@ impl GRIDGRID {
 
 // ── Tick ↔ rate-typed sample time ─────────────────────────────────
 
-fn tick_to_sample_bits<R: SampleRate>(tick: Tick, bpm: Tempo) -> i64 {
+fn tick_to_sample_bits<R: SampleRate>(tick: Tick, bpm: Tempo) -> Option<i64> {
     if bpm.0 == 0 {
-        return i64::MAX;
+        return None;
     }
     let num = u128::from(tick.0) * u128::from(R::HZ) * (1_u128 << 16) * 60_000_000;
     let den = u128::from(bpm.0) * u128::from(PPQN);
     let bits = num.div_ceil(den);
-    bits.min(i64::MAX as u128) as i64
+    Some(bits.min(i64::MAX as u128) as i64)
 }
 
 fn sample_to_tick_floor_for_rate(sample: u64, bpm: Tempo, sr: u32) -> Option<Tick> {
@@ -276,24 +276,29 @@ fn sample_to_tick_ceil_for_rate(sample: u64, bpm: Tempo, sr: u32) -> Option<Tick
     Some(Tick(U128U064.ceil(num.div_ceil(den))))
 }
 
+pub fn sample_to_tick_emitted_lower(sample: u64, bpm: Tempo, sr: u32) -> Option<Tick> {
+    if sample == 0 {
+        return sample_to_tick_floor(sample, bpm, sr);
+    }
+    let prev = sample_to_tick_floor(sample - 1, bpm, sr)?;
+    Some(Tick(prev.0.saturating_add(1)))
+}
+
 macro_rules! tick_sample_fns {
     ($(($to_rate:ident, $Rate:ident, $Whole:ident, $hz:expr)),+ $(,)?) => {
         $(
-            pub fn $to_rate(tick: Tick, bpm: Tempo) -> $Rate {
-                $Rate::from_bits(tick_to_sample_bits::<$Rate>(tick, bpm))
+            pub fn $to_rate(tick: Tick, bpm: Tempo) -> Option<$Rate> {
+                Some($Rate::from_bits(tick_to_sample_bits::<$Rate>(tick, bpm)?))
             }
         )+
 
         pub fn tick_to_whole_samples(tick: Tick, bpm: Tempo, sr: u32) -> Option<u64> {
-            if bpm.0 == 0 {
-                return None;
-            }
-            Some(match sr {
+            match sr {
                 $(
-                    $hz => I064U064.ceil($Whole.ceil($to_rate(tick, bpm))),
+                    $hz => Some(I064U064.ceil($Whole.ceil($to_rate(tick, bpm)?))),
                 )+
-                _ => return None,
-            })
+                _ => None,
+            }
         }
 
         pub fn sample_to_tick_floor(sample: u64, bpm: Tempo, sr: u32) -> Option<Tick> {
@@ -849,32 +854,42 @@ mod tick_sample_tests {
                 proptest! {
                     #[test]
                     fn zero_maps_to_zero(raw_bpm in 1_u32..=u32::MAX) {
-                        prop_assert_eq!($to_rate(Tick(0), Tempo(raw_bpm)).to_bits(), 0);
+                        prop_assert_eq!($to_rate(Tick(0), Tempo(raw_bpm)).map(|s| s.to_bits()), Some(0));
                     }
 
                     #[test]
                     fn monotone_in_tick(a in any::<u64>(), b in any::<u64>(), raw_bpm in 1_u32..=u32::MAX) {
                         let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
                         let bpm = Tempo(raw_bpm);
-                        prop_assert!($to_rate(Tick(lo), bpm).to_bits() <= $to_rate(Tick(hi), bpm).to_bits());
+                        let lo_bits = $to_rate(Tick(lo), bpm).map(|s| s.to_bits());
+                        let hi_bits = $to_rate(Tick(hi), bpm).map(|s| s.to_bits());
+                        prop_assert!(matches!((lo_bits, hi_bits), (Some(l), Some(h)) if l <= h));
                     }
 
                     #[test]
                     fn antitone_in_tempo(tick in any::<u64>(), a in 1_u32..=u32::MAX, b in 1_u32..=u32::MAX) {
                         let (slow, fast) = if a <= b { (a, b) } else { (b, a) };
-                        prop_assert!($to_rate(Tick(tick), Tempo(fast)).to_bits() <= $to_rate(Tick(tick), Tempo(slow)).to_bits());
+                        let fast_bits = $to_rate(Tick(tick), Tempo(fast)).map(|s| s.to_bits());
+                        let slow_bits = $to_rate(Tick(tick), Tempo(slow)).map(|s| s.to_bits());
+                        prop_assert!(matches!((fast_bits, slow_bits), (Some(f), Some(s)) if f <= s));
                     }
 
                     #[test]
                     fn exact_formula_bounds(tick in any::<u64>(), raw_bpm in 1_u32..=u32::MAX) {
                         let bpm = Tempo(raw_bpm);
-                        prop_assert_eq!($to_rate(Tick(tick), bpm).to_bits(), exact_bits(Tick(tick), bpm, $sr));
+                        prop_assert_eq!(
+                            $to_rate(Tick(tick), bpm).map(|s| s.to_bits()),
+                            Some(exact_bits(Tick(tick), bpm, $sr))
+                        );
                     }
                 }
 
                 #[test]
                 fn saturates_high_tick_low_bpm() {
-                    assert_eq!($to_rate(Tick(u64::MAX), Tempo(1)).to_bits(), i64::MAX);
+                    assert_eq!(
+                        $to_rate(Tick(u64::MAX), Tempo(1)).map(|s| s.to_bits()),
+                        Some(i64::MAX)
+                    );
                 }
             }
         };
@@ -890,15 +905,27 @@ mod tick_sample_tests {
     #[test]
     fn one_beat_known_values() {
         let bpm = Tempo::from_bpm_integer(120);
-        assert_eq!(S048I064.ceil(tick_to_s048(Tick(PPQN.into()), bpm)), 24_000);
-        assert_eq!(S096I064.ceil(tick_to_s096(Tick(PPQN.into()), bpm)), 48_000);
-        assert_eq!(S192I064.ceil(tick_to_s192(Tick(PPQN.into()), bpm)), 96_000);
+        assert_eq!(
+            tick_to_s048(Tick(PPQN.into()), bpm).map(|s| S048I064.ceil(s)),
+            Some(24_000)
+        );
+        assert_eq!(
+            tick_to_s096(Tick(PPQN.into()), bpm).map(|s| S096I064.ceil(s)),
+            Some(48_000)
+        );
+        assert_eq!(
+            tick_to_s192(Tick(PPQN.into()), bpm).map(|s| S192I064.ceil(s)),
+            Some(96_000)
+        );
     }
 
     #[test]
     fn non_exact_retains_fraction() {
-        let s = tick_to_s048(Tick(1), Tempo::from_bpm_integer(137));
-        assert_ne!(s.to_bits().rem_euclid(1 << 16), 0);
+        assert_ne!(
+            tick_to_s048(Tick(1), Tempo::from_bpm_integer(137))
+                .map(|s| s.to_bits().rem_euclid(1 << 16)),
+            Some(0)
+        );
     }
 
     #[test]
@@ -907,27 +934,27 @@ mod tick_sample_tests {
         let bpm = Tempo::from_bpm_integer(137);
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 44_100),
-            Some(I064U064.ceil(S044I064.ceil(tick_to_s044(tick, bpm))))
+            tick_to_s044(tick, bpm).map(|s| I064U064.ceil(S044I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 48_000),
-            Some(I064U064.ceil(S048I064.ceil(tick_to_s048(tick, bpm))))
+            tick_to_s048(tick, bpm).map(|s| I064U064.ceil(S048I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 88_200),
-            Some(I064U064.ceil(S088I064.ceil(tick_to_s088(tick, bpm))))
+            tick_to_s088(tick, bpm).map(|s| I064U064.ceil(S088I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 96_000),
-            Some(I064U064.ceil(S096I064.ceil(tick_to_s096(tick, bpm))))
+            tick_to_s096(tick, bpm).map(|s| I064U064.ceil(S096I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 176_400),
-            Some(I064U064.ceil(S176I064.ceil(tick_to_s176(tick, bpm))))
+            tick_to_s176(tick, bpm).map(|s| I064U064.ceil(S176I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 192_000),
-            Some(I064U064.ceil(S192I064.ceil(tick_to_s192(tick, bpm))))
+            tick_to_s192(tick, bpm).map(|s| I064U064.ceil(S192I064.ceil(s)))
         );
     }
 
@@ -945,6 +972,14 @@ mod tick_sample_tests {
             sample_to_tick_ceil(0, Tempo::from_bpm_integer(120), 22_050),
             None
         );
+    }
+
+    #[test]
+    fn tick_to_rate_rejects_zero_tempo() {
+        assert_eq!(tick_to_s048(Tick(0), Tempo::ZERO), None);
+        assert_eq!(tick_to_whole_samples(Tick(0), Tempo::ZERO, 48_000), None);
+        assert_eq!(sample_to_tick_floor(0, Tempo::ZERO, 48_000), None);
+        assert_eq!(sample_to_tick_ceil(0, Tempo::ZERO, 48_000), None);
     }
 
     proptest! {
@@ -967,7 +1002,9 @@ mod tick_sample_tests {
         ) {
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
             let bpm = Tempo(raw_bpm);
-            prop_assert!(tick_to_whole_samples(Tick(lo), bpm, sr).unwrap() <= tick_to_whole_samples(Tick(hi), bpm, sr).unwrap());
+            let lo_sample = tick_to_whole_samples(Tick(lo), bpm, sr);
+            let hi_sample = tick_to_whole_samples(Tick(hi), bpm, sr);
+            prop_assert!(matches!((lo_sample, hi_sample), (Some(l), Some(h)) if l <= h));
         }
 
         #[test]
@@ -978,7 +1015,9 @@ mod tick_sample_tests {
             sr in prop::sample::select(vec![44_100_u32, 48_000, 88_200, 96_000, 176_400, 192_000]),
         ) {
             let (slow, fast) = if a <= b { (a, b) } else { (b, a) };
-            prop_assert!(tick_to_whole_samples(Tick(tick), Tempo(fast), sr).unwrap() <= tick_to_whole_samples(Tick(tick), Tempo(slow), sr).unwrap());
+            let fast_sample = tick_to_whole_samples(Tick(tick), Tempo(fast), sr);
+            let slow_sample = tick_to_whole_samples(Tick(tick), Tempo(slow), sr);
+            prop_assert!(matches!((fast_sample, slow_sample), (Some(f), Some(s)) if f <= s));
         }
     }
 }
