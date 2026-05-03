@@ -232,3 +232,30 @@ Copilot reviewed 7 out of 8 changed files in this pull request and generated 1 c
 #### Reply from cmk ([2026-05-03 06:38 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177735654))
 
 Fixed. `parse_metadata()` now validates the full metadata object before any command-id side effect: explicit ids are only reserved after all fields validate, and generated ids are only allocated after validation. Added `malformed_metadata_does_not_consume_command_ids` to cover both malformed generated-id requests and malformed explicit-id requests near `u64::MAX`.
+
+<!-- gh-id: 3177746214 -->
+### Copilot on [`doc/plans/plan-2026-05-02-08.md:122`](https://github.com/cmk/agogo/pull/63#discussion_r3177746214) (2026-05-03 06:49 UTC)
+
+The plan text references `drain_due_commands()`, but the implemented API is `ControlConsumer::drain_due_command()` (singular). This is a factual mismatch that could mislead readers trying to follow the plan against the current code; update the plan to match the actual API name (or rename the API if the plural form was intended).
+
+<!-- gh-id: 3177746226 -->
+### Copilot on [`crates/host/src/bridge.rs:1044`](https://github.com/cmk/agogo/pull/63#discussion_r3177746226) (2026-05-03 06:49 UTC)
+
+The test name `queue_full_returns_error` no longer matches what the test asserts (it checks for a rejected admission outcome + queue contents, not an error return). Renaming it to reflect the new behavior would make failures easier to interpret.
+
+<!-- gh-id: 4215990454 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 06:49 UTC](https://github.com/cmk/agogo/pull/63#pullrequestreview-4215990454))
+
+## Pull request overview
+
+Copilot reviewed 7 out of 8 changed files in this pull request and generated 2 comments.
+
+<!-- gh-id: 3177752979 -->
+#### Reply from cmk ([2026-05-03 06:56 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177752979))
+
+Fixed. The plan now references the implemented singular `drain_due_command()` API.
+
+<!-- gh-id: 3177753023 -->
+#### Reply from cmk ([2026-05-03 06:56 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177753023))
+
+Fixed. Renamed the test to `queue_full_rejects_with_reason_and_preserves_queue`, matching the rejected admission outcome and queue-preservation assertions.
