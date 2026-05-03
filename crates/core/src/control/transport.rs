@@ -182,25 +182,33 @@ impl std::fmt::Debug for TransportPolicy {
     }
 }
 
-/// Wraps [`TransportPolicy`] with the local stop/teardown latch
-/// (`running`) that gates **both** transport-byte emission and
-/// clock emission once the host signals teardown.
+/// Wraps [`TransportPolicy`] with the local runtime gate
+/// (`running`) that controls whether clock events are emitted.
 #[derive(Debug)]
 pub struct TransportState {
     pub policy: TransportPolicy,
-    /// Local stop/teardown latch. Set to `true` at construction;
-    /// flips to `false` *only* when a [`PlayheadStopHandle::request_stop`]
-    /// signal is observed (the `stop_pending` arm of `next_byte`).
-    /// Policy-driven `Stop` bytes (`LinkDriven` transitions,
-    /// `Scripted` schedules) do **not** clear this flag — they pass
-    /// through as one-shot bytes, preserving the option to resume
-    /// clock + transport later.
+    /// Local clock gate. Set to `true` at construction. A teardown
+    /// stop signal or an accepted command-driven Stop sets it to
+    /// `false`; an accepted command-driven Start can set it back to
+    /// `true` unless teardown has been requested. Policy-driven Stop
+    /// bytes (`LinkDriven` transitions, `Scripted` schedules) do
+    /// **not** clear this flag — they pass through as one-shot bytes,
+    /// preserving the option to resume clock + transport later.
     ///
-    /// While `false`, [`Playhead::on_buffer`] emits no transport
-    /// bytes **and** no clock events — the stream stays silent
-    /// until the host audio stream is dropped. This is the
-    /// "stop clocking immediately on Ctrl-C" contract.
+    /// While `false`, [`Playhead::on_buffer`] emits no clock events.
+    /// Teardown is stronger than command stop because the stop flag
+    /// stays set; command Start/Stop staging is rejected and the
+    /// stream stays silent until the host audio stream is dropped.
     running: bool,
+}
+
+/// Result of trying to stage a command-driven transport byte.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum TransportCommandApply {
+    Applied,
+    UnsupportedPolicy,
+    QueueFull,
+    TeardownRequested,
 }
 
 impl TransportState {
@@ -356,22 +364,36 @@ impl<R: SampleTime> Playhead<R> {
     /// Apply a command-driven transport start. The next
     /// [`Self::on_buffer`] call emits the start byte for internal
     /// transport and resumes clock output.
-    pub fn apply_transport_start(&mut self) -> bool {
-        if !matches!(self.transport.policy, TransportPolicy::Internal { .. }) {
-            return false;
+    pub fn apply_transport_start(&mut self) -> TransportCommandApply {
+        if self.stop_flag.load(Ordering::Acquire) {
+            return TransportCommandApply::TeardownRequested;
         }
-        self.command_transport.push_back(MidiRtByte::Start)
+        if !matches!(self.transport.policy, TransportPolicy::Internal { .. }) {
+            return TransportCommandApply::UnsupportedPolicy;
+        }
+        if self.command_transport.push_back(MidiRtByte::Start) {
+            TransportCommandApply::Applied
+        } else {
+            TransportCommandApply::QueueFull
+        }
     }
 
     /// Apply a command-driven transport stop. The next
     /// [`Self::on_buffer`] call emits Stop and suppresses subsequent
     /// clock output unless a later queued command starts transport
     /// again in FIFO order.
-    pub fn apply_transport_stop(&mut self) -> bool {
-        if !matches!(self.transport.policy, TransportPolicy::Internal { .. }) {
-            return false;
+    pub fn apply_transport_stop(&mut self) -> TransportCommandApply {
+        if self.stop_flag.load(Ordering::Acquire) {
+            return TransportCommandApply::TeardownRequested;
         }
-        self.command_transport.push_back(MidiRtByte::Stop)
+        if !matches!(self.transport.policy, TransportPolicy::Internal { .. }) {
+            return TransportCommandApply::UnsupportedPolicy;
+        }
+        if self.command_transport.push_back(MidiRtByte::Stop) {
+            TransportCommandApply::Applied
+        } else {
+            TransportCommandApply::QueueFull
+        }
     }
 
     /// Buffer-driven dispatch. RT-safe: no allocations, no locks
@@ -680,7 +702,10 @@ mod tests {
         let mut output: [f32; 0] = []; // PCM ABI
 
         stop.request_stop();
-        playhead.apply_transport_start();
+        assert_eq!(
+            playhead.apply_transport_start(),
+            TransportCommandApply::TeardownRequested
+        );
         let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 4_096);
         playhead.on_buffer(&mut io, &sink);
 

@@ -21,4 +21,6 @@ pub use sync::{
     DetectorConfig, Peak, PeakDetector, PhaseSource, PhaseSourceImpl, Pll, PllOutput, PllSettings,
     PllState,
 };
-pub use transport::{Playhead, PlayheadStopHandle, TransportPolicy, TransportState};
+pub use transport::{
+    Playhead, PlayheadStopHandle, TransportCommandApply, TransportPolicy, TransportState,
+};
