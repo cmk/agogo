@@ -361,19 +361,14 @@ impl ControlProducer {
     }
 
     /// Admit a last-value tempo control.
-    pub fn admit_tempo(&self, tempo: Tempo, metadata: AdmissionMetadata) -> AdmissionOutcome {
+    pub fn admit_tempo(&self, tempo: Tempo, mut metadata: AdmissionMetadata) -> AdmissionOutcome {
         if let Some(outcome) = self.reject_if_not_admissible(metadata) {
             return outcome;
         }
-        let previous = self.shared.tempo_raw.swap(tempo.0, Ordering::AcqRel);
-        if metadata.deadline.buffer <= self.current_buffer_epoch() {
-            let _ = self.shared.tempo_raw.compare_exchange(
-                tempo.0,
-                previous,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            );
-            return AdmissionOutcome::late(metadata);
+        self.set_tempo(tempo);
+        let epoch_after_publish = self.current_buffer_epoch();
+        if metadata.deadline.buffer <= epoch_after_publish {
+            metadata.deadline.buffer = epoch_after_publish.saturating_add(1);
         }
         AdmissionOutcome::accepted(metadata)
     }
@@ -673,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn late_tempo_admission_does_not_change_scalar() {
+    fn stale_tempo_admission_does_not_change_scalar() {
         let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
         consumer.begin_buffer();
 
@@ -684,6 +679,21 @@ mod tests {
 
         assert_eq!(outcome.status, AdmissionStatus::Late);
         assert_eq!(producer.tempo(), Tempo::from_bpm_integer(120));
+    }
+
+    #[test]
+    fn published_tempo_admission_is_not_revised_to_late() {
+        let (producer, _consumer) = spsc(4, Tempo::from_bpm_integer(120));
+
+        let outcome = producer.admit_tempo(
+            Tempo::from_bpm_integer(140),
+            AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0),
+        );
+
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+        assert_eq!(outcome.reason, None);
+        assert!(outcome.metadata.deadline.buffer > producer.current_buffer_epoch());
+        assert_eq!(producer.tempo(), Tempo::from_bpm_integer(140));
     }
 
     #[test]
