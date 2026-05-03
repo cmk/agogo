@@ -187,21 +187,36 @@ fn run_output_stream(
         .supported_output_configs()
         .map_err(|e| AudioHostError::Backend(Box::new(e)))?
         .collect();
-    validate_supported_config(&supported, cfg.sample_rate, cfg.output_channels, "output")?;
+    let output_channels =
+        select_output_channels(&supported, cfg.sample_rate, cfg.output_channels)?;
 
     let stream_config = StreamConfig {
-        channels: cfg.output_channels,
+        channels: output_channels,
         sample_rate: SampleRate(cfg.sample_rate),
         buffer_size: BufferSize::Fixed(cfg.buffer_frames),
     };
     let sample_rate = cfg.sample_rate;
+    let scratch_frames = cfg.buffer_frames as usize;
     spawn_stream(move |stop_rx, ready_tx| {
         let mut next_start: u64 = 0;
         let input_stub: [f32; 0] = []; // PCM ABI
+        let mut mono_output = vec![0.0_f32; scratch_frames]; // PCM ABI
         let data_cb = move |samples: &mut [f32], _info: &OutputCallbackInfo| {
-            let frames = samples.len();
-            let mut io = AudioIo::new(&input_stub, samples, next_start, sample_rate, frames);
+            let channels = usize::from(output_channels);
+            let frames = samples.len() / channels;
+            samples.fill(0.0_f32); // PCM ABI
+
+            let writable_frames = frames.min(mono_output.len());
+            mono_output[..writable_frames].fill(0.0_f32); // PCM ABI
+            let mut io = AudioIo::new(
+                &input_stub,
+                &mut mono_output[..writable_frames],
+                next_start,
+                sample_rate,
+                writable_frames,
+            );
             cb(&mut io);
+            fan_out_mono(&mono_output[..writable_frames], samples, channels);
             next_start = next_start.saturating_add(frames as u64);
         };
         let err_cb = |e: StreamError| {
@@ -218,35 +233,104 @@ fn run_output_stream(
     })
 }
 
+fn select_output_channels(
+    supported: &[::cpal::SupportedStreamConfigRange],
+    sample_rate: u32,
+    preferred_channels: u16,
+) -> Result<u16, AudioHostError> {
+    let caps = supported.iter().map(StreamCaps::from);
+    select_f32_channels_at_rate(caps, sample_rate, preferred_channels, "output", true)
+}
+
+fn fan_out_mono(mono: &[f32], interleaved: &mut [f32], channels: usize) {
+    if channels == 0 {
+        return;
+    }
+    for (frame, &sample) in interleaved.chunks_exact_mut(channels).zip(mono) {
+        frame.fill(sample);
+    }
+}
+
 fn validate_supported_config(
     supported: &[::cpal::SupportedStreamConfigRange],
     sample_rate: u32,
     channels: u16,
     direction: &str,
 ) -> Result<(), AudioHostError> {
-    let rate_ok = |c: &::cpal::SupportedStreamConfigRange| {
-        c.min_sample_rate().0 <= sample_rate && c.max_sample_rate().0 >= sample_rate
-    };
-    let any_rate = supported.iter().any(rate_ok);
-    let exact_match = supported
-        .iter()
-        .any(|c| rate_ok(c) && c.sample_format() == SampleFormat::F32 && c.channels() == channels);
-    if exact_match {
-        return Ok(());
+    let caps = supported.iter().map(StreamCaps::from);
+    select_f32_channels_at_rate(caps, sample_rate, channels, direction, false).map(|_| ())
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct StreamCaps {
+    min_sample_rate: u32,
+    max_sample_rate: u32,
+    sample_format: SampleFormat,
+    channels: u16,
+}
+
+impl From<&::cpal::SupportedStreamConfigRange> for StreamCaps {
+    fn from(config: &::cpal::SupportedStreamConfigRange) -> Self {
+        Self {
+            min_sample_rate: config.min_sample_rate().0,
+            max_sample_rate: config.max_sample_rate().0,
+            sample_format: config.sample_format(),
+            channels: config.channels(),
+        }
+    }
+}
+
+fn select_f32_channels_at_rate(
+    caps: impl IntoIterator<Item = StreamCaps>,
+    sample_rate: u32,
+    preferred_channels: u16,
+    direction: &str,
+    allow_channel_fallback: bool,
+) -> Result<u16, AudioHostError> {
+    let mut any_rate = false;
+    let mut any_f32_at_rate = false;
+    let mut any_preferred_channels_at_rate = false;
+    let mut fallback_channels: Option<u16> = None;
+
+    for cap in caps {
+        let rate_ok =
+            cap.min_sample_rate <= sample_rate && cap.max_sample_rate >= sample_rate;
+        if !rate_ok {
+            continue;
+        }
+        if cap.channels == 0 {
+            continue;
+        }
+        any_rate = true;
+        if cap.channels == preferred_channels {
+            any_preferred_channels_at_rate = true;
+        }
+        if cap.sample_format != SampleFormat::F32 {
+            continue;
+        }
+        any_f32_at_rate = true;
+        if cap.channels == preferred_channels {
+            return Ok(preferred_channels);
+        }
+        fallback_channels = Some(match fallback_channels {
+            Some(existing) => existing.min(cap.channels),
+            None => cap.channels,
+        });
+    }
+
+    if allow_channel_fallback {
+        if let Some(channels) = fallback_channels {
+            return Ok(channels);
+        }
     }
     if !any_rate {
         return Err(AudioHostError::UnsupportedSampleRate(sample_rate));
     }
-    let any_f32_at_rate = supported
-        .iter()
-        .any(|c| rate_ok(c) && c.sample_format() == SampleFormat::F32);
-    let any_channels_at_rate = supported
-        .iter()
-        .any(|c| rate_ok(c) && c.channels() == channels);
     Err(AudioHostError::UnsupportedConfig(format!(
-        "{direction} device supports {sample_rate} Hz but not f32 mono \
-         (f32 available at rate: {any_f32_at_rate}, channels={channels} available at rate: \
-         {any_channels_at_rate})",
+        "{direction} device supports {sample_rate} Hz but not f32 with {preferred_channels} \
+         channel{} (f32 available at rate: {any_f32_at_rate}, channels={preferred_channels} \
+         available at rate: {any_preferred_channels_at_rate})",
+        if preferred_channels == 1 { "" } else { "s" },
     )))
 }
 
@@ -365,6 +449,59 @@ mod tests {
                 panic!("expected DeviceNotFound / Backend, got {other:?}")
             }
             Ok(_) => panic!("bogus name must not match a real device"),
+        }
+    }
+
+    #[test]
+    fn output_channel_selection_prefers_requested_mono() {
+        let caps = [
+            caps(48_000, 48_000, SampleFormat::F32, 2),
+            caps(48_000, 48_000, SampleFormat::F32, 1),
+        ];
+
+        let got = select_f32_channels_at_rate(caps, 48_000, 1, "output", true).unwrap();
+
+        assert_eq!(got, 1);
+    }
+
+    #[test]
+    fn output_channel_selection_falls_back_to_stereo() {
+        let caps = [caps(44_100, 96_000, SampleFormat::F32, 2)];
+
+        let got = select_f32_channels_at_rate(caps, 48_000, 1, "output", true).unwrap();
+
+        assert_eq!(got, 2);
+    }
+
+    #[test]
+    fn input_validation_rejects_channel_fallback() {
+        let caps = [caps(44_100, 96_000, SampleFormat::F32, 2)];
+
+        let err = select_f32_channels_at_rate(caps, 48_000, 1, "input", false).unwrap_err();
+
+        assert!(matches!(err, AudioHostError::UnsupportedConfig(_)));
+    }
+
+    #[test]
+    fn fan_out_mono_copies_each_frame_to_all_channels() {
+        let mut interleaved = [0.0_f32; 6]; // PCM ABI
+
+        fan_out_mono(&[0.25, -0.5], &mut interleaved, 3);
+
+        assert_eq!(interleaved, [0.25, 0.25, 0.25, -0.5, -0.5, -0.5]);
+    }
+
+    fn caps(
+        min_sample_rate: u32,
+        max_sample_rate: u32,
+        sample_format: SampleFormat,
+        channels: u16,
+    ) -> StreamCaps {
+        StreamCaps {
+            min_sample_rate,
+            max_sample_rate,
+            sample_format,
+            channels,
         }
     }
 }

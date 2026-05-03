@@ -6,6 +6,11 @@ Plan 2026-05-02-06 adds output-only support for the generated audio
 metronome test feature. CV/gate output remains part of the
 heterogeneous output layer.
 
+The core `AudioIo` output buffer remains mono for this test feature.
+`CpalHost` prefers a mono physical output config, but if the device is
+stereo-only it renders the mono callback buffer once and fans the
+sample stream out to every physical channel.
+
 Not a workspace member by design — `cargo test --workspace` skips it
 so the default CI path doesn't pull cpal + its platform system
 libraries (`libasound` on Linux, CoreAudio on macOS, WASAPI on
