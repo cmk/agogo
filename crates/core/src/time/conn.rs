@@ -33,46 +33,13 @@
 //! give a non-adjoint structure. The tests below build ad-hoc
 //! `*_refine_le` helpers for that reason.
 
-use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
+use connections::conn::{ViewL, ViewR};
 use connections::fixed::u64::U128U064;
 
 use crate::conn::tempo::Tempo;
 use crate::time::grid::Grid;
 use crate::time::tick::{Tick, Time, from_ticks, time_to_tick};
 use connections::lattice::{Join, Meet};
-
-macro_rules! def_conn_marker {
-    ($name:ident, $A:ty, $B:ty, $ceil:path, $inner:path, $floor:path) => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone, Debug, Default)]
-        pub struct $name;
-
-        impl $name {
-            const L: ConnL<$A, $B> = Conn::new_l($ceil, $inner);
-            const R: ConnR<$A, $B> = Conn::new_r($inner, $floor);
-
-            pub fn ceil(self, x: $A) -> $B {
-                Self::L.ceil(x)
-            }
-
-            pub fn inner(self, x: $B) -> $A {
-                Self::L.inner(x)
-            }
-
-            pub fn floor(self, x: $A) -> $B {
-                Self::R.floor(x)
-            }
-        }
-
-        impl ViewL<$A, $B> for $name {
-            const L: ConnL<$A, $B> = Self::L;
-        }
-
-        impl ViewR<$A, $B> for $name {
-            const R: ConnR<$A, $B> = Self::R;
-        }
-    };
-}
 
 // ── ticktime: Tick ↔ Time marker ─────────────────────────────────
 
@@ -138,14 +105,29 @@ fn ticktime_floor(n: Tick) -> Time {
 // the nearest representable `Time`; values above the finite horizon
 // ceil to `End`. The right adjoint maps only `Tick::MAX` to `End`;
 // lower overflow ticks floor to the greatest finite `Time`.
-def_conn_marker!(
-    TICKTIME,
-    Tick,
-    Time,
-    ticktime_ceil,
-    ticktime_inner,
-    ticktime_floor
-);
+connections::triple! {
+    #[allow(non_camel_case_types)]
+    #[derive(Copy, Clone, Debug, Default)]
+    pub TICKTIME : Tick => Time {
+        ceil:  ticktime_ceil,
+        inner: ticktime_inner,
+        floor: ticktime_floor,
+    }
+}
+
+impl TICKTIME {
+    pub fn ceil(self, x: Tick) -> Time {
+        <Self as ViewL<Tick, Time>>::L.ceil(x)
+    }
+
+    pub fn inner(self, x: Time) -> Tick {
+        <Self as ViewL<Tick, Time>>::L.inner(x)
+    }
+
+    pub fn floor(self, x: Tick) -> Time {
+        <Self as ViewR<Tick, Time>>::R.floor(x)
+    }
+}
 
 // ── timetime: (Time, Time) ↔ Time marker ─────────────────────────
 
@@ -202,14 +184,29 @@ fn timetime_floor(ab: (Time, Time)) -> Time {
 //
 // `Time::End` is the refinement top. LCM overflow or finite-horizon
 // misses map to the existing refinement bottom, finite zero.
-def_conn_marker!(
-    TIMETIME,
-    (Time, Time),
-    Time,
-    timetime_ceil,
-    timetime_inner,
-    timetime_floor
-);
+connections::triple! {
+    #[allow(non_camel_case_types)]
+    #[derive(Copy, Clone, Debug, Default)]
+    pub TIMETIME : (Time, Time) => Time {
+        ceil:  timetime_ceil,
+        inner: timetime_inner,
+        floor: timetime_floor,
+    }
+}
+
+impl TIMETIME {
+    pub fn ceil(self, x: (Time, Time)) -> Time {
+        <Self as ViewL<(Time, Time), Time>>::L.ceil(x)
+    }
+
+    pub fn inner(self, x: Time) -> (Time, Time) {
+        <Self as ViewL<(Time, Time), Time>>::L.inner(x)
+    }
+
+    pub fn floor(self, x: (Time, Time)) -> Time {
+        <Self as ViewR<(Time, Time), Time>>::R.floor(x)
+    }
+}
 
 // ── gridgrid: (Grid, Grid) ↔ Grid marker ─────────────────────────
 
@@ -229,14 +226,29 @@ fn gridgrid_floor(ab: (Grid, Grid)) -> Grid {
 
 // Divisibility-lattice connection on `Grid`. `ceil = meet (GCD of
 // tick counts)`, `floor = join (LCM)`, `inner = diagonal`.
-def_conn_marker!(
-    GRIDGRID,
-    (Grid, Grid),
-    Grid,
-    gridgrid_ceil,
-    gridgrid_inner,
-    gridgrid_floor
-);
+connections::triple! {
+    #[allow(non_camel_case_types)]
+    #[derive(Copy, Clone, Debug, Default)]
+    pub GRIDGRID : (Grid, Grid) => Grid {
+        ceil:  gridgrid_ceil,
+        inner: gridgrid_inner,
+        floor: gridgrid_floor,
+    }
+}
+
+impl GRIDGRID {
+    pub fn ceil(self, x: (Grid, Grid)) -> Grid {
+        <Self as ViewL<(Grid, Grid), Grid>>::L.ceil(x)
+    }
+
+    pub fn inner(self, x: Grid) -> (Grid, Grid) {
+        <Self as ViewL<(Grid, Grid), Grid>>::L.inner(x)
+    }
+
+    pub fn floor(self, x: (Grid, Grid)) -> Grid {
+        <Self as ViewR<(Grid, Grid), Grid>>::R.floor(x)
+    }
+}
 
 // ── SampleTickConn: Sample ↔ Tick bridge ─────────────────────────
 //

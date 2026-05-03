@@ -20,26 +20,7 @@ rg -n \
   crates \
   >"$tmp" || true
 
-if [[ ! -s "$tmp" ]]; then
-  echo "check-connections.sh: OK — connection construction is macro-backed."
-  exit 0
-fi
-
-# Temporary migration allowlist for Plan 2026-05-02-09. These sites are
-# known unresolved work in the active sprint:
-# - `conn/midi.rs` needs an upstream one-sided declaration macro.
-# - `time/conn.rs` still owns the local `def_conn_marker!` shim for
-#   static markers that have not yet been migrated to upstream macros.
-#
-# The allowlist exists so this gate can land before those design
-# decisions are finished. It must shrink as the sprint progresses.
-violations=$(awk '
-  /crates\/core\/src\/conn\/midi\.rs:/ { next }
-  /crates\/core\/src\/time\/conn\.rs:/ { next }
-  { print }
-' "$tmp")
-
-if [[ -n "$violations" ]]; then
+if [[ -s "$tmp" ]]; then
   cat >&2 <<'MSG'
 check-connections.sh: direct connection construction found.
 
@@ -49,8 +30,8 @@ Do not hide connection-domain failures with hand-built constructors.
 
 Offending sites:
 MSG
-  printf '%s\n' "$violations" >&2
+  cat "$tmp" >&2
   exit 1
 fi
 
-echo "check-connections.sh: OK — only active Plan 2026-05-02-09 allowlisted sites remain."
+echo "check-connections.sh: OK — connection construction is macro-backed."
