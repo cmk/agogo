@@ -9,7 +9,7 @@
 //! qualitatively different (correction loops, NaN/saturation handling,
 //! float-domain proof obligations), so they live in separate files.
 
-use connections::conn::{Conn, ConnL, ConnR, ViewL, ViewR};
+use connections::conn::{ViewL, ViewR};
 
 // Re-export the float-boundary primitive types so downstream crates
 // that don't depend on `connections` directly (cli, host-link) can
@@ -53,17 +53,20 @@ use super::fixed::{FD00, FD01, FD02, FD03, FD06, FD09, FD12};
 // source's ±∞.
 macro_rules! float_conn {
     ($const_name:ident, $float:ty, $Rung:ident, $prec:expr) => {
-        #[allow(non_camel_case_types)]
-        #[derive(Copy, Clone, Debug, Default)]
-        pub struct $const_name;
+        connections::triple! {
+            #[allow(non_camel_case_types)]
+            #[derive(Copy, Clone, Debug, Default)]
+            pub $const_name : ExtendedFloat<$float> => Extended<$Rung> {
+                ceil:  $const_name::ceil_fn,
+                inner: $const_name::inner_fn,
+                floor: $const_name::floor_fn,
+            }
+        }
 
+        #[allow(non_camel_case_types)]
         impl $const_name {
             const PREC: i64 = $prec;
             const PREC_F: f64 = Self::PREC as f64;
-            const L: ConnL<ExtendedFloat<$float>, Extended<$Rung>> =
-                Conn::new_l(Self::ceil_fn, Self::inner_fn);
-            const R: ConnR<ExtendedFloat<$float>, Extended<$Rung>> =
-                Conn::new_r(Self::inner_fn, Self::floor_fn);
 
             // `inner(Rung)` reinterpreted as f64 for the correction-loop
             // comparisons. The `as $float as f64` round-trip is a no-op
@@ -171,24 +174,16 @@ macro_rules! float_conn {
             }
 
             pub fn ceil(self, x: ExtendedFloat<$float>) -> Extended<$Rung> {
-                Self::L.ceil(x)
+                <Self as ViewL<ExtendedFloat<$float>, Extended<$Rung>>>::L.ceil(x)
             }
 
             pub fn inner(self, x: Extended<$Rung>) -> ExtendedFloat<$float> {
-                Self::L.inner(x)
+                <Self as ViewL<ExtendedFloat<$float>, Extended<$Rung>>>::L.inner(x)
             }
 
             pub fn floor(self, x: ExtendedFloat<$float>) -> Extended<$Rung> {
-                Self::R.floor(x)
+                <Self as ViewR<ExtendedFloat<$float>, Extended<$Rung>>>::R.floor(x)
             }
-        }
-
-        impl ViewL<ExtendedFloat<$float>, Extended<$Rung>> for $const_name {
-            const L: ConnL<ExtendedFloat<$float>, Extended<$Rung>> = Self::L;
-        }
-
-        impl ViewR<ExtendedFloat<$float>, Extended<$Rung>> for $const_name {
-            const R: ConnR<ExtendedFloat<$float>, Extended<$Rung>> = Self::R;
         }
     };
 }

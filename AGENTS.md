@@ -307,6 +307,28 @@ code based on it.
     separators inside the name.
   - The `AGENTS.md` in the upstream repository spells this out in detail.
 
+- **Connection construction must use the upstream macros and must be
+  total over the declared types.** Production code in agogo must not
+  call `Conn::new_l`, `Conn::new_r`, `RuntimeConn::new`, or a local
+  wrapper macro such as `def_conn_marker!` to publish a connection.
+  Declare connections with the upstream `connections::triple!`,
+  `connections::iso!`, `connections::compose!`,
+  `connections::compose_l!`, or `connections::compose_r!` macros.
+
+  A connection adjoint (`ceil`, `inner`, `floor`) must not contain
+  `expect`, `unwrap`, `panic`, `unreachable`, arithmetic overflow, or
+  a prose-only precondition to fake totality. Do not bound a proptest
+  generator to keep the bad part of the input type away from the
+  adjoint; that cooks the test instead of testing the connection. If
+  the lawful shape is not known, stop and ask for the missing math or
+  API design. It is categorically better to say "I do not know how to
+  implement this connection lawfully" than to fake a connection and
+  hide the failure in the generator.
+
+  `scripts/check-connections.sh` enforces the constructor side of this
+  rule. Temporary migration allowlists are allowed only with a plan
+  Review entry that names the remaining design problem.
+
 - **Cross-conversions compose existing `Conn`s — they are not
   hardcoded.** If `A → C` is needed and `Conn<A, B>` + `Conn<B, C>`
   already exist, compose the two at the call site. A small helper
@@ -687,6 +709,11 @@ chain:
    `use agogo_core::<top>` (column-0 imports) violates the partial
    order in each module-root's `//! depends-on:` sentinel. See
    the layering rule above.
+5. `scripts/check-connections.sh` — fail if production code constructs
+   `Conn` values directly with `Conn::new_l`, `Conn::new_r`,
+   `RuntimeConn::new`, or local marker wrappers instead of the upstream
+   declaration/composition macros. Temporary allowlists must be named
+   in the active plan's Review section.
 
 **Layer 3 — Git `pre-push`** (`.githooks/pre-push`): fires once
 per `git push`, regardless of intra-branch commit count. Runs the

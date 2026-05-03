@@ -67,4 +67,10 @@ scripts/check-floats.sh
 step "scripts/check-layers.sh"
 scripts/check-layers.sh
 
+# 5. Connection-construction gate — blocking. Per AGENTS.md, agogo
+#    production code must use upstream `connections` macros for
+#    connection construction or stop and design a truthful type/API.
+step "scripts/check-connections.sh"
+scripts/check-connections.sh
+
 step "OK"
