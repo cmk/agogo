@@ -399,18 +399,18 @@ fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
     a
 }
 
-fn lcm_u64(a: u64, b: u64) -> u64 {
+fn checked_lcm_u64(a: u64, b: u64) -> Option<u64> {
     if a == 0 || b == 0 {
-        0
+        Some(0)
     } else {
-        a / gcd_u64(a, b) * b
+        (a / gcd_u64(a, b)).checked_mul(b)
     }
 }
 
 fn timetime_ceil(ab: (Time, Time)) -> Time {
     let (a, b) = ab;
     let g = gcd_u64(time_to_tick(a).0, time_to_tick(b).0);
-    from_ticks(Tick(g)).expect("timetime_ceil: GCD of representable ticks is itself representable")
+    from_ticks(Tick(g)).unwrap_or(Time::End)
 }
 
 fn timetime_inner(t: Time) -> (Time, Time) {
@@ -419,12 +419,9 @@ fn timetime_inner(t: Time) -> (Time, Time) {
 
 fn timetime_floor(ab: (Time, Time)) -> Time {
     let (a, b) = ab;
-    let l = lcm_u64(time_to_tick(a).0, time_to_tick(b).0);
-    // LCM can exceed `u32::MAX × Grid::T1.tick_count()` in general;
-    // property tests bound inputs via `arb_small_time` so `l` stays
-    // representable. For larger inputs `from_ticks` returns `None`
-    // and we panic loudly rather than silently picking a wrong value.
-    from_ticks(Tick(l)).expect("timetime_floor: LCM exceeds the from_ticks horizon")
+    checked_lcm_u64(time_to_tick(a).0, time_to_tick(b).0)
+        .and_then(|l| from_ticks(Tick(l)))
+        .unwrap_or(Time::End)
 }
 
 // Divisibility-lattice connection on `Time`.
@@ -433,11 +430,7 @@ fn timetime_floor(ab: (Time, Time)) -> Time {
 // Following Haskell convention — the relevant order here is
 // divisibility of tick counts, not magnitude.
 //
-// `floor` panics if the LCM of the two input tick counts exceeds
-// the `from_ticks` horizon (`u32::MAX × Grid::T1.tick_count()`).
-// For musically-bounded `Time` values this is unreachable; tests
-// use `arb_small_time` (tick counts ≤ 192_000) to stay safely
-// bounded.
+// Overflow or finite-horizon misses map to `Time::End`.
 def_conn_marker!(
     TIMETIME,
     (Time, Time),
@@ -748,6 +741,22 @@ mod tests {
                 base: Grid::T8
             }
         );
+    }
+
+    #[test]
+    fn timetime_ceil_end_end_is_end() {
+        let c = TIMETIME;
+        assert_eq!(c.ceil((Time::End, Time::End)), Time::End);
+    }
+
+    #[test]
+    fn timetime_floor_end_and_finite_is_end() {
+        let c = TIMETIME;
+        let finite = Time::At {
+            beats: 1,
+            base: Grid::T4,
+        };
+        assert_eq!(c.floor((Time::End, finite)), Time::End);
     }
 
     #[test]
@@ -1085,18 +1094,21 @@ mod tests {
             let c = TIMETIME;
             let ta = time_to_tick(a).0;
             let tb = time_to_tick(b).0;
-            prop_assert_eq!(time_to_tick(c.floor((a, b))).0, lcm_u64(ta, tb));
+            prop_assert_eq!(
+                time_to_tick(c.floor((a, b))).0,
+                checked_lcm_u64(ta, tb).expect("small Time LCM fits in u64")
+            );
         }
 
         #[test]
-        fn time_inner_is_diagonal(t in arb_small_time()) {
+        fn time_inner_is_diagonal(t in arb_time()) {
             let c = TIMETIME;
             prop_assert_eq!(c.inner(t), (t, t));
         }
 
         #[test]
         fn time_adjoint(
-            a in arb_small_time(), b in arb_small_time(), z in arb_small_time(),
+            a in arb_time(), b in arb_time(), z in arb_time(),
         ) {
             let c = TIMETIME;
             let lhs = timetime_refine_le(c.ceil((a, b)), z);
@@ -1105,7 +1117,7 @@ mod tests {
         }
 
         #[test]
-        fn time_closed(a in arb_small_time(), b in arb_small_time()) {
+        fn time_closed(a in arb_time(), b in arb_time()) {
             let c = TIMETIME;
             let (x, y) = c.inner(c.ceil((a, b)));
             prop_assert!(timetime_refine_le(a, x));
@@ -1113,13 +1125,13 @@ mod tests {
         }
 
         #[test]
-        fn time_kernel(z in arb_small_time()) {
+        fn time_kernel(z in arb_time()) {
             let c = TIMETIME;
             prop_assert!(timetime_refine_le(c.ceil(c.inner(z)), z));
         }
 
         #[test]
-        fn time_idempotent(a in arb_small_time(), b in arb_small_time()) {
+        fn time_idempotent(a in arb_time(), b in arb_time()) {
             let c = TIMETIME;
             let once = c.inner(c.ceil((a, b)));
             let twice = c.inner(c.ceil(once));
@@ -1128,9 +1140,9 @@ mod tests {
 
         #[test]
         fn time_monotonic(
-            a1 in arb_small_time(), a2 in arb_small_time(),
-            b1 in arb_small_time(), b2 in arb_small_time(),
-            z1 in arb_small_time(), z2 in arb_small_time(),
+            a1 in arb_time(), a2 in arb_time(),
+            b1 in arb_time(), b2 in arb_time(),
+            z1 in arb_time(), z2 in arb_time(),
         ) {
             let c = TIMETIME;
             if timetime_refine_le(a1, a2) && timetime_refine_le(b1, b2) {
