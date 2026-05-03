@@ -19,6 +19,15 @@ const NO_PENDING_TEMPO: u64 = 0;
 const WRITING_TEMPO_BIT: u64 = 1 << 62;
 const CLAIMED_TEMPO_BIT: u64 = 1 << 63;
 const TEMPO_GENERATION_MASK: u64 = WRITING_TEMPO_BIT - 1;
+// Soft-side calls may spin briefly after publishing into a buffer
+// boundary race, but must never peg a core waiting for RT progress.
+const TEMPO_PRODUCER_SETTLE_SPINS: usize = 64;
+// RT gets a small CAS retry budget against the single serialized
+// tempo producer. If the producer keeps changing the slot for the
+// whole budget, the callback leaves the slot untouched and reuses the
+// last stable tempo rather than spending unbounded time in the audio
+// thread.
+const TEMPO_RT_CLAIM_RETRIES: usize = 8;
 
 state_machine! {
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -460,7 +469,7 @@ impl ControlProducer {
     }
 
     fn settle_published_tempo(&self, generation: u64, deadline: u64) -> bool {
-        loop {
+        for _ in 0..TEMPO_PRODUCER_SETTLE_SPINS {
             let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
             if state == claimed_tempo_state(generation) {
                 return true;
@@ -485,6 +494,33 @@ impl ControlProducer {
                 continue;
             }
             std::hint::spin_loop();
+        }
+
+        self.cancel_published_tempo(generation)
+    }
+
+    fn cancel_published_tempo(&self, generation: u64) -> bool {
+        loop {
+            let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
+            if state == claimed_tempo_state(generation) {
+                return true;
+            }
+            if state != generation {
+                return false;
+            }
+            if self
+                .shared
+                .pending_tempo_state
+                .compare_exchange(
+                    generation,
+                    NO_PENDING_TEMPO,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                return false;
+            }
         }
     }
 
@@ -629,16 +665,16 @@ impl ControlProducer {
         tempo: Tempo,
         deadline: u64,
     ) -> bool {
-        self.shared
-            .pending_tempo_raw
-            .store(tempo.0, Ordering::Release);
-        self.shared
-            .pending_tempo_deadline
-            .store(deadline, Ordering::Release);
-
         loop {
             let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
             if state == write.writing_state {
+                if write.previous_generation != 0
+                    && self.shared.backup_tempo_deadline.load(Ordering::Acquire)
+                        <= self.current_buffer_epoch()
+                {
+                    return false;
+                }
+                self.store_pending_tempo(tempo, deadline);
                 let next = tempo_slot_transition(
                     TempoSlotState::Writing,
                     TempoSlotEvent::PublishReplacement,
@@ -661,6 +697,7 @@ impl ControlProducer {
                 if deadline <= self.current_buffer_epoch() {
                     return false;
                 }
+                self.store_pending_tempo(tempo, deadline);
                 let next = tempo_slot_transition(
                     TempoSlotState::Claimed,
                     TempoSlotEvent::PublishReplacement,
@@ -679,6 +716,15 @@ impl ControlProducer {
 
             return false;
         }
+    }
+
+    fn store_pending_tempo(&self, tempo: Tempo, deadline: u64) {
+        self.shared
+            .pending_tempo_raw
+            .store(tempo.0, Ordering::Release);
+        self.shared
+            .pending_tempo_deadline
+            .store(deadline, Ordering::Release);
     }
 
     fn abort_tempo_write(&self, write: TempoWriteGuard) {
@@ -765,7 +811,7 @@ impl ControlConsumer {
     }
 
     fn consume_pending_tempo(&self, epoch: u64) -> Option<Tempo> {
-        for _ in 0..8 {
+        for _ in 0..TEMPO_RT_CLAIM_RETRIES {
             let state = self.shared.pending_tempo_state.load(Ordering::Acquire);
             match tempo_slot_state(state) {
                 TempoSlotState::Empty | TempoSlotState::Claimed => return None,
@@ -1193,6 +1239,50 @@ mod tests {
         assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(120));
         assert!(!producer.publish_tempo_write(write, generation, Tempo::from_bpm_integer(140), 1));
         assert_eq!(producer.tempo(), Tempo::from_bpm_integer(120));
+    }
+
+    #[test]
+    fn tempo_replacement_does_not_publish_over_due_backup() {
+        let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let first = producer.admit_tempo(
+            Tempo::from_bpm_integer(130),
+            AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0),
+        );
+        assert_eq!(first.status, AdmissionStatus::Accepted);
+        producer.shared.buffer_epoch.store(1, Ordering::Release);
+
+        let generation = producer.next_tempo_generation();
+        producer
+            .shared
+            .staged_tempo_raw
+            .store(Tempo::from_bpm_integer(140).0, Ordering::Release);
+        producer
+            .shared
+            .staged_tempo_deadline
+            .store(2, Ordering::Release);
+        let write = producer.begin_tempo_write();
+
+        assert!(!producer.publish_tempo_write(write, generation, Tempo::from_bpm_integer(140), 2));
+        producer.abort_tempo_write(write);
+        assert_eq!(
+            consumer.consume_pending_tempo(1),
+            Some(Tempo::from_bpm_integer(130))
+        );
+    }
+
+    #[test]
+    fn published_tempo_settle_has_bounded_late_fallback() {
+        let (producer, _consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let generation = producer.next_tempo_generation();
+        let write = producer.begin_tempo_write();
+        assert!(producer.publish_tempo_write(write, generation, Tempo::from_bpm_integer(140), 1));
+        producer.shared.buffer_epoch.store(1, Ordering::Release);
+
+        assert!(!producer.settle_published_tempo(generation, 1));
+        assert_eq!(
+            producer.shared.pending_tempo_state.load(Ordering::Acquire),
+            NO_PENDING_TEMPO
+        );
     }
 
     #[test]

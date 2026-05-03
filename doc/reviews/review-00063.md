@@ -161,3 +161,30 @@ Fixed. `begin_buffer()` now advances `buffer_epoch` with a saturating `fetch_upd
 #### Reply from cmk ([2026-05-03 05:36 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177680762))
 
 Fixed. Explicit `command_id` values now reserve the driver's generated-id range via `reserve_generated_ids_through`, and generated ids advance with a saturating atomic update. Added `explicit_command_id_advances_generated_ids` for the explicit 42 then generated 43 case.
+
+<!-- gh-id: 3177691677 -->
+### Copilot on [`crates/host/src/bridge.rs:466`](https://github.com/cmk/agogo/pull/63#discussion_r3177691677) (2026-05-03 05:50 UTC)
+
+`settle_published_tempo()` is an unbounded spin loop on the producer side. If the RT thread is delayed after advancing `buffer_epoch` but before updating `tempo_snapshot_epoch`/claiming the pending generation, this can busy-wait indefinitely and peg a core while a tool call is in flight. Consider adding a bounded spin budget/backoff with a fallback (e.g., treat as `late`) or documenting why termination is guaranteed quickly in production.
+
+<!-- gh-id: 3177691682 -->
+### Copilot on [`crates/host/src/bridge.rs:771`](https://github.com/cmk/agogo/pull/63#discussion_r3177691682) (2026-05-03 05:50 UTC)
+
+`consume_pending_tempo()` uses a hard-coded retry budget (`for _ in 0..8`) and returns `None` after the loop without explaining the bound or guaranteeing that the pending slot makes forward progress. Please replace `8` with a named constant + rationale (RT time budget), and consider whether exhausting the budget could allow an admitted tempo update to be skipped past its deadline under heavy producer contention.
+
+<!-- gh-id: 4215938783 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 05:50 UTC](https://github.com/cmk/agogo/pull/63#pullrequestreview-4215938783))
+
+## Pull request overview
+
+Copilot reviewed 7 out of 8 changed files in this pull request and generated 2 comments.
+
+<!-- gh-id: 3177699439 -->
+#### Reply from cmk ([2026-05-03 05:59 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177699439))
+
+Fixed. `settle_published_tempo()` now uses the named `TEMPO_PRODUCER_SETTLE_SPINS` budget and falls back by canceling the unclaimed generation as `late` instead of spinning indefinitely. Added `published_tempo_settle_has_bounded_late_fallback` for that boundary.
+
+<!-- gh-id: 3177699586 -->
+#### Reply from cmk ([2026-05-03 05:59 UTC](https://github.com/cmk/agogo/pull/63#discussion_r3177699586))
+
+Fixed. The RT retry budget is now the named `TEMPO_RT_CLAIM_RETRIES` constant with an RT-budget rationale. I also tightened the producer path so a replacement cannot publish over a prior pending tempo once that prior deadline buffer has started; `tempo_replacement_does_not_publish_over_due_backup` covers the skip-past-deadline case.
