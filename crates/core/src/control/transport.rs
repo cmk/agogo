@@ -287,6 +287,38 @@ impl<R: SampleTime> Playhead<R> {
         self.transport.running
     }
 
+    /// Apply a tempo change at a buffer boundary. This is the
+    /// command-bridge path: the host consumes admitted tempo metadata,
+    /// then updates the runtime before scheduling the buffer.
+    pub fn apply_tempo(&mut self, bpm: Tempo) -> bool {
+        if self.stc.bpm() == bpm {
+            return false;
+        }
+        self.stc = SampleTickConn::new(self.stc.sr(), bpm, self.stc.ppqn());
+        if let PhaseSource::Internal { bpm: source_bpm } = &mut self.phase_source {
+            *source_bpm = bpm;
+        }
+        true
+    }
+
+    /// Apply a command-driven transport start. The next
+    /// [`Self::on_buffer`] call emits the start byte for internal
+    /// transport and resumes clock output.
+    pub fn apply_transport_start(&mut self) {
+        self.stop_flag.store(false, Ordering::Release);
+        self.transport.running = true;
+        if let TransportPolicy::Internal { start_emitted } = &mut self.transport.policy {
+            *start_emitted = false;
+        }
+    }
+
+    /// Apply a command-driven transport stop. The next
+    /// [`Self::on_buffer`] call takes the existing stop path, emits
+    /// Stop once, and suppresses subsequent clock output.
+    pub fn apply_transport_stop(&mut self) {
+        self.stop_flag.store(true, Ordering::Release);
+    }
+
     /// Buffer-driven dispatch. RT-safe: no allocations, no locks
     /// (assuming the `PhaseSource` and `MidiSink` impls obey the
     /// same contract — `RtProducer` does; the `LinkSession`

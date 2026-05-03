@@ -10,7 +10,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError};
 
+use agogo::core::conn::sample::SampleTime;
 use agogo::core::conn::tempo::Tempo;
+use agogo::core::control::Playhead;
 use rust_fsm::state_machine;
 
 pub const MAX_SOURCE_ID_LEN: usize = 64;
@@ -312,6 +314,16 @@ impl AdmissionOutcome {
 pub enum RtCommandDrain {
     Command(CommandEnvelope),
     MissedDeadline(CommandEnvelope),
+}
+
+/// Result of applying bridge state to a `Playhead` at one RT buffer boundary.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct CommandApplyReport {
+    pub params: ControlParams,
+    pub tempo_updated: bool,
+    pub applied_commands: u32,
+    pub missed_deadlines: u32,
+    pub unsupported_commands: u32,
 }
 
 /// Per-buffer scalar snapshot read by the audio callback.
@@ -947,6 +959,50 @@ impl ControlConsumer {
     }
 }
 
+/// Apply one RT buffer worth of admitted control state to `playhead`.
+///
+/// This is the command-bridge companion to `Playhead::on_buffer`: call
+/// it at the top of the audio buffer, then render the buffer. The
+/// function does not allocate; it consumes the fixed-capacity bridge
+/// queue and reports anything it cannot apply.
+pub fn apply_control_to_playhead<R: SampleTime>(
+    consumer: &mut ControlConsumer,
+    playhead: &mut Playhead<R>,
+) -> CommandApplyReport {
+    let params = consumer.begin_buffer();
+    let tempo_updated = playhead.apply_tempo(params.tempo);
+    let mut report = CommandApplyReport {
+        params,
+        tempo_updated,
+        applied_commands: 0,
+        missed_deadlines: 0,
+        unsupported_commands: 0,
+    };
+
+    while let Some(drain) = consumer.drain_due_command() {
+        match drain {
+            RtCommandDrain::MissedDeadline(_) => {
+                report.missed_deadlines = report.missed_deadlines.saturating_add(1);
+            }
+            RtCommandDrain::Command(envelope) => match envelope.command {
+                ControlCommand::Start => {
+                    playhead.apply_transport_start();
+                    report.applied_commands = report.applied_commands.saturating_add(1);
+                }
+                ControlCommand::Stop => {
+                    playhead.apply_transport_stop();
+                    report.applied_commands = report.applied_commands.saturating_add(1);
+                }
+                ControlCommand::ChannelConfigure { .. } | ControlCommand::Locate { .. } => {
+                    report.unsupported_commands = report.unsupported_commands.saturating_add(1);
+                }
+            },
+        }
+    }
+
+    report
+}
+
 fn tempo_slot_transition(state: TempoSlotState, event: TempoSlotEvent) -> TempoSlotState {
     let mut fsm = TempoSlotFsm::from_state(state);
     fsm.consume(&event)
@@ -981,7 +1037,17 @@ fn tempo_slot_state(state: u64) -> TempoSlotState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agogo::core::channel::{Channel, ChannelCommon, MidiRole};
+    use agogo::core::conn::fixed::Micro;
+    use agogo::core::conn::sample::S048;
+    use agogo::core::control::TransportPolicy;
+    use agogo::core::control::sync::PhaseSource;
+    use agogo::core::time::grid::Grid;
+    use agogo::core::time::swing::SwingConfig;
+    use agogo::core::time::tbase::TBase;
+    use agogo::core::time::tick::PPQN;
     use proptest::prelude::*;
+    use std::collections::VecDeque;
 
     fn metadata(id: u64, deadline: u64) -> AdmissionMetadata {
         AdmissionMetadata {
@@ -1013,6 +1079,34 @@ mod tests {
             Just(TempoSlotEvent::ClearStale),
             Just(TempoSlotEvent::MarkSnapshotEmpty),
         ]
+    }
+
+    fn zero_channel(divider: Grid) -> Channel {
+        Channel::Midi {
+            common: ChannelCommon {
+                divider,
+                shuffle: SwingConfig {
+                    resolution: TBase::T16,
+                    amount: 0,
+                },
+                delay: Micro::ZERO,
+                offset: Micro::ZERO,
+                bar_multiplier: None,
+            },
+            role: MidiRole::Clock,
+        }
+    }
+
+    fn playhead(bpm: Tempo, transport: TransportPolicy) -> Playhead<S048> {
+        Playhead::<S048>::new(
+            vec![zero_channel(Grid::T4)],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            PPQN,
+            transport,
+            24_000,
+        )
     }
 
     fn tempo_generation_strategy() -> impl Strategy<Value = u64> {
@@ -1330,6 +1424,121 @@ mod tests {
         assert_eq!(consumer.current_buffer_epoch(), u64::MAX);
         assert_eq!(consumer.begin_buffer().buffer_epoch, u64::MAX);
         assert_eq!(consumer.current_buffer_epoch(), u64::MAX);
+    }
+
+    #[test]
+    fn accepted_tempo_applies_by_deadline() {
+        let initial = Tempo::from_bpm_integer(120);
+        let next = Tempo::from_bpm_integer(240);
+        let (producer, mut consumer) = spsc(4, initial);
+        let mut playhead = playhead(
+            initial,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+        );
+
+        let outcome = producer.admit_tempo(
+            next,
+            AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0),
+        );
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+
+        assert!(report.tempo_updated);
+        assert_eq!(report.params.tempo, next);
+        assert_eq!(playhead.stc.bpm(), next);
+        match playhead.phase_source {
+            PhaseSource::Internal { bpm } => assert_eq!(bpm, next),
+            _ => panic!("test playhead uses internal source"),
+        }
+    }
+
+    #[test]
+    fn accepted_stop_applies_by_deadline() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Internal {
+                start_emitted: true,
+            },
+        );
+
+        let outcome = producer.admit_ordered(ControlCommand::Stop, metadata(1, 1));
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+        assert_eq!(report.applied_commands, 1);
+        assert!(playhead.stop_handle().is_stop_requested());
+    }
+
+    #[test]
+    fn accepted_start_applies_by_deadline() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Internal {
+                start_emitted: true,
+            },
+        );
+        let stop = producer.admit_ordered(ControlCommand::Stop, metadata(1, 1));
+        assert_eq!(stop.status, AdmissionStatus::Accepted);
+        apply_control_to_playhead(&mut consumer, &mut playhead);
+        assert!(playhead.stop_handle().is_stop_requested());
+
+        let start = producer.admit_ordered(
+            ControlCommand::Start,
+            AdmissionMetadata::next_buffer(CommandId(2), SourceId::default(), 1),
+        );
+        assert_eq!(start.status, AdmissionStatus::Accepted);
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+        assert_eq!(report.applied_commands, 1);
+        assert!(!playhead.stop_handle().is_stop_requested());
+        assert!(playhead.is_running());
+    }
+
+    #[test]
+    fn late_ordered_command_reports_fault() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+        );
+
+        let outcome = producer.admit_ordered(ControlCommand::Start, metadata(1, 1));
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+        consumer.begin_buffer();
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+
+        assert_eq!(report.missed_deadlines, 1);
+        assert_eq!(report.applied_commands, 0);
+    }
+
+    #[test]
+    fn unsupported_ordered_command_reports_fault() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+        );
+
+        let outcome = producer.admit_ordered(ControlCommand::Locate { tick: 960 }, metadata(1, 1));
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+
+        assert_eq!(report.unsupported_commands, 1);
+        assert_eq!(report.applied_commands, 0);
     }
 
     proptest! {
