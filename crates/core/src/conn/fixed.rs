@@ -11,7 +11,7 @@
 //! - `FD12(i) = i × 10⁻¹²` (1 ps)
 //!
 //! For every ordered pair `(Fine, Coarse)` where `Fine`'s resolution is
-//! strictly smaller, there is a [`Conn`]`<Fine, Coarse>` named
+//! strictly smaller, there is a [`Conn`](connections::conn::Conn)`<Fine, Coarse>` named
 //! `FD<dd>FD<dd>`:
 //!
 //! - `ceil:  Fine → Coarse`  smallest `c` with `inner(c) ≥ f`
@@ -24,7 +24,7 @@
 //! Both rounding functions use [`i64::div_euclid`] / [`i64::rem_euclid`]
 //! so negative inputs round consistently toward −∞ for `floor` and
 //! toward +∞ for `ceil`. This matches the documented adjoint-triple
-//! semantics of [`Conn`]; the Haskell `fixfix` `h` used `div` with a
+//! semantics of [`Conn`](connections::conn::Conn); the Haskell `fixfix` `h` used `div` with a
 //! `j − 1` fixup on nonzero remainder, which does not satisfy the
 //! standard lower-adjoint Galois law and is believed to be an
 //! idiosyncrasy of the Haskell implementation rather than an
