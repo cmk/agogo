@@ -1041,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn queue_full_returns_error() {
+    fn queue_full_rejects_with_reason_and_preserves_queue() {
         let (producer, mut consumer) = spsc(1, Tempo::from_bpm_integer(120));
         let first = producer.admit_ordered(ControlCommand::Start, metadata(1, 1));
         assert_eq!(first.status, AdmissionStatus::Accepted);
