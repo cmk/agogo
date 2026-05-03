@@ -225,11 +225,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     }
 }
 
-/// Rate-monomorphic body. The concrete sample type plumbs all the way down
-/// into `PhaseSource<Sxxx>` / `Playhead<Sxxx>` / `CallbackState<Sxxx>` so the
-/// audio callback never branches on rate at runtime. The
-/// `Send + 'static` bound is what cpal's `data_callback` requires
-/// of the moved closure.
+/// Channel-role summary used to select the required runtime sinks.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct ChannelMix {
     has_midi: bool,

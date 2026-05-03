@@ -5,7 +5,7 @@
 //! [`crate::control::sync::detect`] tests to drive the PLL and peak detector
 //! against ground-truth pulse positions.
 //!
-//! Not testkit-gated — `pulse_train` is a runtime API, not a
+//! Not testkit-gated — the `pulse_train_sxxx` functions are runtime APIs, not
 //! proptest strategy. It lives in `sync/` because every consumer
 //! sits in the sync subsystem.
 
@@ -113,6 +113,20 @@ fn pulse_train_with<R>(
 
 macro_rules! pulse_train_rate {
     ($func:ident, $Rate:ident) => {
+        /// Generate a synthetic audio buffer containing `n_pulses` Hann-bell
+        /// pulses at the given BPM/PPQ.
+        ///
+        /// Returns the PCM buffer and the ground-truth pulse-centre positions
+        /// after jitter, represented as Q48.16 values in this function's
+        /// concrete sample-rate type.
+        ///
+        /// `jitter_sigma` is a non-negative Gaussian timing standard deviation
+        /// in picoseconds. `seed` deterministically seeds the PRNG; passing
+        /// `seed = 0` selects a fixed non-zero fallback.
+        ///
+        /// # Panics
+        ///
+        /// Panics if `bpm == 0`, `ppq == 0`, or `jitter_sigma.0 < 0`.
         pub fn $func(
             bpm: Tempo,
             ppq: u32,
