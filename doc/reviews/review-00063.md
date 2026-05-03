@@ -61,3 +61,24 @@ Review comment:
 
 - [P2] Don't publish tempo before late status is settled — crates/host/src/bridge.rs:368-376
   When a tempo admission races the RT thread after this `swap`, `begin_buffer()` can increment the epoch and load the new tempo before the second epoch check sees `deadline <= current_epoch`. The method then returns `late` and may roll back future snapshots, but the supposedly late command already affected that buffer, so callers/logs see a rejected/late admission that was not rejected before touching the RT side.
+
+## Local review (2026-05-02)
+
+**Branch:** plan-2026-05-02-08
+**Commits:** 5 (origin/main..plan-2026-05-02-08)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The patch introduces admission semantics that can report accepted tempo commands with altered deadlines and misleading coalesce metadata, plus new proptests that violate the repo's documented domain-coverage rule. These should be fixed before considering the patch correct.
+
+Full review comments:
+
+- [P2] Preserve caller-declared tempo deadlines — crates/host/src/bridge.rs:370-371
+  When a tempo admission races the RT callback after the initial admissibility check, this branch rewrites the caller's `deadline_buffer` to a later buffer and still returns `accepted`. For an explicit next-buffer deadline that was already missed, scalar controls have no later `MissedDeadline` drain fault, so the admission log reports success against a different deadline than the caller declared.
+
+- [P2] Reject non-tempo coalesce keys for tempo writes — crates/host/src/driver.rs:213-221
+  For `agogo.tempo.set`, callers can pass `coalesce_key: null` or any arbitrary string here and the bridge will still accept the write, even though all tempo writes share one atomic scalar and therefore overwrite each other regardless of key. Two accepted tempo commands with different keys can be silently coalesced while the response echoes misleading metadata; restrict tempo admissions to the fixed `tempo` key or reject overrides.
+
+- [P2] Cover the full deadline domain in proptests — crates/host/src/bridge.rs:709-709
+  This deadline strategy only samples `0..8`, and the other new deadline properties use similarly tiny ranges, so the proptests never exercise the `u64` boundary values used by `CommandDeadline` and the epoch arithmetic. The repo's proptest rule requires the full input domain or a documented bound with explicit boundary spot checks; otherwise regressions around saturation or wrap at `u64::MAX` will not be caught.

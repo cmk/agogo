@@ -6,6 +6,7 @@
 //! side never locks and never allocates.
 
 use std::fmt;
+use std::hint;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError};
@@ -279,6 +280,11 @@ pub struct ControlParams {
 #[derive(Debug)]
 struct SharedControlParams {
     tempo_raw: AtomicU32,
+    pending_tempo_raw: AtomicU32,
+    pending_tempo_deadline: AtomicU64,
+    pending_tempo_generation: AtomicU64,
+    next_tempo_generation: AtomicU64,
+    applied_tempo_generation: AtomicU64,
     buffer_epoch: AtomicU64,
 }
 
@@ -286,6 +292,11 @@ impl SharedControlParams {
     fn new(tempo: Tempo) -> Self {
         Self {
             tempo_raw: AtomicU32::new(tempo.0),
+            pending_tempo_raw: AtomicU32::new(tempo.0),
+            pending_tempo_deadline: AtomicU64::new(0),
+            pending_tempo_generation: AtomicU64::new(0),
+            next_tempo_generation: AtomicU64::new(1),
+            applied_tempo_generation: AtomicU64::new(0),
             buffer_epoch: AtomicU64::new(0),
         }
     }
@@ -294,6 +305,7 @@ impl SharedControlParams {
 /// Async/control-side bridge handle.
 pub struct ControlProducer {
     shared: Arc<SharedControlParams>,
+    tempo_producer: Mutex<()>,
     producer: Mutex<rtrb::Producer<CommandEnvelope>>,
 }
 
@@ -347,6 +359,7 @@ pub fn spsc(capacity: usize, initial_tempo: Tempo) -> (ControlProducer, ControlC
     (
         ControlProducer {
             shared: Arc::clone(&shared),
+            tempo_producer: Mutex::new(()),
             producer: Mutex::new(producer),
         },
         ControlConsumer { shared, consumer },
@@ -361,14 +374,43 @@ impl ControlProducer {
     }
 
     /// Admit a last-value tempo control.
-    pub fn admit_tempo(&self, tempo: Tempo, mut metadata: AdmissionMetadata) -> AdmissionOutcome {
+    pub fn admit_tempo(&self, tempo: Tempo, metadata: AdmissionMetadata) -> AdmissionOutcome {
+        if metadata.coalesce_key != Some(CoalesceKey::tempo()) {
+            return AdmissionOutcome::rejected(
+                metadata,
+                AdmissionRejectReason::UnsupportedCommandClass,
+            );
+        }
+        let Ok(_guard) = self.tempo_producer.lock() else {
+            return AdmissionOutcome::rejected(metadata, AdmissionRejectReason::QueuePoisoned);
+        };
         if let Some(outcome) = self.reject_if_not_admissible(metadata) {
             return outcome;
         }
-        self.set_tempo(tempo);
-        let epoch_after_publish = self.current_buffer_epoch();
-        if metadata.deadline.buffer <= epoch_after_publish {
-            metadata.deadline.buffer = epoch_after_publish.saturating_add(1);
+
+        let generation = self.next_tempo_generation();
+        self.shared
+            .pending_tempo_raw
+            .store(tempo.0, Ordering::Release);
+        self.shared
+            .pending_tempo_deadline
+            .store(metadata.deadline.buffer, Ordering::Release);
+        self.shared
+            .pending_tempo_generation
+            .store(generation, Ordering::Release);
+
+        if metadata.deadline.buffer <= self.current_buffer_epoch() {
+            if self
+                .shared
+                .pending_tempo_generation
+                .compare_exchange(generation, 0, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return AdmissionOutcome::late(metadata);
+            }
+            if !self.tempo_generation_was_applied(generation) {
+                return AdmissionOutcome::late(metadata);
+            }
         }
         AdmissionOutcome::accepted(metadata)
     }
@@ -440,6 +482,34 @@ impl ControlProducer {
         }
         None
     }
+
+    fn next_tempo_generation(&self) -> u64 {
+        let generation = self.shared.next_tempo_generation.fetch_update(
+            Ordering::AcqRel,
+            Ordering::Acquire,
+            |current| {
+                Some(
+                    current
+                        .checked_add(1)
+                        .filter(|next| *next != 0)
+                        .unwrap_or(1),
+                )
+            },
+        );
+        generation
+            .expect("tempo generation update closure always returns Some")
+            .max(1)
+    }
+
+    fn tempo_generation_was_applied(&self, generation: u64) -> bool {
+        for _ in 0..64 {
+            if self.shared.applied_tempo_generation.load(Ordering::Acquire) == generation {
+                return true;
+            }
+            hint::spin_loop();
+        }
+        false
+    }
 }
 
 fn bridge_result_for_outcome(outcome: AdmissionOutcome) -> Result<(), BridgeError> {
@@ -467,8 +537,11 @@ impl ControlConsumer {
             .buffer_epoch
             .fetch_add(1, Ordering::AcqRel)
             .saturating_add(1);
+        let tempo = self
+            .consume_pending_tempo(epoch)
+            .unwrap_or_else(|| Tempo(self.shared.tempo_raw.load(Ordering::Acquire)));
         ControlParams {
-            tempo: Tempo(self.shared.tempo_raw.load(Ordering::Acquire)),
+            tempo,
             buffer_epoch: epoch,
         }
     }
@@ -483,6 +556,38 @@ impl ControlConsumer {
 
     pub fn current_buffer_epoch(&self) -> u64 {
         self.shared.buffer_epoch.load(Ordering::Acquire)
+    }
+
+    fn consume_pending_tempo(&self, epoch: u64) -> Option<Tempo> {
+        let generation = self.shared.pending_tempo_generation.load(Ordering::Acquire);
+        if generation == 0 {
+            return None;
+        }
+        let deadline = self.shared.pending_tempo_deadline.load(Ordering::Acquire);
+        if deadline < epoch {
+            let _ = self.shared.pending_tempo_generation.compare_exchange(
+                generation,
+                0,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+            return None;
+        }
+        if self
+            .shared
+            .pending_tempo_generation
+            .compare_exchange(generation, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return None;
+        }
+
+        let tempo = Tempo(self.shared.pending_tempo_raw.load(Ordering::Acquire));
+        self.shared.tempo_raw.store(tempo.0, Ordering::Release);
+        self.shared
+            .applied_tempo_generation
+            .store(generation, Ordering::Release);
+        Some(tempo)
     }
 
     /// Drain one ordered command envelope. Non-blocking and
@@ -617,6 +722,22 @@ mod tests {
     }
 
     #[test]
+    fn tempo_rejects_non_tempo_coalesce_key() {
+        let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let mut meta = AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0);
+        meta.coalesce_key = Some(CoalesceKey::new("transport").expect("key fits"));
+
+        let outcome = producer.admit_tempo(Tempo::from_bpm_integer(140), meta);
+
+        assert_eq!(outcome.status, AdmissionStatus::Rejected);
+        assert_eq!(
+            outcome.reason,
+            Some(AdmissionRejectReason::UnsupportedCommandClass)
+        );
+        assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(120));
+    }
+
+    #[test]
     fn unsupported_time_domain_rejected_before_enqueue() {
         let (producer, mut consumer) = spsc(4, Tempo::from_bpm_integer(120));
         let mut meta = metadata(1, 1);
@@ -683,7 +804,7 @@ mod tests {
 
     #[test]
     fn published_tempo_admission_is_not_revised_to_late() {
-        let (producer, _consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
 
         let outcome = producer.admit_tempo(
             Tempo::from_bpm_integer(140),
@@ -692,8 +813,8 @@ mod tests {
 
         assert_eq!(outcome.status, AdmissionStatus::Accepted);
         assert_eq!(outcome.reason, None);
-        assert!(outcome.metadata.deadline.buffer > producer.current_buffer_epoch());
-        assert_eq!(producer.tempo(), Tempo::from_bpm_integer(140));
+        assert_eq!(outcome.metadata.deadline, CommandDeadline::rt_buffer(1));
+        assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(140));
     }
 
     #[test]
@@ -702,11 +823,34 @@ mod tests {
         assert_eq!(bridge_result_for_outcome(outcome), Err(BridgeError::Late));
     }
 
+    #[test]
+    fn max_deadline_ordered_admission_preserves_boundary() {
+        let (producer, _consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        let outcome = producer.admit_ordered(ControlCommand::Start, metadata(1, u64::MAX));
+
+        assert_eq!(outcome.status, AdmissionStatus::Accepted);
+        assert_eq!(
+            outcome.metadata.deadline,
+            CommandDeadline::rt_buffer(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn default_deadline_saturates_at_u64_max() {
+        let (producer, _consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        producer
+            .shared
+            .buffer_epoch
+            .store(u64::MAX, Ordering::Release);
+
+        assert_eq!(producer.default_deadline_buffer(), u64::MAX);
+    }
+
     proptest! {
         #[test]
         fn command_admission_is_total(
             id in any::<u64>(),
-            deadline in 0_u64..8,
+            deadline in any::<u64>(),
             domain in domain_strategy(),
             has_coalesce_key in any::<bool>(),
         ) {
@@ -729,8 +873,9 @@ mod tests {
         #[test]
         fn accepted_command_has_declared_deadline(
             id in any::<u64>(),
-            deadline in 1_u64..8,
+            deadline in any::<u64>(),
         ) {
+            prop_assume!(deadline > 0);
             let (producer, _consumer) = spsc(4, Tempo::from_bpm_integer(120));
             let meta = metadata(id, deadline);
             let outcome = producer.admit_ordered(ControlCommand::Start, meta);
@@ -741,6 +886,10 @@ mod tests {
             prop_assert_eq!(outcome.metadata.deadline, CommandDeadline::rt_buffer(deadline));
         }
 
+        // This property advances the simulated callback once per generated
+        // buffer, so it intentionally samples a small latency window. The
+        // u64 deadline boundary is covered by
+        // `max_deadline_ordered_admission_preserves_boundary`.
         #[test]
         fn accepted_command_applies_by_deadline(deadline in 1_u64..8) {
             let (producer, mut consumer) = spsc(4, Tempo::from_bpm_integer(120));
