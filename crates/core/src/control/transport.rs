@@ -85,6 +85,10 @@ pub struct Playhead<R: SampleTime> {
     /// flips this; the next [`Playhead::on_buffer`] reads it and
     /// emits [`MidiRtByte::Stop`].
     stop_flag: Arc<AtomicBool>,
+    /// Command-bridge transport byte staged by the audio thread at
+    /// the buffer boundary. Separate from `stop_flag`, which is the
+    /// teardown latch.
+    command_transport: Option<MidiRtByte>,
 }
 
 /// Caller's transport policy:
@@ -263,6 +267,7 @@ impl<R: SampleTime> Playhead<R> {
             click_counters: vec![0; n],
             audio_click_counters: vec![0; n],
             stop_flag: Arc::new(AtomicBool::new(false)),
+            command_transport: None,
         }
     }
 
@@ -305,18 +310,15 @@ impl<R: SampleTime> Playhead<R> {
     /// [`Self::on_buffer`] call emits the start byte for internal
     /// transport and resumes clock output.
     pub fn apply_transport_start(&mut self) {
-        self.stop_flag.store(false, Ordering::Release);
         self.transport.running = true;
-        if let TransportPolicy::Internal { start_emitted } = &mut self.transport.policy {
-            *start_emitted = false;
-        }
+        self.command_transport = Some(MidiRtByte::Start);
     }
 
     /// Apply a command-driven transport stop. The next
     /// [`Self::on_buffer`] call takes the existing stop path, emits
     /// Stop once, and suppresses subsequent clock output.
     pub fn apply_transport_stop(&mut self) {
-        self.stop_flag.store(true, Ordering::Release);
+        self.command_transport = Some(MidiRtByte::Stop);
     }
 
     /// Buffer-driven dispatch. RT-safe: no allocations, no locks
@@ -336,7 +338,32 @@ impl<R: SampleTime> Playhead<R> {
 
         // 2. Compute the per-buffer transport byte.
         let stop_pending = self.stop_flag.load(Ordering::Acquire);
-        let transport = self.transport.next_byte(stop_pending);
+        let transport = if stop_pending {
+            self.command_transport = None;
+            self.transport.next_byte(true)
+        } else if let Some(command_transport) = self.command_transport.take() {
+            match command_transport {
+                MidiRtByte::Start => {
+                    if let TransportPolicy::Internal { start_emitted } = &mut self.transport.policy
+                    {
+                        *start_emitted = true;
+                    }
+                    self.transport.running = true;
+                    Some(MidiRtByte::Start)
+                }
+                MidiRtByte::Stop => {
+                    if self.transport.running {
+                        self.transport.running = false;
+                        Some(MidiRtByte::Stop)
+                    } else {
+                        None
+                    }
+                }
+                MidiRtByte::Continue => Some(MidiRtByte::Continue),
+            }
+        } else {
+            self.transport.next_byte(false)
+        };
 
         // 3. Emit transport once, ahead of all channels' clock.
         //    Transport bytes are global to the MIDI port (one stream
@@ -577,6 +604,41 @@ mod tests {
             vec![0],
             "clock should fall silent immediately after request_stop"
         );
+    }
+
+    #[test]
+    fn command_start_does_not_cancel_teardown_stop() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let mut playhead = Playhead::<S048>::new(
+            vec![zero_channel(Grid::T4)],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            PPQN,
+            TransportPolicy::Internal {
+                start_emitted: true,
+            },
+            4_096,
+        );
+        let stop = playhead.stop_handle();
+        let sink = TestSink::new();
+        let input = vec![0.0_f32; 4_096]; // PCM ABI
+        let mut output: [f32; 0] = []; // PCM ABI
+
+        stop.request_stop();
+        playhead.apply_transport_start();
+        let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 4_096);
+        playhead.on_buffer(&mut io, &sink);
+
+        let transport_records: Vec<u8> = sink
+            .records()
+            .into_iter()
+            .filter_map(|r| r.bytes.first().copied())
+            .filter(|b| *b == MIDI_START || *b == MIDI_STOP)
+            .collect();
+        assert_eq!(transport_records, vec![MIDI_STOP]);
+        assert!(!playhead.is_running());
+        assert!(stop.is_stop_requested());
     }
 
     proptest! {

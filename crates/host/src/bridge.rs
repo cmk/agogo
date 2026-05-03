@@ -1471,7 +1471,7 @@ mod tests {
 
         let report = apply_control_to_playhead(&mut consumer, &mut playhead);
         assert_eq!(report.applied_commands, 1);
-        assert!(playhead.stop_handle().is_stop_requested());
+        assert!(!playhead.stop_handle().is_stop_requested());
     }
 
     #[test]
@@ -1487,7 +1487,7 @@ mod tests {
         let stop = producer.admit_ordered(ControlCommand::Stop, metadata(1, 1));
         assert_eq!(stop.status, AdmissionStatus::Accepted);
         apply_control_to_playhead(&mut consumer, &mut playhead);
-        assert!(playhead.stop_handle().is_stop_requested());
+        assert!(!playhead.stop_handle().is_stop_requested());
 
         let start = producer.admit_ordered(
             ControlCommand::Start,
