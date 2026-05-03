@@ -8,6 +8,7 @@
 //!
 //! Plan 2026-04-28-05 T7: extracted from `cli/main.rs`.
 
+use agogo::core::channel::time::validate_schedule_params;
 use agogo::core::channel::{Channel, ChannelCommon, MidiRole};
 use agogo::core::conn::fixed::Micro;
 use agogo::core::conn::sample::{S048, SampleRate};
@@ -147,6 +148,8 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
             ));
         }
     }
+    validate_schedule_params(args.sr, bpm)
+        .map_err(|e| format!("invalid scheduling parameters: {e}"))?;
     // The demo instantiates `CallbackState<S048>` only. Multi-rate
     // dispatch via a static `match args.sr { ... }` lives in
     // `agogo run`.

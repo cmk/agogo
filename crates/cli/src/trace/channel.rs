@@ -42,7 +42,9 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
     let mut rows = Vec::new();
     for b in 0..args.buffers {
         let start = u64::from(b).checked_mul(frames_u64).expect("checked above");
-        for ev in tick_stream(&common, args.sr, args.bpm, start, args.frames) {
+        for ev in tick_stream(&common, args.sr, args.bpm, start, args.frames)
+            .map_err(|e| format!("invalid scheduling parameters: {e}"))?
+        {
             rows.push(TraceRow {
                 buffer_index: b,
                 sample_index: ev.sample_index,
