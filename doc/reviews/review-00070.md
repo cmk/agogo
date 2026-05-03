@@ -16,7 +16,8 @@ The branch also aligns agogo's Rust pin with stdio-core's Rust 1.92 across the
 workspace, detached host crates, toolchain file, CI/docs workflows, and active
 repo workflow prose. The Rust 1.92 bump required mechanical clippy cleanup for
 new lints, including `is_multiple_of`, derived defaults, doc-list indentation,
-and collapsible `if` cases.
+and collapsible `if` cases. It also updates `time` to the non-advisory release
+and drops the now-stale cargo-deny ignore.
 
 Validation:
 
@@ -29,3 +30,21 @@ Validation:
 - `cargo test --workspace --quiet`
 - `cargo clippy --all-targets --quiet -- -D warnings`
 - `git diff --check`
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-03-05
+**Commits:** 5 (origin/main..plan-2026-05-03-05)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The runtime helper can publish incorrect transport state for stop commands, and the MSRV bump leaves a now-actionable security advisory suppressed. These are actionable correctness/security issues introduced by the patch.
+
+Full review comments:
+
+- [P2] Report stopped transport after stop commands — crates/host/src/runtime.rs:176-177
+  When `agogo.stop` is exercised through `run_command_step`, `apply_control_to_playhead` only stages the Stop for `Playhead::on_buffer`, but `advance_buffer` writes the snapshot without ever rendering that buffer. Because the snapshot state is derived from `is_running()` here, the report can say the stop command applied while the emitted `agogo-state` observation still says `running`, which breaks adapter tests that treat snapshots as the resulting transport truth.
+
+- [P2] Drop the stale RUSTSEC ignore after the MSRV bump — deny.toml:13-13
+  With this patch agogo's MSRV is 1.92, but the advisory ignore still suppresses RUSTSEC-2026-0009 even though the comment says the fixed `time` release only needed Rust 1.88 and should be re-evaluated once MSRV reached 1.88+. CI will keep allowing the locked vulnerable `time 0.3.45` instead of forcing the now-compatible 0.3.47 update, so the security gate remains blind to a fixable advisory.
