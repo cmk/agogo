@@ -57,3 +57,62 @@ Full review comments:
 - Fixed: `MidirSink` exposes `TIMING_CAPABILITY`, the trait impl returns that
   value, and the test asserts the backend-advertised capability rather than a
   separately constructed expected value.
+
+<!-- gh-id: 4216949426 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 22:54 UTC](https://github.com/cmk/agogo/pull/69#pullrequestreview-4216949426))
+
+## Pull request overview
+
+This PR makes MIDI output timing “truth” explicit by adding capability reporting to the core `MidiSink` abstraction and updating current sinks/backends to declare that `at_sample` is preserved as metadata but not physically honored (best-effort/immediate dispatch). It also adds a diagnostic sink to record intended vs observed drain timing outside the realtime callback path, and updates docs/tests to reflect and pin these claims.
+
+**Changes:**
+- Introduces `MidiTimingCapability` (+ related enums) and requires all `MidiSink` implementations to report timing capabilities.
+- Updates `MidirSink`, `RtProducer`, and `TestSink` to declare best-effort/immediate timing; adds `DiagnosticSink` + delay summaries and tests.
+- Updates v0.2/v0.3 notes and adds plan/review docs describing the new timing-truth contract and diagnostics.
+
+### Reviewed changes
+
+Copilot reviewed 10 out of 10 changed files in this pull request and generated 2 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/versions/version-0.3.md | Notes that clock-domain work must rely on backend timing capability reports before assuming `at_sample` is honored. |
+| doc/versions/version-0.2.md | Updates the timestamped-output spike notes to reflect capability reporting + diagnostics as the first step. |
+| doc/reviews/review-00069.md | Adds review record describing prior issues and their resolutions (capability enforced on `MidiSink`, test asserts backend-advertised capability). |
+| doc/plans/plan-2026-05-03-04.md | Adds a plan describing capability metadata, best-effort truthfulness, diagnostic sink behavior, and verification matrix. |
+| crates/host-midi/src/midir.rs | Adds `MidirSink::TIMING_CAPABILITY`, implements `MidiTimingCapabilities`, and adds a capability test. |
+| crates/host-midi/src/lib.rs | Updates crate-level docs to mention `MidiTimingCapability` reporting for midir-backed output. |
+| crates/host-midi/README.md | Updates README to mention best-effort timing capability reporting and where that logic lives. |
+| crates/host-cpal/src/cpal/control.rs | Implements `MidiTimingCapabilities` for `RtProducer` and adds tests for `at_sample` preservation + capability reporting. |
+| crates/host-cpal/src/cpal.rs | Pure formatting adjustments (line wrapping). |
+| crates/core/src/sink/midi.rs | Adds timing capability API, makes `MidiSink` require capability reporting, adds `DiagnosticSink` + summaries and tests. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3178897176 -->
+### Copilot on [`crates/host-midi/src/lib.rs:14`](https://github.com/cmk/agogo/pull/69#discussion_r3178897176) (2026-05-03 22:54 UTC)
+
+nit: The rustdoc says "sub-us scheduling"; elsewhere in the repo the unit is consistently written as "sub-µs". Consider switching to "sub-µs" (or spelling out "sub-microsecond") to avoid ambiguity and keep terminology consistent.
+
+
+<!-- gh-id: 3178897181 -->
+### Copilot on [`crates/core/src/sink/midi.rs:206`](https://github.com/cmk/agogo/pull/69#discussion_r3178897181) (2026-05-03 22:54 UTC)
+
+nit: `DiagnosticSink` is described as a diagnostic helper, but unlike `TestSink` its rustdoc doesn’t explicitly call out that it is not RT-safe (it takes a `Mutex` on every record). Consider adding an explicit "Not RT-safe" note to reduce the chance of it being used from the audio callback path by mistake.
+
+<!-- gh-id: 3178900913 -->
+#### ↳ cmk ([2026-05-03 22:57 UTC](https://github.com/cmk/agogo/pull/69#discussion_r3178900913))
+
+Fixed in the next review-round commit by restoring the repo-standard `sub-µs` spelling in the crate rustdoc.
+
+<!-- gh-id: 3178901000 -->
+#### ↳ cmk ([2026-05-03 22:57 UTC](https://github.com/cmk/agogo/pull/69#discussion_r3178901000))
+
+Fixed in the next review-round commit by adding an explicit not-RT-safe note to `DiagnosticSink`'s rustdoc and pointing audio callback users at `RtProducer`.
