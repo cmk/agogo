@@ -187,13 +187,13 @@ def mark_audited(audit: Audit) -> None:
 def invoke_codex(audit: Audit, changed: list[str], dry_run: bool = False) -> str:
     """Invoke `codex exec -` and return its stdout.
 
-    The prompt is the audit body verbatim plus a "Files changed since
-    last audit" preamble so the agent doesn't have to re-discover the
-    delta. If `dry_run` is set, prints the prompt to stdout and returns
-    empty without invoking Codex.
+    The prompt is the audit body verbatim plus a file-selection
+    preamble so the agent doesn't have to re-discover the scope. If
+    `dry_run` is set, prints the prompt to stdout and returns empty
+    without invoking Codex.
     """
     preamble = (
-        f"# Files changed since last audit ({len(changed)} files):\n"
+        f"# Files selected for audit ({len(changed)} files):\n"
         + "\n".join(f"- {p}" for p in changed[:200])
         + ("\n- ... (truncated)\n" if len(changed) > 200 else "\n")
         + "\n---\n\n"
@@ -288,10 +288,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     audit = audits[args.name]
     changed = changed_files_since_last(audit)
-    if not changed and not args.force:
-        print(f"audit.py: '{audit.name}' — no changed files since last run; skip")
-        return 0
-    if not changed and args.force:
+    if args.force:
         # Force mode: audit the full pathspec
         changed = subprocess.run(
             ["git", "ls-files", "--", *audit.paths],
@@ -299,6 +296,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             text=True,
             cwd=REPO_ROOT,
         ).stdout.splitlines()
+    elif not changed:
+        print(f"audit.py: '{audit.name}' — no changed files since last run; skip")
+        return 0
     print(f"audit.py: running '{audit.name}' on {len(changed)} changed files")
     output = invoke_codex(audit, changed, dry_run=args.dry_run)
     if args.dry_run:
