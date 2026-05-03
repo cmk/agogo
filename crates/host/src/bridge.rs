@@ -326,6 +326,12 @@ pub enum BridgeError {
     QueueFull,
     #[error("agogo control queue lock is poisoned")]
     QueuePoisoned,
+    #[error("agogo control command missed its deadline")]
+    Late,
+    #[error("agogo control command uses an unsupported time domain")]
+    UnsupportedTimeDomain,
+    #[error("agogo control command class is unsupported")]
+    UnsupportedCommandClass,
 }
 
 impl<T> From<PoisonError<T>> for BridgeError {
@@ -359,7 +365,16 @@ impl ControlProducer {
         if let Some(outcome) = self.reject_if_not_admissible(metadata) {
             return outcome;
         }
-        self.set_tempo(tempo);
+        let previous = self.shared.tempo_raw.swap(tempo.0, Ordering::AcqRel);
+        if metadata.deadline.buffer <= self.current_buffer_epoch() {
+            let _ = self.shared.tempo_raw.compare_exchange(
+                tempo.0,
+                previous,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+            return AdmissionOutcome::late(metadata);
+        }
         AdmissionOutcome::accepted(metadata)
     }
 
@@ -389,18 +404,7 @@ impl ControlProducer {
             SourceId::default(),
             self.current_buffer_epoch(),
         );
-        match self.admit_ordered(command, metadata) {
-            outcome if outcome.is_accepted() => Ok(()),
-            AdmissionOutcome {
-                reason: Some(AdmissionRejectReason::QueueFull),
-                ..
-            } => Err(BridgeError::QueueFull),
-            AdmissionOutcome {
-                reason: Some(AdmissionRejectReason::QueuePoisoned),
-                ..
-            } => Err(BridgeError::QueuePoisoned),
-            _ => Ok(()),
-        }
+        bridge_result_for_outcome(self.admit_ordered(command, metadata))
     }
 
     /// Admit one ordered command envelope without blocking.
@@ -440,6 +444,22 @@ impl ControlProducer {
             return Some(AdmissionOutcome::late(metadata));
         }
         None
+    }
+}
+
+fn bridge_result_for_outcome(outcome: AdmissionOutcome) -> Result<(), BridgeError> {
+    match outcome.reason {
+        None if outcome.is_accepted() => Ok(()),
+        Some(AdmissionRejectReason::QueueFull) => Err(BridgeError::QueueFull),
+        Some(AdmissionRejectReason::QueuePoisoned) => Err(BridgeError::QueuePoisoned),
+        Some(AdmissionRejectReason::LateDeadline) => Err(BridgeError::Late),
+        Some(AdmissionRejectReason::UnsupportedTimeDomain) => {
+            Err(BridgeError::UnsupportedTimeDomain)
+        }
+        Some(AdmissionRejectReason::UnsupportedCommandClass) => {
+            Err(BridgeError::UnsupportedCommandClass)
+        }
+        None => Err(BridgeError::UnsupportedCommandClass),
     }
 }
 
@@ -650,6 +670,26 @@ mod tests {
         assert_eq!(first.status, AdmissionStatus::Accepted);
         assert_eq!(second.status, AdmissionStatus::Accepted);
         assert_eq!(consumer.begin_buffer().tempo, Tempo::from_bpm_integer(140));
+    }
+
+    #[test]
+    fn late_tempo_admission_does_not_change_scalar() {
+        let (producer, consumer) = spsc(4, Tempo::from_bpm_integer(120));
+        consumer.begin_buffer();
+
+        let outcome = producer.admit_tempo(
+            Tempo::from_bpm_integer(140),
+            AdmissionMetadata::tempo(CommandId(1), SourceId::default(), 0),
+        );
+
+        assert_eq!(outcome.status, AdmissionStatus::Late);
+        assert_eq!(producer.tempo(), Tempo::from_bpm_integer(120));
+    }
+
+    #[test]
+    fn compatibility_push_late_outcome_is_error() {
+        let outcome = AdmissionOutcome::late(metadata(1, 0));
+        assert_eq!(bridge_result_for_outcome(outcome), Err(BridgeError::Late));
     }
 
     proptest! {
