@@ -143,3 +143,92 @@ Copilot reviewed 6 out of 6 changed files in this pull request and generated 3 c
 | crates/host/src/bridge.rs | Adds `CommandApplyReport` and `apply_control_to_playhead`; adds targeted bridge/applicator tests. |
 | crates/core/src/control/transport.rs | Adds command-transport staging FIFO and `Playhead` hooks for tempo/start/stop; updates callback transport emission logic and tests. |
 </details>
+
+<!-- gh-id: 3177867120 -->
+#### ↳ cmk ([2026-05-03 08:47 UTC](https://github.com/cmk/agogo/pull/65#discussion_r3177867120))
+
+Fixed in the review-round commit by replacing the boolean Playhead transport apply result with TransportCommandApply and recording queue-full separately from unsupported policy in CommandApplyReport. Added transport_queue_full_reports_separately to cover the fixed-capacity FIFO case.
+
+<!-- gh-id: 3177868526 -->
+#### ↳ cmk ([2026-05-03 08:48 UTC](https://github.com/cmk/agogo/pull/65#discussion_r3177868526))
+
+Fixed in the review-round commit by checking the teardown stop flag inside apply_transport_start/apply_transport_stop and returning TransportCommandApply::TeardownRequested instead of staging a command that on_buffer would drop. Added teardown_requested_reports_without_staging_command for the host-side report behavior.
+
+<!-- gh-id: 3177868556 -->
+#### ↳ cmk ([2026-05-03 08:48 UTC](https://github.com/cmk/agogo/pull/65#discussion_r3177868556))
+
+Fixed in the review-round commit by updating the TransportState::running documentation to describe it as the local clock gate rather than a teardown-only latch, including the stronger teardown behavior that rejects further command staging.
+
+<!-- gh-id: 3177872019 -->
+### Copilot on [`crates/core/src/control/transport.rs:366`](https://github.com/cmk/agogo/pull/65#discussion_r3177872019) (2026-05-03 08:52 UTC)
+
+The docstring implies the next `on_buffer` will emit Start/resume clocking, but this method can return `UnsupportedPolicy`, `QueueFull`, or `TeardownRequested` (and even after `Applied`, a teardown stop could be requested before `on_buffer`, causing the staged command to be cleared). Please qualify the guarantee to the `Applied` case (and/or document the teardown race) so callers don’t treat any successful call as “will definitely start next buffer.”
+
+
+<!-- gh-id: 3177872026 -->
+### Copilot on [`crates/core/src/control/transport.rs:388`](https://github.com/cmk/agogo/pull/65#discussion_r3177872026) (2026-05-03 08:52 UTC)
+
+Similar to `apply_transport_start`: this docstring states the next `on_buffer` call emits Stop and suppresses clock output, but the method can return non-`Applied` results and even an `Applied` Stop may not emit a byte if teardown is requested before `on_buffer` runs. Clarifying the exact semantics (what is guaranteed for each `TransportCommandApply` variant) would make the API contract unambiguous.
+
+<!-- gh-id: 4216101887 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 08:52 UTC](https://github.com/cmk/agogo/pull/65#pullrequestreview-4216101887))
+
+## Pull request overview
+
+Copilot reviewed 7 out of 7 changed files in this pull request and generated 2 comments.
+
+
+
+
+
+<!-- gh-id: 4216104133 -->
+### chatgpt-codex-connector[bot] — COMMENTED ([2026-05-03 08:55 UTC](https://github.com/cmk/agogo/pull/65#pullrequestreview-4216104133))
+
+
+### 💡 Codex Review
+
+Here are some automated review suggestions for this pull request.
+
+**Reviewed commit:** `a12de3c7f9`
+
+
+<details> <summary>ℹ️ About Codex in GitHub</summary>
+<br/>
+
+[Your team has set up Codex to review pull requests in this repo](https://chatgpt.com/codex/cloud/settings/general). Reviews are triggered when you
+- Open a pull request for review
+- Mark a draft as ready
+- Comment "@codex review".
+
+If Codex has suggestions, it will comment; otherwise it will react with 👍.
+
+
+
+
+Codex can also answer questions or update the PR. Try commenting "@codex address that feedback".
+
+</details>
+
+<!-- gh-id: 3177874949 -->
+### chatgpt-codex-connector[bot] on [`crates/host/src/bridge.rs:987`](https://github.com/cmk/agogo/pull/65#discussion_r3177874949) (2026-05-03 08:55 UTC)
+
+**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Defer draining commands until their deadline buffer**
+
+`apply_control_to_playhead` now drains and applies every queued ordered command each buffer, but `drain_due_command` only marks commands as missed when `deadline < current_epoch`; commands with `deadline > current_epoch` are still returned as `Command` and get applied immediately. This means a caller that sets `deadline_buffer` several buffers ahead (for example, `agogo.start` with `deadline_buffer: 10`) will execute on the next callback instead of at/before its intended buffer boundary, violating the deadline contract for scheduled commands.
+
+Useful? React with 👍 / 👎.
+
+<!-- gh-id: 3177878531 -->
+#### ↳ cmk ([2026-05-03 08:58 UTC](https://github.com/cmk/agogo/pull/65#discussion_r3177878531))
+
+Fixed by qualifying apply_transport_start to the TransportCommandApply::Applied case and documenting that teardown requested before on_buffer wins and clears staged commands. Non-Applied results now explicitly mean no command was staged.
+
+<!-- gh-id: 3177878561 -->
+#### ↳ cmk ([2026-05-03 08:58 UTC](https://github.com/cmk/agogo/pull/65#discussion_r3177878561))
+
+Fixed by retaining a future-deadline FIFO head inside ControlConsumer instead of returning it as due. drain_due_command now returns None for commands whose RT-buffer deadline is still ahead, then reports the command once the buffer epoch reaches the declared deadline or missed-deadline if it is observed late. Added future_deadline_waits_until_declared_buffer.
+
+<!-- gh-id: 3177878569 -->
+#### ↳ cmk ([2026-05-03 08:58 UTC](https://github.com/cmk/agogo/pull/65#discussion_r3177878569))
+
+Fixed by qualifying apply_transport_stop to the TransportCommandApply::Applied case, documenting that other variants stage nothing, and calling out that teardown before rendering clears staged commands.
