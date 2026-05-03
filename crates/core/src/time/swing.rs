@@ -76,8 +76,9 @@ mod tests {
     use crate::time::arb::arb_swing;
     use crate::time::arb::arb_tbase;
     use crate::time::arb::arb_tick;
-    use crate::time::conn::quantize_at;
+    use crate::time::conn::TICKTIME;
     use crate::time::tbase::BAR;
+    use crate::time::tick::Time;
     use proptest::prelude::*;
 
     fn cfg(resolution: TBase, amount: i8) -> SwingConfig {
@@ -432,14 +433,14 @@ mod tests {
                 t1, t2, e1, e2, r, amount);
         }
 
-        /// Plan property `is_swung_step_factors_through_quantize_at_resolution`:
-        /// detection depends only on the resolution-step `Time`
-        /// representation. Two ticks that floor to the same step have
-        /// the same swing decision *when both are on the resolution
-        /// grid* (off-grid ticks aren't swung anyway, so this is the
-        /// non-trivial direction).
+        /// Plan property `is_swung_step_factors_through_resolution_time`:
+        /// detection depends only on the resolution-step `Time`. Two
+        /// ticks in the same resolution bin have the same swing
+        /// decision *when both are on the resolution grid* (off-grid
+        /// ticks aren't swung anyway, so this is the non-trivial
+        /// direction).
         #[test]
-        fn is_swung_step_factors_through_quantize_at_resolution(
+        fn is_swung_step_factors_through_resolution_time(
             r in arb_tbase(),
             k1 in 0u64..=10_000,
             k2 in 0u64..=10_000,
@@ -448,8 +449,9 @@ mod tests {
             let t1 = Tick(k1.saturating_mul(u64::from(r.tick_count())));
             let t2 = Tick(k2.saturating_mul(u64::from(r.tick_count())));
             let c = cfg(r, 0);
-            let q = quantize_at(g);
-            if q.floor(t1) == q.floor(t2) {
+            let resolution = Time::At { beats: 1, base: g };
+            let step = TICKTIME.inner(resolution).0;
+            if t1.0 / step == t2.0 / step {
                 prop_assert_eq!(is_swung_step(t1, &c), is_swung_step(t2, &c));
             }
         }
