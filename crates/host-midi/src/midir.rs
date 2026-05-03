@@ -20,6 +20,8 @@ pub struct MidirSink {
 }
 
 impl MidirSink {
+    pub const TIMING_CAPABILITY: MidiTimingCapability = MidiTimingCapability::best_effort("midir");
+
     /// Open a midir output connection by port name. Names are those
     /// returned by [`Self::list_output_ports`]. Matching is
     /// case-sensitive.
@@ -98,7 +100,7 @@ impl MidiSink for MidirSink {
 
 impl MidiTimingCapabilities for MidirSink {
     fn timing_capability(&self) -> MidiTimingCapability {
-        MidiTimingCapability::best_effort("midir")
+        Self::TIMING_CAPABILITY
     }
 }
 
@@ -133,7 +135,7 @@ mod tests {
 
     #[test]
     fn midir_capability_is_best_effort() {
-        let capability = MidiTimingCapability::best_effort("midir");
+        let capability = MidirSink::TIMING_CAPABILITY;
         assert_eq!(capability.backend_name, "midir");
         assert_eq!(capability.scheduling, MidiSchedulingClass::Immediate);
         assert_eq!(
