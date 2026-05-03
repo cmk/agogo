@@ -427,8 +427,9 @@ when a future plan grep brings up a stale promise.
   feature dependencies; the no-default-features compile check passes.
 - **Per-type `arb.rs` colocation** — Plan 28-08; every type module
   under `crates/core/src/time/` now owns its `<module>/arb.rs`.
-- **`SampleTickConn` shim** — wired in Plan 03 (then renamed and
-  ultimately deleted in Plan 28-04 once `compose!` removed the need).
+- **Runtime sample/tick shim** — wired in Plan 03 and removed in Plan
+  2026-05-03-03 once fixed `PPQN` plus rate-specific sample helpers
+  replaced the conn-shaped runtime bridge.
 - **Transport FSM minimal `{Stopped, Playing}` shim** — Plan 09;
   `crates/host-link/src/transport.rs:33-46`. NEG/POS extension is the
   open follow-on listed above.

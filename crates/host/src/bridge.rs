@@ -99,6 +99,7 @@ impl SourceId {
 
 impl Default for SourceId {
     fn default() -> Self {
+        // boundary-panic-ok: fixed literal, not user input.
         Self::new("agogo.driver").expect("default source id fits fixed storage")
     }
 }
@@ -122,6 +123,7 @@ impl CoalesceKey {
     }
 
     pub fn tempo() -> Self {
+        // boundary-panic-ok: fixed literal, not user input.
         Self::new("tempo").expect("tempo coalesce key fits fixed storage")
     }
 
@@ -147,6 +149,7 @@ fn fixed_string<const N: usize>(value: &str) -> Option<([u8; N], u8)> {
 
 fn fixed_string_as_str(bytes: &[u8], len: u8) -> &str {
     std::str::from_utf8(&bytes[..usize::from(len)])
+        // boundary-panic-ok: bytes only enter through `fixed_string(&str)`.
         .expect("fixed bridge string is built from utf-8 input")
 }
 
@@ -628,6 +631,7 @@ impl ControlProducer {
             },
         );
         generation
+            // boundary-panic-ok: fetch_update closure always returns Some.
             .expect("tempo generation update closure always returns Some")
             .max(1)
     }
@@ -806,6 +810,7 @@ impl ControlConsumer {
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 Some(current.saturating_add(1))
             })
+            // boundary-panic-ok: fetch_update closure always returns Some.
             .expect("buffer epoch update closure always returns Some")
             .saturating_add(1);
         let tempo = self
@@ -1040,6 +1045,7 @@ impl CommandApplyReport {
 fn tempo_slot_transition(state: TempoSlotState, event: TempoSlotEvent) -> TempoSlotState {
     let mut fsm = TempoSlotFsm::from_state(state);
     fsm.consume(&event)
+        // boundary-panic-ok: transition table is static rust-fsm state.
         .expect("tempo slot transition is declared in rust-fsm");
     fsm.state().clone()
 }
@@ -1081,7 +1087,6 @@ mod tests {
     use agogo::core::time::grid::Grid;
     use agogo::core::time::swing::SwingConfig;
     use agogo::core::time::tbase::TBase;
-    use agogo::core::time::tick::PPQN;
     use proptest::prelude::*;
     use std::collections::VecDeque;
 
@@ -1139,7 +1144,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             transport,
             24_000,
         )
@@ -1484,7 +1488,7 @@ mod tests {
 
         assert!(report.tempo_updated);
         assert_eq!(report.params.tempo, next);
-        assert_eq!(playhead.stc.bpm(), next);
+        assert_eq!(playhead.bpm, next);
         match playhead.phase_source {
             PhaseSource::Internal { bpm } => assert_eq!(bpm, next),
             _ => panic!("test playhead uses internal source"),

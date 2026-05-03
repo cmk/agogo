@@ -1,12 +1,12 @@
 //! Per-audio-buffer scheduler.
 //!
-//! Given a `Channel` and a `SampleTickConn`, [`tick_stream`] returns
-//! the `ScheduledEvent`s whose `sample_index` falls inside the half-
-//! open window `[buffer_start_sample, buffer_start_sample + frames)`.
+//! Given a channel, sample rate, and tempo, [`tick_stream`] returns the
+//! `ScheduledEvent`s whose `sample_index` falls inside the half-open
+//! window `[buffer_start_sample, buffer_start_sample + frames)`.
 //!
 //! The plan's `tick_stream` signature names a `&mut PhaseSource` as
 //! its first argument. v0.1 does not read phase here — the tick range
-//! is derived algebraically from `SampleTickConn`, and the PLL is
+//! is derived algebraically from the fixed-PPQN tick/sample mapping, and the PLL is
 //! driven by the audio callback outside this function (Plan 05). The
 //! parameter is omitted rather than kept unused; documented in the
 //! sprint's Review section.
@@ -14,7 +14,8 @@
 use crate::channel::role::ChannelCommon;
 use crate::channel::time::{MAX_DELAY, ScheduledEvent, micro_to_samples};
 use crate::conn::fixed::Micro;
-use crate::time::conn::SampleTickConn;
+use crate::conn::tempo::Tempo;
+use crate::time::conn::{sample_to_tick_ceil, sample_to_tick_floor, tick_to_whole_samples};
 use crate::time::swing;
 use crate::time::tick::Tick;
 use connections::fixed::u64::{I064U064, I128U064};
@@ -49,12 +50,13 @@ pub fn max_events_for_buffer(frames: usize) -> usize {
 /// reuse a pre-sized buffer and stay allocation-free.
 pub fn tick_stream(
     common: &ChannelCommon,
-    stc: &SampleTickConn,
+    sr: u32,
+    bpm: Tempo,
     buffer_start_sample: u64,
     frames: usize,
 ) -> Vec<ScheduledEvent> {
     let mut buf = Vec::new();
-    tick_stream_into(&mut buf, common, stc, buffer_start_sample, frames);
+    tick_stream_into(&mut buf, common, sr, bpm, buffer_start_sample, frames);
     buf
 }
 
@@ -70,7 +72,8 @@ pub fn tick_stream(
 pub fn tick_stream_into(
     buf: &mut Vec<ScheduledEvent>,
     common: &ChannelCommon,
-    stc: &SampleTickConn,
+    sr: u32,
+    bpm: Tempo,
     buffer_start_sample: u64,
     frames: usize,
 ) {
@@ -79,16 +82,20 @@ pub fn tick_stream_into(
     }
     let buffer_end = buffer_start_sample.saturating_add(frames as u64);
 
-    // Inverse of the transform's sample offset: event.sample_index =
-    // stc.inner(swung_tick) + delay_samples + offset_samples. For an
-    // event to land in [start, end), the swung_tick's natural sample
-    // must land in [start - delta, end - delta). Same
+    // Inverse of the transform's sample offset: event.sample_index is
+    // tick_to_whole_samples(swung_tick) + delay_samples + offset_samples.
+    // For an event to land in [start, end), the swung_tick's natural
+    // sample must land in [start - delta, end - delta). Same
     // `FD12FD06 ∘ pico_to_samples` composition as `transform`,
     // routed through `micro_to_samples` so the two stages are
     // impossible to drift.
     let delay_clamped = Micro(common.delay.0.clamp(0, MAX_DELAY.0));
-    let delay_samples: i64 = micro_to_samples(delay_clamped, stc.sr());
-    let offset_samples: i64 = micro_to_samples(common.offset, stc.sr());
+    let Some(delay_samples) = micro_to_samples(delay_clamped, sr) else {
+        return;
+    };
+    let Some(offset_samples) = micro_to_samples(common.offset, sr) else {
+        return;
+    };
     // Promote to i128 so `buffer_start_sample - delta` can't wrap —
     // `buffer_start_sample as i64` would lose the high bit for streams
     // past ~6×10¹² seconds and produce spurious bounds.
@@ -108,8 +115,14 @@ pub fn tick_stream_into(
     // signed swing window can't overflow at either edge of the u64
     // range.
     let swing_d: i128 = -i128::from(common.shuffle.amount);
-    let lo_from_sample = i128::from(stc.floor(swung_lo).0);
-    let hi_from_sample = i128::from(stc.ceil(swung_hi).0);
+    let Some(lo_from_sample) = sample_to_tick_floor(swung_lo, bpm, sr).map(|t| i128::from(t.0))
+    else {
+        return;
+    };
+    let Some(hi_from_sample) = sample_to_tick_ceil(swung_hi, bpm, sr).map(|t| i128::from(t.0))
+    else {
+        return;
+    };
     let lo_tick = I128U064.ceil(lo_from_sample.saturating_add(swing_d.min(0)));
     let hi_tick_i = hi_from_sample.saturating_add(swing_d.max(0));
     let hi_tick = I128U064.ceil(hi_tick_i);
@@ -133,7 +146,9 @@ pub fn tick_stream_into(
             continue;
         }
         let swung = swing::effective_tick(&common.shuffle, t);
-        let base = stc.inner(swung);
+        let Some(base) = tick_to_whole_samples(swung, bpm, sr) else {
+            return;
+        };
         let with_delay = base.saturating_add(delay_fwd);
         let final_sample = if offset_samples >= 0 {
             with_delay.saturating_add(I064U064.ceil(offset_samples))
@@ -158,13 +173,8 @@ mod tests {
     use crate::time::tbase::TBase;
     use proptest::prelude::*;
 
-    fn stc_120_48k() -> SampleTickConn {
-        SampleTickConn::new(
-            48_000,
-            crate::conn::tempo::Tempo::from_bpm_integer(120),
-            960,
-        )
-    }
+    const SR_48K: u32 = 48_000;
+    const BPM_120: Tempo = Tempo::from_bpm_integer(120);
 
     /// Bare `ChannelCommon` for scheduler tests — `tick_stream`
     /// operates on this directly post-Plan-21 (audit P3).
@@ -190,7 +200,7 @@ mod tests {
         // exactly containing 24 000. At 960 PPQN the corresponding
         // tick is 960. The scheduler should emit one event.
         let common = zero_common(Grid::T4);
-        let ev = tick_stream(&common, &stc_120_48k(), 20_480, 4_096);
+        let ev = tick_stream(&common, SR_48K, BPM_120, 20_480, 4_096);
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].sample_index, 24_000);
         assert_eq!(ev[0].tick.0, 960);
@@ -199,7 +209,7 @@ mod tests {
     #[test]
     fn empty_buffer_returns_empty() {
         let common = zero_common(Grid::T4);
-        assert!(tick_stream(&common, &stc_120_48k(), 0, 0).is_empty());
+        assert!(tick_stream(&common, SR_48K, BPM_120, 0, 0).is_empty());
     }
 
     #[test]
@@ -207,7 +217,7 @@ mod tests {
         // Between two quarter notes: buffer [1000, 5000) contains no
         // multiple of 24 000.
         let common = zero_common(Grid::T4);
-        assert!(tick_stream(&common, &stc_120_48k(), 1_000, 4_000).is_empty());
+        assert!(tick_stream(&common, SR_48K, BPM_120, 1_000, 4_000).is_empty());
     }
 
     #[test]
@@ -216,7 +226,7 @@ mod tests {
         // 24 000 samples wide at sample 0 covers 4 events at
         // 0, 6 000, 12 000, 18 000.
         let common = zero_common(Grid::T16);
-        let ev = tick_stream(&common, &stc_120_48k(), 0, 24_000);
+        let ev = tick_stream(&common, SR_48K, BPM_120, 0, 24_000);
         let samples: Vec<u64> = ev.iter().map(|e| e.sample_index).collect();
         assert_eq!(samples, vec![0, 6_000, 12_000, 18_000]);
     }
@@ -262,7 +272,7 @@ mod tests {
                 bar_multiplier: None,
             };
             let end = buffer_start + frames as u64;
-            let ev = tick_stream(&common, &stc_120_48k(), buffer_start, frames);
+            let ev = tick_stream(&common, SR_48K, BPM_120, buffer_start, frames);
             for e in &ev {
                 prop_assert!(
                     e.sample_index >= buffer_start,
@@ -305,7 +315,6 @@ mod tests {
                 offset: Micro(offset_us),
                 bar_multiplier: None,
             };
-            let stc = stc_120_48k();
             let buffer_end = buffer_start + frames as u64;
 
             // Reference: `transform` over a generous tick range,
@@ -315,14 +324,15 @@ mod tests {
             let reference: Vec<ScheduledEvent> = transform(
                 (0u64..=65_536).map(Tick),
                 &common,
-                &stc,
+                SR_48K,
+                BPM_120,
             )
             .into_iter()
             .filter(|e| e.sample_index >= buffer_start && e.sample_index < buffer_end)
             .collect();
 
             let mut pushed = Vec::new();
-            tick_stream_into(&mut pushed, &common, &stc, buffer_start, frames);
+            tick_stream_into(&mut pushed, &common, SR_48K, BPM_120, buffer_start, frames);
             prop_assert_eq!(pushed, reference);
         }
 
@@ -345,7 +355,6 @@ mod tests {
                 offset: Micro(offset_us),
                 bar_multiplier: None,
             };
-            let stc = stc_120_48k();
             // Upper bound: every master tick in the window could
             // produce an event. `frames` is the sample count; at PPQN
             // 960 / 48 kHz / 120 BPM the densest divider (Grid::T512P
@@ -354,7 +363,7 @@ mod tests {
             let cap = frames * 4 + 32;
             let mut buf = Vec::with_capacity(cap);
             let cap_before = buf.capacity();
-            tick_stream_into(&mut buf, &common, &stc, buffer_start, frames);
+            tick_stream_into(&mut buf, &common, SR_48K, BPM_120, buffer_start, frames);
             prop_assert_eq!(
                 buf.capacity(), cap_before,
                 "tick_stream_into grew buf capacity — pre-alloc too small?"
@@ -380,14 +389,13 @@ mod tests {
                 offset: Micro(offset_us),
                 bar_multiplier: None,
             };
-            let stc = stc_120_48k();
             let total = buf_size * n_buffers;
 
-            let one_big = tick_stream(&common, &stc, 0, total);
+            let one_big = tick_stream(&common, SR_48K, BPM_120, 0, total);
             let mut pieces = Vec::new();
             for b in 0..n_buffers {
                 let start = (b * buf_size) as u64;
-                pieces.extend(tick_stream(&common, &stc, start, buf_size));
+                pieces.extend(tick_stream(&common, SR_48K, BPM_120, start, buf_size));
             }
             prop_assert_eq!(one_big, pieces);
         }

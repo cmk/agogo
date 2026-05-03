@@ -428,14 +428,9 @@ mod tests {
     use crate::conn::fixed::Micro;
     use crate::conn::tempo::Tempo;
     use crate::control::event::tick_stream;
-    use crate::time::conn::SampleTickConn;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
-
-    fn stc_120_48k() -> SampleTickConn {
-        SampleTickConn::new(48_000, Tempo::from_bpm_integer(120), 960)
-    }
 
     fn midi_common(divider: Grid) -> ChannelCommon {
         ChannelCommon {
@@ -522,8 +517,13 @@ mod tests {
         ) {
             let common = midi_common(Grid::T16);
             let role = MidiRole::Clock;
-            let stc = stc_120_48k();
-            let evs = tick_stream(&common, &stc, buffer_start, frames);
+            let evs = tick_stream(
+                &common,
+                48_000,
+                Tempo::from_bpm_integer(120),
+                buffer_start,
+                frames,
+            );
             let sink = TestSink::new();
             render_midi_channel(&common, &role, &evs, None, buffer_start, None, &sink);
             let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();

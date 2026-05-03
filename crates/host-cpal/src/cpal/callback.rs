@@ -76,7 +76,6 @@ mod tests {
     use agogo::core::time::grid::Grid;
     use agogo::core::time::swing::SwingConfig;
     use agogo::core::time::tbase::TBase;
-    use agogo::core::time::tick::PPQN;
     use std::collections::VecDeque;
 
     fn build_state(
@@ -103,7 +102,6 @@ mod tests {
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
-            PPQN,
             // No transport bytes — preserves the demo's clock-only behaviour.
             TransportPolicy::Scripted {
                 schedule: VecDeque::new(),

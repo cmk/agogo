@@ -22,13 +22,9 @@
 //!   helpers.
 //! - Linear and Hermite-smoothstep envelopes.
 //!
-//! No I/O, no audio. `Tick ↔ Samples` is
-//! [`crate::time::conn::SampleTickConn`] — a Conn-shaped struct that
-//! captures runtime `(sr, bpm, ppqn)`. Plan 2026-04-29-01 T3 merged
-//! it in from the deleted `sync/sample_tick.rs`; the "no tempo
-//! coupling" prose convention was relaxed when `Tempo` itself moved
-//! to `conn::tempo` and the layering rule began enforcing the
-//! partial order more strictly.
+//! No I/O, no audio. Tick-to-sample scheduling uses fixed `PPQN`,
+//! runtime `Tempo`, and rate-specific helpers in [`crate::time::conn`]
+//! that dispatch through the static sample-rate connection types.
 
 pub mod conn;
 pub mod envelope;

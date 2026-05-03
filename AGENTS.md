@@ -329,6 +329,22 @@ code based on it.
   rule. Temporary migration allowlists are allowed only with a plan
   Review entry that names the remaining design problem.
 
+- **User-reachable invalid input fails at the boundary, not in bridge
+  or scheduler panics.** CLI parsers, host-command parsers, config
+  loaders, and FFI adapters return `Result` / `Option` with precise
+  errors for invalid user input. Once a value enters core scheduling,
+  rendering, or bridge code, it should either be type-validated or
+  already boundary-checked. Do not use `assert!`, `expect`, `unwrap`,
+  `panic!`, or `unreachable!` in bridge/scheduler modules to reject
+  values that can originate from CLI args, host commands, config
+  files, devices, or network peers.
+
+  `scripts/check-boundary-panics.sh` enforces the narrow production
+  scope where this mistake is most damaging. A true internal invariant
+  may be annotated with `// boundary-panic-ok: <reason>`, but the
+  reason must state why the value is not user input and why returning
+  an error would be misleading.
+
 - **Cross-conversions compose existing `Conn`s — they are not
   hardcoded.** If `A → C` is needed and `Conn<A, B>` + `Conn<B, C>`
   already exist, compose the two at the call site. A small helper

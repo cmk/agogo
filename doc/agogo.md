@@ -189,9 +189,9 @@ Two ops stay **outside** the grid lattice, at the Sample layer: **Shift (±300 m
 
 ## 7. On `Conn` and the fn-pointer constraint
 
-The `Conn<A, B>` type in `connections/src/conn.rs` uses bare `fn` pointers, which cannot close over runtime state. The natural shape `fn conn_sample_tick(sr, bpm) -> Conn<Sample, Tick>` is therefore not expressible today — a `Conn` value cannot depend on runtime `(sr, bpm)`.
+The `Conn<A, B>` type in `connections/src/conn.rs` uses bare `fn` pointers, which cannot close over runtime state. The natural shape `fn conn_sample_tick(bpm) -> Conn<Sample, Tick>` is therefore not expressible today — a `Conn` value cannot depend on runtime tempo.
 
-Pragmatic resolution: introduce a parallel `SampleTickConn { sr, bpm, ppqn }` struct with `floor/ceil/inner` methods mirroring `Conn`'s shape and laws. Tick↔Time connections (tempo-independent) use genuine `Conn` from the connections crate. If connections later ships a closure-capturing variant (`ConnBox` or similar), agogo migrates — the laws and test fixtures port unchanged.
+Pragmatic resolution: keep the static pieces static. `PPQN` is fixed at the `Tick` type, each supported sample rate has a rate-typed sample connection, and the musical scheduler computes `Tick + Tempo -> Sxxx` directly before using the static `SxxxI064` whole-sample connection. Decimal `FD06` / `FD12` conversions stay at SI-duration boundaries such as delay, offset, jitter, and FFI seams.
 
 ## 8. Libraries
 

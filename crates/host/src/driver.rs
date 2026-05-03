@@ -163,7 +163,7 @@ impl AgogoDriver {
             Tool::TempoSet => args
                 .get("prior_bpm")
                 .and_then(Value::as_u64)
-                .filter(|bpm| *bpm <= u64::from(Tempo::MAX_BPM_INTEGER))
+                .filter(|bpm| *bpm != 0 && *bpm <= u64::from(Tempo::MAX_BPM_INTEGER))
                 .map(|bpm| (Tool::TempoSet.name().to_owned(), json!({ "bpm": bpm }))),
             Tool::Start => Some((Tool::Stop.name().to_owned(), json!({}))),
             Tool::Stop => Some((Tool::Start.name().to_owned(), json!({}))),
@@ -256,10 +256,9 @@ impl AgogoDriver {
     }
 
     fn reserve_generated_ids_through(&self, command_id: CommandId) {
-        let next = command_id
-            .get()
-            .checked_add(1)
-            .expect("caller rejects u64::MAX command id");
+        let Some(next) = command_id.get().checked_add(1) else {
+            return;
+        };
         let _ =
             self.next_command_id
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
@@ -279,6 +278,7 @@ fn admission_response(outcome: AdmissionOutcome) -> Value {
     });
     let object = value
         .as_object_mut()
+        // boundary-panic-ok: json! literal above is an object.
         .expect("admission response is an object");
     if let Some(key) = outcome.metadata.coalesce_key {
         object.insert("coalesce_key".to_owned(), json!(key.as_str()));
@@ -291,6 +291,9 @@ fn admission_response(outcome: AdmissionOutcome) -> Value {
 
 fn parse_integer_bpm(args: &Value) -> Result<Tempo, String> {
     let bpm = parse_u32_field(args, "bpm")?;
+    if bpm == 0 {
+        return Err("field `bpm` must be >= 1".to_owned());
+    }
     if bpm > Tempo::MAX_BPM_INTEGER {
         return Err(format!("field `bpm` must be <= {}", Tempo::MAX_BPM_INTEGER));
     }
@@ -410,6 +413,18 @@ mod tests {
             err,
             format!("field `bpm` must be <= {}", Tempo::MAX_BPM_INTEGER)
         );
+    }
+
+    #[test]
+    fn tempo_set_rejects_zero_bpm() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        driver.on_mount().expect("mount");
+
+        let err = driver
+            .handle_call(Tool::TempoSet.name(), json!({ "bpm": 0 }))
+            .unwrap_err();
+
+        assert_eq!(err, "field `bpm` must be >= 1");
     }
 
     #[test]
@@ -694,6 +709,18 @@ mod tests {
             driver.inverse_op(
                 Tool::TempoSet.name(),
                 &json!({ "bpm": 140, "prior_bpm": u64::from(Tempo::MAX_BPM_INTEGER) + 1 })
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn inverse_op_rejects_zero_prior_tempo() {
+        let (driver, _consumer) = AgogoDriver::new(AgogoDriverConfig::default());
+        assert_eq!(
+            driver.inverse_op(
+                Tool::TempoSet.name(),
+                &json!({ "bpm": 140, "prior_bpm": 0 })
             ),
             None
         );
