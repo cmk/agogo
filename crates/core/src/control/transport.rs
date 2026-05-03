@@ -33,6 +33,8 @@ use crate::sink::audio::{AudioIo, render_audio_click_block};
 use crate::sink::midi::{MidiRtByte, MidiSink, render_midi_channel};
 use crate::time::conn::SampleTickConn;
 
+const COMMAND_TRANSPORT_CAPACITY: usize = 128;
+
 /// N-channel runtime state. Built on the control thread, moved into
 /// the audio callback closure, never mutated from the control thread
 /// thereafter except via the [`PlayheadStopHandle`].
@@ -85,10 +87,55 @@ pub struct Playhead<R: SampleTime> {
     /// flips this; the next [`Playhead::on_buffer`] reads it and
     /// emits [`MidiRtByte::Stop`].
     stop_flag: Arc<AtomicBool>,
-    /// Command-bridge transport byte staged by the audio thread at
+    /// Command-bridge transport bytes staged by the audio thread at
     /// the buffer boundary. Separate from `stop_flag`, which is the
     /// teardown latch.
-    command_transport: Option<MidiRtByte>,
+    command_transport: CommandTransportQueue,
+}
+
+struct CommandTransportQueue {
+    bytes: [MidiRtByte; COMMAND_TRANSPORT_CAPACITY],
+    head: usize,
+    len: usize,
+}
+
+impl CommandTransportQueue {
+    const fn new() -> Self {
+        Self {
+            bytes: [MidiRtByte::Start; COMMAND_TRANSPORT_CAPACITY],
+            head: 0,
+            len: 0,
+        }
+    }
+
+    fn push_back(&mut self, byte: MidiRtByte) -> bool {
+        if self.len == self.bytes.len() {
+            return false;
+        }
+        let tail = (self.head + self.len) % self.bytes.len();
+        self.bytes[tail] = byte;
+        self.len += 1;
+        true
+    }
+
+    fn pop_front(&mut self) -> Option<MidiRtByte> {
+        if self.len == 0 {
+            return None;
+        }
+        let byte = self.bytes[self.head];
+        self.head = (self.head + 1) % self.bytes.len();
+        self.len -= 1;
+        Some(byte)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn clear(&mut self) {
+        self.head = 0;
+        self.len = 0;
+    }
 }
 
 /// Caller's transport policy:
@@ -267,7 +314,7 @@ impl<R: SampleTime> Playhead<R> {
             click_counters: vec![0; n],
             audio_click_counters: vec![0; n],
             stop_flag: Arc::new(AtomicBool::new(false)),
-            command_transport: None,
+            command_transport: CommandTransportQueue::new(),
         }
     }
 
@@ -309,16 +356,16 @@ impl<R: SampleTime> Playhead<R> {
     /// Apply a command-driven transport start. The next
     /// [`Self::on_buffer`] call emits the start byte for internal
     /// transport and resumes clock output.
-    pub fn apply_transport_start(&mut self) {
-        self.transport.running = true;
-        self.command_transport = Some(MidiRtByte::Start);
+    pub fn apply_transport_start(&mut self) -> bool {
+        self.command_transport.push_back(MidiRtByte::Start)
     }
 
     /// Apply a command-driven transport stop. The next
-    /// [`Self::on_buffer`] call takes the existing stop path, emits
-    /// Stop once, and suppresses subsequent clock output.
-    pub fn apply_transport_stop(&mut self) {
-        self.command_transport = Some(MidiRtByte::Stop);
+    /// [`Self::on_buffer`] call emits Stop and suppresses subsequent
+    /// clock output unless a later queued command starts transport
+    /// again in FIFO order.
+    pub fn apply_transport_stop(&mut self) -> bool {
+        self.command_transport.push_back(MidiRtByte::Stop)
     }
 
     /// Buffer-driven dispatch. RT-safe: no allocations, no locks
@@ -338,41 +385,42 @@ impl<R: SampleTime> Playhead<R> {
 
         // 2. Compute the per-buffer transport byte.
         let stop_pending = self.stop_flag.load(Ordering::Acquire);
-        let transport = if stop_pending {
-            self.command_transport = None;
-            self.transport.next_byte(true)
-        } else if let Some(command_transport) = self.command_transport.take() {
-            match command_transport {
-                MidiRtByte::Start => {
-                    if let TransportPolicy::Internal { start_emitted } = &mut self.transport.policy
-                    {
-                        *start_emitted = true;
-                    }
-                    self.transport.running = true;
-                    Some(MidiRtByte::Start)
-                }
-                MidiRtByte::Stop => {
-                    if self.transport.running {
-                        self.transport.running = false;
-                        Some(MidiRtByte::Stop)
-                    } else {
-                        None
-                    }
-                }
-                MidiRtByte::Continue => Some(MidiRtByte::Continue),
+        if stop_pending {
+            self.command_transport.clear();
+            if let Some(t) = self.transport.next_byte(true) {
+                sink.send_at(&[t.status_byte()], io.buffer_start_sample);
             }
-        } else {
-            self.transport.next_byte(false)
-        };
-
-        // 3. Emit transport once, ahead of all channels' clock.
-        //    Transport bytes are global to the MIDI port (one stream
-        //    per port shared by all channels in v0.1).
-        if let Some(t) = transport {
+        } else if !self.command_transport.is_empty() {
+            while let Some(command_transport) = self.command_transport.pop_front() {
+                let transport = match command_transport {
+                    MidiRtByte::Start => {
+                        if let TransportPolicy::Internal { start_emitted } =
+                            &mut self.transport.policy
+                        {
+                            *start_emitted = true;
+                        }
+                        self.transport.running = true;
+                        Some(MidiRtByte::Start)
+                    }
+                    MidiRtByte::Stop => {
+                        if self.transport.running {
+                            self.transport.running = false;
+                            Some(MidiRtByte::Stop)
+                        } else {
+                            None
+                        }
+                    }
+                    MidiRtByte::Continue => Some(MidiRtByte::Continue),
+                };
+                if let Some(t) = transport {
+                    sink.send_at(&[t.status_byte()], io.buffer_start_sample);
+                }
+            }
+        } else if let Some(t) = self.transport.next_byte(false) {
             sink.send_at(&[t.status_byte()], io.buffer_start_sample);
         }
 
-        // 4. If the host has requested teardown, skip clock for this
+        // 3. If the host has requested teardown, skip clock for this
         //    buffer and all future buffers. The Stop byte (if any)
         //    has already been emitted above; the stream now stays
         //    silent until the cpal stream is dropped. See

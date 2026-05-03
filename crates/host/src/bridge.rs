@@ -986,12 +986,18 @@ pub fn apply_control_to_playhead<R: SampleTime>(
             }
             RtCommandDrain::Command(envelope) => match envelope.command {
                 ControlCommand::Start => {
-                    playhead.apply_transport_start();
-                    report.applied_commands = report.applied_commands.saturating_add(1);
+                    if playhead.apply_transport_start() {
+                        report.applied_commands = report.applied_commands.saturating_add(1);
+                    } else {
+                        report.unsupported_commands = report.unsupported_commands.saturating_add(1);
+                    }
                 }
                 ControlCommand::Stop => {
-                    playhead.apply_transport_stop();
-                    report.applied_commands = report.applied_commands.saturating_add(1);
+                    if playhead.apply_transport_stop() {
+                        report.applied_commands = report.applied_commands.saturating_add(1);
+                    } else {
+                        report.unsupported_commands = report.unsupported_commands.saturating_add(1);
+                    }
                 }
                 ControlCommand::ChannelConfigure { .. } | ControlCommand::Locate { .. } => {
                     report.unsupported_commands = report.unsupported_commands.saturating_add(1);
@@ -1042,6 +1048,8 @@ mod tests {
     use agogo::core::conn::sample::S048;
     use agogo::core::control::TransportPolicy;
     use agogo::core::control::sync::PhaseSource;
+    use agogo::core::sink::audio::AudioIo;
+    use agogo::core::sink::midi::{MIDI_START, MIDI_STOP, TestSink};
     use agogo::core::time::grid::Grid;
     use agogo::core::time::swing::SwingConfig;
     use agogo::core::time::tbase::TBase;
@@ -1487,6 +1495,12 @@ mod tests {
         let stop = producer.admit_ordered(ControlCommand::Stop, metadata(1, 1));
         assert_eq!(stop.status, AdmissionStatus::Accepted);
         apply_control_to_playhead(&mut consumer, &mut playhead);
+        let sink = TestSink::new();
+        let input = [];
+        let mut output = [];
+        let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 24_000);
+        playhead.on_buffer(&mut io, &sink);
+        assert!(!playhead.is_running());
         assert!(!playhead.stop_handle().is_stop_requested());
 
         let start = producer.admit_ordered(
@@ -1497,7 +1511,43 @@ mod tests {
         let report = apply_control_to_playhead(&mut consumer, &mut playhead);
         assert_eq!(report.applied_commands, 1);
         assert!(!playhead.stop_handle().is_stop_requested());
+        let mut io = AudioIo::new(&input, &mut output, 24_000, 48_000, 24_000);
+        playhead.on_buffer(&mut io, &sink);
         assert!(playhead.is_running());
+    }
+
+    #[test]
+    fn ordered_transport_commands_emit_fifo_in_one_buffer() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::Internal {
+                start_emitted: true,
+            },
+        );
+        let sink = TestSink::new();
+        let input = [];
+        let mut output = [];
+
+        let start = producer.admit_ordered(ControlCommand::Start, metadata(1, 1));
+        let stop = producer.admit_ordered(ControlCommand::Stop, metadata(2, 1));
+        assert_eq!(start.status, AdmissionStatus::Accepted);
+        assert_eq!(stop.status, AdmissionStatus::Accepted);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+        assert_eq!(report.applied_commands, 2);
+        let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 24_000);
+        playhead.on_buffer(&mut io, &sink);
+
+        let transport_records: Vec<u8> = sink
+            .records()
+            .into_iter()
+            .filter_map(|r| r.bytes.first().copied())
+            .filter(|b| *b == MIDI_START || *b == MIDI_STOP)
+            .collect();
+        assert_eq!(transport_records, vec![MIDI_START, MIDI_STOP]);
+        assert!(!playhead.is_running());
     }
 
     #[test]
