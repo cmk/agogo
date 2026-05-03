@@ -46,3 +46,18 @@ Full review comments:
 
 - [P2] Don't report late compatibility pushes as success — crates/host/src/bridge.rs:402-402
   When an existing caller uses `try_push` near a buffer boundary, `AdmissionMetadata::next_buffer` can choose `current_epoch + 1`, then the RT thread can call `begin_buffer()` before `admit_ordered` re-checks the epoch. In that case `admit_ordered` returns a `Late` outcome without enqueuing anything, but this wildcard arm converts it to `Ok(())`, so ordered commands are silently lost even though the API still documents visible errors on non-enqueue.
+
+## Local review (2026-05-02)
+
+**Branch:** plan-2026-05-02-08
+**Commits:** 4 (origin/main..plan-2026-05-02-08)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The patch still has a deadline race in scalar tempo admission: a late/rejected response can be returned after the RT side has already observed the command. That breaks the admission truthfulness guarantee introduced by the change.
+
+Review comment:
+
+- [P2] Don't publish tempo before late status is settled — crates/host/src/bridge.rs:368-376
+  When a tempo admission races the RT thread after this `swap`, `begin_buffer()` can increment the epoch and load the new tempo before the second epoch check sees `deadline <= current_epoch`. The method then returns `late` and may roll back future snapshots, but the supposedly late command already affected that buffer, so callers/logs see a rejected/late admission that was not rejected before touching the RT side.
