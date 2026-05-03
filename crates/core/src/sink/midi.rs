@@ -24,23 +24,6 @@ pub const MIDI_NOTE_ON: u8 = 0x90;
 /// Note Off status nibble. OR with channel `0..=15`.
 pub const MIDI_NOTE_OFF: u8 = 0x80;
 
-// ── Core trait ──────────────────────────────────────────────────────
-
-/// Back-end-agnostic MIDI output sink.
-///
-/// Each back-end converts `at_sample` to its native timebase inside
-/// `send_at` — mach time for CoreMIDI, frame index for JACK,
-/// `QueryPerformanceCounter` for WinMM (`doc/agogo.md` §5). The core
-/// only ever sees monotonic sample counts.
-///
-/// **RT safety.** Implementations may allocate or take locks
-/// (`midir` does both). `host-cpal` wires an `rtrb`
-/// drain thread so the audio callback enqueues `(bytes, at_sample)`
-/// pairs without calling `send_at` directly.
-pub trait MidiSink: Send {
-    fn send_at(&self, msg: &[u8], at_sample: u64);
-}
-
 // ── Timing capability reports ──────────────────────────────────────
 
 /// How a MIDI backend dispatches a message once it reaches the sink.
@@ -113,6 +96,23 @@ impl MidiTimingCapability {
 /// current and future backend must make an explicit claim.
 pub trait MidiTimingCapabilities {
     fn timing_capability(&self) -> MidiTimingCapability;
+}
+
+// ── Core trait ──────────────────────────────────────────────────────
+
+/// Back-end-agnostic MIDI output sink.
+///
+/// Each back-end converts `at_sample` to its native timebase inside
+/// `send_at` — mach time for CoreMIDI, frame index for JACK,
+/// `QueryPerformanceCounter` for WinMM (`doc/agogo.md` §5). The core
+/// only ever sees monotonic sample counts.
+///
+/// **RT safety.** Implementations may allocate or take locks
+/// (`midir` does both). `host-cpal` wires an `rtrb`
+/// drain thread so the audio callback enqueues `(bytes, at_sample)`
+/// pairs without calling `send_at` directly.
+pub trait MidiSink: Send + MidiTimingCapabilities {
+    fn send_at(&self, msg: &[u8], at_sample: u64);
 }
 
 // ── Synthetic in-memory sink for tests ──────────────────────────────

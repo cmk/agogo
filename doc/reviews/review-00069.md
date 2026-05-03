@@ -31,3 +31,29 @@ Validation:
 - `cargo clippy --all-targets --quiet -- -D warnings`
 - `cargo test --quiet` in `crates/host-cpal`
 - `cargo test --quiet` in `crates/host-midi`
+
+## Local review (2026-05-03)
+
+**Branch:** plan/2026-05-03-04
+**Commits:** 3 (origin/main..plan/2026-05-03-04)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The capability API does not enforce or preserve timing reports through the main sink abstraction, and the host-midi verification does not actually exercise the backend implementation it claims to verify. These issues undermine the central behavior added by the patch.
+
+Full review comments:
+
+- [P2] Require timing reports on every MidiSink — crates/core/src/sink/midi.rs:114-115
+  Because `MidiTimingCapabilities` is independent of `MidiSink`, the main drain API can still accept `Arc<dyn MidiSink + Send + Sync>` and the CLI can coerce `MidirSink` into that type, at which point the selected output sink no longer exposes `timing_capability()`. In that scenario a new backend can implement only `MidiSink` and still enter production output without any explicit timing claim, which defeats this PR's purpose of distinguishing metadata-only versus timestamped output; consider making `MidiSink` require the timing-capability trait or carrying a combined trait object through the drain path.
+
+- [P2] Exercise MidirSink capability reporting in the test — crates/host-midi/src/midir.rs:136-136
+  This test constructs the expected best-effort value directly instead of querying `MidirSink`'s implementation, so changing `MidirSink::timing_capability()` to return the wrong backend name or claim timestamped support would still pass. Since the verification table claims this pins `MidirSink`'s report, route the assertion through the backend's advertised capability, such as an associated capability used by the impl, rather than the generic constructor.
+
+## Local review resolution (2026-05-03)
+
+- Fixed: `MidiSink` now inherits `MidiTimingCapabilities`, so any production
+  sink that enters the drain path must make an explicit timing claim.
+- Fixed: `MidirSink` exposes `TIMING_CAPABILITY`, the trait impl returns that
+  value, and the test asserts the backend-advertised capability rather than a
+  separately constructed expected value.
