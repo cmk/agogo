@@ -30,7 +30,6 @@ fi
 # - `conn/midi.rs` needs an upstream one-sided declaration macro.
 # - `time/conn.rs` still owns the local `def_conn_marker!` shim for
 #   static markers that have not yet been migrated to upstream macros.
-#   `quantize_at` is intentionally demoted from `Conn` to total rounder.
 #
 # The allowlist exists so this gate can land before those design
 # decisions are finished. It must shrink as the sprint progresses.

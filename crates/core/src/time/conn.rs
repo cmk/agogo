@@ -1,33 +1,29 @@
 //! Marker-backed Galois connections for `Tick`, `Time`, `Rational`,
 //! and `Grid`.
 //!
-//! Four static marker values plus one fixed-grid rounder port the
-//! Haskell Cirklon conversions:
+//! Four static marker values port the Haskell Cirklon conversions:
 //!
 //! | Rust            | Haskell      | Public API                                |
 //! |-----------------|--------------|-------------------------------------------|
 //! | [`TICKTIME`]    | `ticks`      | marker with `ViewL<Tick, Time>` + `ViewR<Tick, Time>` |
 //! | [`WHOLTICK`]    | `ratTick`    | marker with `ViewL<Whole, Tick>` + `ViewR<Whole, Tick>` |
-//! | [`quantize_at`] | `quantizeAt` | returns a total fixed-grid quantizer |
 //! | [`TIMETIME`]    | `time`       | marker with `ViewL<(Time, Time), Time>` + `ViewR<(Time, Time), Time>` |
 //! | [`GRIDGRID`]    | `tbase`      | marker with `ViewL<(Grid, Grid), Grid>` + `ViewR<(Grid, Grid), Grid>` |
 //!
 //! Naming: per CLAUDE.md, Conn accessors are 8-char identifiers
 //! built from two 4-char side names. Single-type-side Conns
 //! (`TICKTIME`, `WHOLTICK`) follow the rule directly. Pair-side Conns
-//! (`TIMETIME`, `GRIDGRID`) duplicate the side name. `quantize_at` is
-//! a fixed-grid rounding helper, not a `Conn`: the Haskell original is
-//! connection-shaped only when the `Time` side is restricted to the
-//! chosen grid, and agogo's `Time` type does not encode that subset.
+//! (`TIMETIME`, `GRIDGRID`) duplicate the side name. The Haskell
+//! `quantizeAt` helper is intentionally not ported as an agogo Conn:
+//! its laws require a `Time` codomain restricted to the selected grid,
+//! while agogo callers can use [`TICKTIME`] plus an explicit resolution
+//! [`Time`] when they need fixed-grid binning.
 //!
 //! The four static connections are zero-sized marker values matching
 //! upstream's triple API. Their inherent `.ceil()`, `.inner()`, and
 //! `.floor()` methods forward to kind-tagged
 //! [`connections::conn::ConnL`] / [`connections::conn::ConnR`] views
-//! built from bare `fn` pointers. `quantize_at` returns a small
-//! grid-carrying value with `.ceil()`, `.inner()`, and `.floor()` for
-//! call-site compatibility, but intentionally does not implement
-//! `ViewL` / `ViewR`.
+//! built from bare `fn` pointers.
 //!
 //! **Orientation of `timetime` and `gridgrid`.** These are lattice
 //! connections: the pair side carries the divisibility product order,
@@ -204,55 +200,6 @@ def_conn_marker!(
     wholtick_inner,
     wholtick_floor
 );
-
-// ── quantize_at: total fixed-grid Tick → Time rounder ─────────────
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct QuantizeAt {
-    grid: Grid,
-}
-
-impl QuantizeAt {
-    pub const fn grid(self) -> Grid {
-        self.grid
-    }
-
-    pub fn ceil(self, n: Tick) -> Time {
-        let tc = u64::from(self.grid.tick_count());
-        let beats = n.0.div_ceil(tc);
-        u32::try_from(beats)
-            .ok()
-            .map(|beats| Time::At {
-                beats,
-                base: self.grid,
-            })
-            .unwrap_or(Time::End)
-    }
-
-    pub fn inner(self, t: Time) -> Tick {
-        time_to_tick(t)
-    }
-
-    pub fn floor(self, n: Tick) -> Time {
-        if n.0 == u64::MAX {
-            return Time::End;
-        }
-
-        let tc = u64::from(self.grid.tick_count());
-        let beats = n.0 / tc;
-        Time::At {
-            beats: u32::try_from(beats).unwrap_or(u32::MAX),
-            base: self.grid,
-        }
-    }
-}
-
-/// Quantise a `Tick` to the nearest `Time` on the `g` grid, keeping
-/// finite results on that grid (no further nicest-coarsening, unlike
-/// [`TICKTIME`]).
-pub fn quantize_at(g: Grid) -> QuantizeAt {
-    QuantizeAt { grid: g }
-}
 
 // ── timetime: (Time, Time) ↔ Time marker ─────────────────────────
 
@@ -540,46 +487,6 @@ mod tests {
     }
 
     #[test]
-    fn quantize_at_t16_aligned() {
-        let c = quantize_at(Grid::T16);
-        // 240 ticks = 1 T16 step at 960 PPQN.
-        assert_eq!(
-            c.floor(Tick(240)),
-            Time::At {
-                beats: 1,
-                base: Grid::T16
-            }
-        );
-        assert_eq!(
-            c.ceil(Tick(240)),
-            Time::At {
-                beats: 1,
-                base: Grid::T16
-            }
-        );
-    }
-
-    #[test]
-    fn quantize_at_t16_unaligned_splits_on_grid() {
-        let c = quantize_at(Grid::T16);
-        // 250 ticks: floor = 240/240 = 1 T16; ceil = 480/240 = 2 T16.
-        assert_eq!(
-            c.floor(Tick(250)),
-            Time::At {
-                beats: 1,
-                base: Grid::T16
-            }
-        );
-        assert_eq!(
-            c.ceil(Tick(250)),
-            Time::At {
-                beats: 2,
-                base: Grid::T16
-            }
-        );
-    }
-
-    #[test]
     fn timetime_ceil_gcd_of_t4_t8() {
         let c = TIMETIME;
         let a = Time::At {
@@ -780,106 +687,6 @@ mod tests {
             }
         }
 
-        // ── quantize_at ──────────────────────────────────────────
-        //
-        // The Haskell `quantizeAt tb` definition rounds with
-        // `floor = n div t` and `ceil = (n + t - 1) div t`, but its
-        // connection laws only make sense when the `Time` side is
-        // restricted to the selected grid. Agogo's `Time` type does
-        // not encode that subset, so `quantize_at` is a total
-        // fixed-grid rounder rather than a `Conn`.
-
-        #[test]
-        fn quantize_at_brackets_input(
-            g in arb_grid(), n in arb_any_tick(),
-        ) {
-            let c = quantize_at(g);
-            let lo = time_to_tick(c.floor(n));
-            let hi = time_to_tick(c.ceil(n));
-            prop_assert!(lo <= n);
-            prop_assert!(n <= hi);
-        }
-
-        #[test]
-        fn quantize_at_aligned_inner_round_trip(
-            g in arb_grid(), q in 0u32..=10_000,
-        ) {
-            let c = quantize_at(g);
-            let n = Tick(u64::from(q) * u64::from(g.tick_count()));
-            prop_assert_eq!(c.inner(c.floor(n)), n);
-            prop_assert_eq!(c.inner(c.ceil(n)), n);
-        }
-
-        #[test]
-        fn quantize_at_adjoint(
-            g in arb_grid(), n in arb_any_tick(), k in any::<u32>(),
-        ) {
-            let c = quantize_at(g);
-            let t = Time::At { beats: k, base: g };
-            let lhs = c.ceil(n) <= t;
-            let rhs = n <= c.inner(t);
-            prop_assert_eq!(lhs, rhs);
-        }
-
-        #[test]
-        fn quantize_at_ceil_adjoint_at_end(g in arb_grid(), n in arb_any_tick()) {
-            let c = quantize_at(g);
-            let lhs = c.ceil(n) <= Time::End;
-            let rhs = n <= c.inner(Time::End);
-            prop_assert_eq!(lhs, rhs);
-        }
-
-        #[test]
-        fn quantize_at_floor_adjoint(
-            g in arb_grid(), n in arb_any_tick(), k in any::<u32>(),
-        ) {
-            let c = quantize_at(g);
-            let t = Time::At { beats: k, base: g };
-            let lhs = c.inner(t) <= n;
-            let rhs = t <= c.floor(n);
-            prop_assert_eq!(lhs, rhs);
-        }
-
-        #[test]
-        fn quantize_at_floor_adjoint_at_end(g in arb_grid(), n in arb_any_tick()) {
-            let c = quantize_at(g);
-            let lhs = c.inner(Time::End) <= n;
-            let rhs = Time::End <= c.floor(n);
-            prop_assert_eq!(lhs, rhs);
-        }
-
-        #[test]
-        fn quantize_at_closed(g in arb_grid(), n in arb_any_tick()) {
-            let c = quantize_at(g);
-            prop_assert!(n <= c.inner(c.ceil(n)));
-        }
-
-        #[test]
-        fn quantize_at_kernel(g in arb_grid(), k in 0u32..=10_000) {
-            let c = quantize_at(g);
-            let t = Time::At { beats: k, base: g };
-            prop_assert!(c.ceil(c.inner(t)) <= t);
-        }
-
-        #[test]
-        fn quantize_at_monotonic(
-            g in arb_grid(),
-            a1 in arb_any_tick(), a2 in arb_any_tick(),
-        ) {
-            let c = quantize_at(g);
-            if a1 <= a2 {
-                prop_assert!(c.ceil(a1) <= c.ceil(a2));
-                prop_assert!(c.floor(a1) <= c.floor(a2));
-            }
-        }
-
-        #[test]
-        fn quantize_at_idempotent(g in arb_grid(), n in arb_any_tick()) {
-            let c = quantize_at(g);
-            let once = c.inner(c.ceil(n));
-            let twice = c.inner(c.ceil(once));
-            prop_assert_eq!(once, twice);
-        }
     }
 
     // ── Lattice-connection laws for `TIMETIME` and `GRIDGRID` ────
