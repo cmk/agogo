@@ -30,7 +30,7 @@ scripts/
    <paths>` whether anything changed under the audit's path filter
    since the last successful run. If empty, it skips the audit.
 4. If non-empty, it invokes `codex exec -` with the audit body plus a
-   "Files changed since last audit" preamble.
+   file-selection preamble.
 5. If Codex exits nonzero, is missing from PATH, or returns empty
    output, the harness exits nonzero and does not move the audit pin.
 6. If Codex outputs exactly `no findings`, nothing is appended.
