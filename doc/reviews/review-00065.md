@@ -88,3 +88,13 @@ Review comment:
 
 - [P2] Add the no-reallocation property test - doc/plans/plan-2026-05-03-01.md:130-130
   For this sprint, rows under `Properties (must pass)` are required verification before shipping, but there is no `rt_command_application_no_realloc` or equivalent allocation check in the host tests. Because this is the RT-side apply path, future changes could grow command-application storage without any gate catching it; either add the no-reallocation test or move/defer this row in the plan's Review section.
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-03-01
+**Commits:** 7 (origin/main..plan-2026-05-03-01)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+No actionable correctness issues were found in the diff. The added host bridge application path and transport hooks are covered by targeted tests, and the workspace tests pass locally.
