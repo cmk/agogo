@@ -2,7 +2,7 @@
 //!
 //! Pure-logic MIDI output: defines the back-end-agnostic sink contract
 //! and emits `0xF8` clock bytes + `0xFA`/`0xFB`/`0xFC` transport
-//! bytes. Real back-ends (midir, CoreMIDI, JACK, …) live in sibling
+//! bytes. Real back-ends (midir, CoreMIDI, JACK, ...) live in sibling
 //! crates and implement [`MidiSink`]. `crates/host-midi` is the
 //! current best-effort midir back-end.
 
@@ -39,6 +39,80 @@ pub const MIDI_NOTE_OFF: u8 = 0x80;
 /// pairs without calling `send_at` directly.
 pub trait MidiSink: Send {
     fn send_at(&self, msg: &[u8], at_sample: u64);
+}
+
+// ── Timing capability reports ──────────────────────────────────────
+
+/// How a MIDI backend dispatches a message once it reaches the sink.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum MidiSchedulingClass {
+    /// Sends when the drain path calls [`MidiSink::send_at`].
+    Immediate,
+    /// Schedules against the audio sample timeline.
+    NativeSampleTime,
+    /// Schedules against a platform host-time clock derived from
+    /// audio sample time.
+    NativeHostTime,
+}
+
+/// Whether a backend can compensate output latency itself.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum MidiLatencyCompensation {
+    /// No backend latency compensation is available.
+    None,
+    /// A fixed latency value is applied by the backend.
+    Static,
+    /// Runtime measurement or calibration is applied by the backend.
+    Measured,
+}
+
+/// Whether [`MidiSink::send_at`]'s `at_sample` argument controls
+/// physical dispatch or is only retained as diagnostic metadata.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum AtSampleSupport {
+    MetadataOnly,
+    Honored,
+}
+
+/// Timing capability report for a MIDI sink implementation.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct MidiTimingCapability {
+    pub backend_name: &'static str,
+    pub scheduling: MidiSchedulingClass,
+    pub latency_compensation: MidiLatencyCompensation,
+    pub at_sample: AtSampleSupport,
+}
+
+impl MidiTimingCapability {
+    /// Report for sinks that preserve `at_sample` only as metadata
+    /// and send at drain time.
+    pub const fn best_effort(backend_name: &'static str) -> Self {
+        Self {
+            backend_name,
+            scheduling: MidiSchedulingClass::Immediate,
+            latency_compensation: MidiLatencyCompensation::None,
+            at_sample: AtSampleSupport::MetadataOnly,
+        }
+    }
+
+    pub const fn honors_at_sample(self) -> bool {
+        matches!(self.at_sample, AtSampleSupport::Honored)
+    }
+
+    pub const fn is_timestamped(self) -> bool {
+        self.honors_at_sample()
+            || matches!(
+                self.scheduling,
+                MidiSchedulingClass::NativeSampleTime | MidiSchedulingClass::NativeHostTime
+            )
+    }
+}
+
+/// Implemented by MIDI sinks that can report their output timing
+/// capabilities. There is intentionally no blanket default: each
+/// current and future backend must make an explicit claim.
+pub trait MidiTimingCapabilities {
+    fn timing_capability(&self) -> MidiTimingCapability;
 }
 
 // ── Synthetic in-memory sink for tests ──────────────────────────────
@@ -87,6 +161,142 @@ impl MidiSink for TestSink {
             at_sample,
             bytes: msg.to_vec(),
         });
+    }
+}
+
+impl MidiTimingCapabilities for TestSink {
+    fn timing_capability(&self) -> MidiTimingCapability {
+        MidiTimingCapability::best_effort("test")
+    }
+}
+
+// ── Diagnostic sink for timing reports ─────────────────────────────
+
+/// One capture produced by [`DiagnosticSink`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiagnosticRecord {
+    pub at_sample: u64,
+    pub bytes: Vec<u8>,
+    pub drain_order: u64,
+    pub observed_sample: Option<u64>,
+    pub delay_samples: Option<i128>,
+}
+
+/// Integer summary of diagnostic drain observations.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DiagnosticSummary {
+    pub record_count: usize,
+    pub observed_count: usize,
+    pub late_count: usize,
+    pub early_count: usize,
+    pub on_time_count: usize,
+    pub max_late_samples: u64,
+    pub max_early_samples: u64,
+    pub total_abs_delay_samples: u128,
+}
+
+/// In-memory diagnostic [`MidiSink`]. It records intended sample
+/// times and byte payloads in FIFO order; tests or soft-side tooling
+/// may also supply an observed drain sample to compute delay outside
+/// the realtime callback path.
+#[derive(Debug)]
+pub struct DiagnosticSink {
+    capability: MidiTimingCapability,
+    inner: std::sync::Mutex<Vec<DiagnosticRecord>>,
+}
+
+impl DiagnosticSink {
+    pub fn new(backend_name: &'static str) -> Self {
+        Self {
+            capability: MidiTimingCapability::best_effort(backend_name),
+            inner: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn with_capability(capability: MidiTimingCapability) -> Self {
+        Self {
+            capability,
+            inner: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn records(&self) -> Vec<DiagnosticRecord> {
+        self.inner.lock().unwrap().clone()
+    }
+
+    pub fn summary(&self) -> DiagnosticSummary {
+        let records = self.inner.lock().unwrap();
+        let mut summary = DiagnosticSummary {
+            record_count: records.len(),
+            ..DiagnosticSummary::default()
+        };
+
+        for record in records.iter() {
+            let Some(delay) = record.delay_samples else {
+                continue;
+            };
+            summary.observed_count += 1;
+            match delay.cmp(&0) {
+                core::cmp::Ordering::Greater => {
+                    summary.late_count += 1;
+                    summary.max_late_samples = summary.max_late_samples.max(delay as u64);
+                    summary.total_abs_delay_samples += delay as u128;
+                }
+                core::cmp::Ordering::Less => {
+                    let early = delay.unsigned_abs();
+                    summary.early_count += 1;
+                    summary.max_early_samples = summary.max_early_samples.max(early as u64);
+                    summary.total_abs_delay_samples += early;
+                }
+                core::cmp::Ordering::Equal => {
+                    summary.on_time_count += 1;
+                }
+            }
+        }
+
+        summary
+    }
+
+    pub fn clear(&self) {
+        self.inner.lock().unwrap().clear();
+    }
+
+    /// Record a drain observation with an externally supplied sample
+    /// cursor. This is for tests and soft-side diagnostics; production
+    /// render code still calls [`MidiSink::send_at`].
+    pub fn record_observed_at_sample(&self, msg: &[u8], at_sample: u64, observed_sample: u64) {
+        self.push_record(msg, at_sample, Some(observed_sample));
+    }
+
+    fn push_record(&self, msg: &[u8], at_sample: u64, observed_sample: Option<u64>) {
+        let delay_samples = observed_sample.map(|observed| observed as i128 - at_sample as i128);
+        let mut records = self.inner.lock().unwrap();
+        let drain_order = records.len() as u64;
+        records.push(DiagnosticRecord {
+            at_sample,
+            bytes: msg.to_vec(),
+            drain_order,
+            observed_sample,
+            delay_samples,
+        });
+    }
+}
+
+impl Default for DiagnosticSink {
+    fn default() -> Self {
+        Self::new("diagnostic")
+    }
+}
+
+impl MidiSink for DiagnosticSink {
+    fn send_at(&self, msg: &[u8], at_sample: u64) {
+        self.push_record(msg, at_sample, None);
+    }
+}
+
+impl MidiTimingCapabilities for DiagnosticSink {
+    fn timing_capability(&self) -> MidiTimingCapability {
+        self.capability
     }
 }
 
@@ -265,6 +475,78 @@ mod tests {
         );
         sink.clear();
         assert!(sink.is_empty());
+    }
+
+    #[test]
+    fn timing_capability_truthful() {
+        let test_sink = TestSink::new();
+        let diagnostic = DiagnosticSink::default();
+        let reports = [
+            test_sink.timing_capability(),
+            diagnostic.timing_capability(),
+        ];
+
+        for report in reports {
+            assert!(!report.backend_name.is_empty());
+            assert_eq!(report.at_sample, AtSampleSupport::MetadataOnly);
+            assert_eq!(report.scheduling, MidiSchedulingClass::Immediate);
+            assert_eq!(report.latency_compensation, MidiLatencyCompensation::None);
+            assert!(!report.is_timestamped());
+        }
+    }
+
+    #[test]
+    fn diagnostic_sink_records_intended_order() {
+        let sink = DiagnosticSink::default();
+        sink.send_at(&[MIDI_START], 1024);
+        sink.send_at(&[MIDI_CLOCK], 2048);
+
+        assert_eq!(
+            sink.records(),
+            vec![
+                DiagnosticRecord {
+                    at_sample: 1024,
+                    bytes: vec![MIDI_START],
+                    drain_order: 0,
+                    observed_sample: None,
+                    delay_samples: None,
+                },
+                DiagnosticRecord {
+                    at_sample: 2048,
+                    bytes: vec![MIDI_CLOCK],
+                    drain_order: 1,
+                    observed_sample: None,
+                    delay_samples: None,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn diagnostic_sink_reports_drain_delay() {
+        let sink = DiagnosticSink::default();
+        sink.record_observed_at_sample(&[MIDI_CLOCK], 10_000, 10_144);
+        sink.record_observed_at_sample(&[MIDI_CLOCK], 20_000, 19_952);
+        sink.record_observed_at_sample(&[MIDI_STOP], 30_000, 30_000);
+
+        let records = sink.records();
+        assert_eq!(records[0].delay_samples, Some(144));
+        assert_eq!(records[1].delay_samples, Some(-48));
+        assert_eq!(records[2].delay_samples, Some(0));
+
+        assert_eq!(
+            sink.summary(),
+            DiagnosticSummary {
+                record_count: 3,
+                observed_count: 3,
+                late_count: 1,
+                early_count: 1,
+                on_time_count: 1,
+                max_late_samples: 144,
+                max_early_samples: 48,
+                total_abs_delay_samples: 192,
+            }
+        );
     }
 
     /// `TestSink` is `Send + Sync` — two threads pushing 1 000 records

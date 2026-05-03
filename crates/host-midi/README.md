@@ -2,8 +2,9 @@
 
 midir back-end for `agogo::core::sink::midi::MidiSink`. Cross-platform
 MIDI output for v0.1 (~1 ms USB-bus dispatch jitter per
-`doc/agogo.md` §4); platform-native sinks (CoreMIDI, JACK,
-ALSA-MIDI, WinMM) that tighten the precision side land as v0.2+
+`doc/agogo.md` §4); it reports immediate best-effort dispatch through
+`MidiTimingCapability`. Platform-native sinks (CoreMIDI, JACK,
+ALSA-MIDI, WinMM) that tighten the precision side land as
 timestamped-output sibling crates.
 
 Not a workspace member by design — `cargo test --workspace` skips
@@ -50,4 +51,5 @@ set-up will be:
 
 ## Where the logic lives
 
-- `src/midir.rs` — `MidirSink` (impl `MidiSink`) + port enumeration.
+- `src/midir.rs` — `MidirSink` (impl `MidiSink`) + port enumeration and
+  timing capability reporting.

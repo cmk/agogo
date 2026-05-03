@@ -11,7 +11,7 @@
 //! See `doc/designs/output.md` ("Two-phase dispatch") for the
 //! upstream design rationale.
 
-use agogo::core::sink::midi::MidiSink;
+use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -144,6 +144,12 @@ impl MidiSink for RtProducer {
     }
 }
 
+impl MidiTimingCapabilities for RtProducer {
+    fn timing_capability(&self) -> MidiTimingCapability {
+        MidiTimingCapability::best_effort("rt-producer")
+    }
+}
+
 /// Consumer side of the control-plane SPSC. Owns the drain thread
 /// once [`Self::spawn_drain`] is called.
 pub struct ControlConsumer {
@@ -249,7 +255,9 @@ impl Drop for DrainHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo::core::sink::midi::TestSink;
+    use agogo::core::sink::midi::{
+        AtSampleSupport, MidiLatencyCompensation, MidiSchedulingClass, TestSink,
+    };
     use proptest::prelude::*;
 
     fn arb_msg() -> impl Strategy<Value = MidiMessage> {
@@ -278,6 +286,35 @@ mod tests {
         let drained = cons.inner.pop().expect("ring should have one msg");
         assert_eq!(drained.at_sample, 24_000);
         assert_eq!(drained.as_slice(), &[0xF8]);
+    }
+
+    #[test]
+    fn rt_producer_preserves_at_sample() {
+        let (prod, mut cons) = spsc(8);
+        MidiSink::send_at(&prod, &[0xFA], 1024);
+        MidiSink::send_at(&prod, &[0xF8], 2048);
+
+        let first = cons.try_pop().expect("first message");
+        let second = cons.try_pop().expect("second message");
+        assert_eq!(first.at_sample, 1024);
+        assert_eq!(first.as_slice(), &[0xFA]);
+        assert_eq!(second.at_sample, 2048);
+        assert_eq!(second.as_slice(), &[0xF8]);
+        assert!(cons.try_pop().is_none());
+    }
+
+    #[test]
+    fn rt_producer_capability_is_metadata_only() {
+        let (prod, _cons) = spsc(8);
+        let capability = prod.timing_capability();
+        assert_eq!(capability.backend_name, "rt-producer");
+        assert_eq!(capability.scheduling, MidiSchedulingClass::Immediate);
+        assert_eq!(
+            capability.latency_compensation,
+            MidiLatencyCompensation::None
+        );
+        assert_eq!(capability.at_sample, AtSampleSupport::MetadataOnly);
+        assert!(!capability.is_timestamped());
     }
 
     proptest! {

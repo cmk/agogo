@@ -187,8 +187,7 @@ fn run_output_stream(
         .supported_output_configs()
         .map_err(|e| AudioHostError::Backend(Box::new(e)))?
         .collect();
-    let output_channels =
-        select_output_channels(&supported, cfg.sample_rate, cfg.output_channels)?;
+    let output_channels = select_output_channels(&supported, cfg.sample_rate, cfg.output_channels)?;
 
     let stream_config = StreamConfig {
         channels: output_channels,
@@ -328,8 +327,7 @@ fn select_f32_channels_at_rate(
     let mut fallback_channels: Option<u16> = None;
 
     for cap in caps {
-        let rate_ok =
-            cap.min_sample_rate <= sample_rate && cap.max_sample_rate >= sample_rate;
+        let rate_ok = cap.min_sample_rate <= sample_rate && cap.max_sample_rate >= sample_rate;
         if !rate_ok {
             continue;
         }
@@ -567,7 +565,9 @@ mod tests {
         assert_eq!(next_start, 105);
         assert_eq!(
             interleaved,
-            [100.0, 100.0, 101.0, 101.0, 102.0, 102.0, 103.0, 103.0, 104.0, 104.0]
+            [
+                100.0, 100.0, 101.0, 101.0, 102.0, 102.0, 103.0, 103.0, 104.0, 104.0
+            ]
         );
     }
 

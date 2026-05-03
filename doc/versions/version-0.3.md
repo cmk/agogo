@@ -48,6 +48,9 @@ audio pulse.
   emitting clock through the v0.2 output backend.
 - Demo: agogo follows incoming MIDI clock and reports lock/loss in
   `agogo-state`.
+- Output capability reports continue to distinguish best-effort midir from any
+  selected native timestamped backend; v0.3 clock-domain work must not assume
+  `at_sample` is physically honored unless the backend reports it.
 - No source/follower code introduces model, stdio-core, MCP, filesystem, or
   logging dependencies into the callback path.
 
