@@ -1,14 +1,14 @@
 //! Marker-backed Galois connections for `Tick`, `Time`, `Rational`,
 //! and `Grid`.
 //!
-//! Four static marker values plus one runtime-selected family port the
-//! Haskell Cirklon connections:
+//! Four static marker values plus one fixed-grid rounder port the
+//! Haskell Cirklon conversions:
 //!
 //! | Rust            | Haskell      | Public API                                |
 //! |-----------------|--------------|-------------------------------------------|
 //! | [`TICKTIME`]    | `ticks`      | marker with `ViewL<Tick, Time>` + `ViewR<Tick, Time>` |
 //! | [`WHOLTICK`]    | `ratTick`    | marker with `ViewL<Whole, Tick>` + `ViewR<Whole, Tick>` |
-//! | [`quantize_at`] | `quantizeAt` | returns `RuntimeConn<Tick, Time>` for one `Grid` |
+//! | [`quantize_at`] | `quantizeAt` | returns a total fixed-grid quantizer |
 //! | [`TIMETIME`]    | `time`       | marker with `ViewL<(Time, Time), Time>` + `ViewR<(Time, Time), Time>` |
 //! | [`GRIDGRID`]    | `tbase`      | marker with `ViewL<(Grid, Grid), Grid>` + `ViewR<(Grid, Grid), Grid>` |
 //!
@@ -16,17 +16,18 @@
 //! built from two 4-char side names. Single-type-side Conns
 //! (`TICKTIME`, `WHOLTICK`) follow the rule directly. Pair-side Conns
 //! (`TIMETIME`, `GRIDGRID`) duplicate the side name. `quantize_at` is
-//! a Conn *constructor* (parametric family), not a Conn constant —
-//! exempt from the 8-char rule, since each instance is named by the
-//! parameter `g: Grid`.
+//! a fixed-grid rounding helper, not a `Conn`: the Haskell original is
+//! connection-shaped only when the `Time` side is restricted to the
+//! chosen grid, and agogo's `Time` type does not encode that subset.
 //!
 //! The four static connections are zero-sized marker values matching
 //! upstream's triple API. Their inherent `.ceil()`, `.inner()`, and
 //! `.floor()` methods forward to kind-tagged
 //! [`connections::conn::ConnL`] / [`connections::conn::ConnR`] views
-//! built from bare `fn` pointers. `quantize_at` returns
-//! [`RuntimeConn`] because its inner / ceil / floor pointers vary per
-//! `Grid` value.
+//! built from bare `fn` pointers. `quantize_at` returns a small
+//! grid-carrying value with `.ceil()`, `.inner()`, and `.floor()` for
+//! call-site compatibility, but intentionally does not implement
+//! `ViewL` / `ViewR`.
 //!
 //! **Orientation of `timetime` and `gridgrid`.** These are lattice
 //! connections: the pair side carries the divisibility product order,
@@ -84,36 +85,6 @@ macro_rules! def_conn_marker {
             const R: ConnR<$A, $B> = Self::R;
         }
     };
-}
-
-/// Runtime-selected triple for parametric connection families.
-#[derive(Copy, Clone)]
-pub struct RuntimeConn<A, B> {
-    l: ConnL<A, B>,
-    r: ConnR<A, B>,
-}
-
-impl<A, B> RuntimeConn<A, B> {
-    const fn new(ceil: fn(A) -> B, inner: fn(B) -> A, floor: fn(A) -> B) -> Self {
-        Self {
-            l: Conn::new_l(ceil, inner),
-            r: Conn::new_r(inner, floor),
-        }
-    }
-}
-
-impl<A: Copy, B: Copy> RuntimeConn<A, B> {
-    pub fn ceil(self, x: A) -> B {
-        self.l.ceil(x)
-    }
-
-    pub fn inner(self, x: B) -> A {
-        self.l.inner(x)
-    }
-
-    pub fn floor(self, x: A) -> B {
-        self.r.floor(x)
-    }
 }
 
 // ── ticktime: Tick ↔ Time marker ─────────────────────────────────
@@ -234,158 +205,53 @@ def_conn_marker!(
     wholtick_floor
 );
 
-// ── quantize_at: RuntimeConn<Tick, Time> per Grid ────────────────
+// ── quantize_at: total fixed-grid Tick → Time rounder ─────────────
 
-fn qa_inner(t: Time) -> Tick {
-    time_to_tick(t)
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct QuantizeAt {
+    grid: Grid,
 }
 
-macro_rules! qa_variant {
-    ($variant:ident, $ceil:ident, $floor:ident) => {
-        fn $ceil(n: Tick) -> Time {
-            let tc = u64::from(Grid::$variant.tick_count());
-            let beats = n.0.div_ceil(tc);
-            Time::At {
-                beats: u32::try_from(beats)
-                    .expect("quantize_at Conn requires n.0.div_ceil(tc) ≤ u32::MAX"),
-                base: Grid::$variant,
-            }
+impl QuantizeAt {
+    pub const fn grid(self) -> Grid {
+        self.grid
+    }
+
+    pub fn ceil(self, n: Tick) -> Time {
+        let tc = u64::from(self.grid.tick_count());
+        let beats = n.0.div_ceil(tc);
+        u32::try_from(beats)
+            .ok()
+            .map(|beats| Time::At {
+                beats,
+                base: self.grid,
+            })
+            .unwrap_or(Time::End)
+    }
+
+    pub fn inner(self, t: Time) -> Tick {
+        time_to_tick(t)
+    }
+
+    pub fn floor(self, n: Tick) -> Time {
+        if n.0 == u64::MAX {
+            return Time::End;
         }
-        fn $floor(n: Tick) -> Time {
-            let tc = u64::from(Grid::$variant.tick_count());
-            let beats = n.0 / tc;
-            Time::At {
-                beats: u32::try_from(beats).expect("quantize_at Conn requires n.0 / tc ≤ u32::MAX"),
-                base: Grid::$variant,
-            }
+
+        let tc = u64::from(self.grid.tick_count());
+        let beats = n.0 / tc;
+        Time::At {
+            beats: u32::try_from(beats).unwrap_or(u32::MAX),
+            base: self.grid,
         }
-    };
+    }
 }
-
-// Binary track (9)
-qa_variant!(T1, qa_t1_ceil, qa_t1_floor);
-qa_variant!(T2, qa_t2_ceil, qa_t2_floor);
-qa_variant!(T4, qa_t4_ceil, qa_t4_floor);
-qa_variant!(T8, qa_t8_ceil, qa_t8_floor);
-qa_variant!(T16, qa_t16_ceil, qa_t16_floor);
-qa_variant!(T32, qa_t32_ceil, qa_t32_floor);
-qa_variant!(T64, qa_t64_ceil, qa_t64_floor);
-qa_variant!(T128, qa_t128_ceil, qa_t128_floor);
-qa_variant!(T256, qa_t256_ceil, qa_t256_floor);
-
-// Triplet track (9)
-qa_variant!(T2T, qa_t2t_ceil, qa_t2t_floor);
-qa_variant!(T4T, qa_t4t_ceil, qa_t4t_floor);
-qa_variant!(T8T, qa_t8t_ceil, qa_t8t_floor);
-qa_variant!(T16T, qa_t16t_ceil, qa_t16t_floor);
-qa_variant!(T32T, qa_t32t_ceil, qa_t32t_floor);
-qa_variant!(T64T, qa_t64t_ceil, qa_t64t_floor);
-qa_variant!(T128T, qa_t128t_ceil, qa_t128t_floor);
-qa_variant!(T256T, qa_t256t_ceil, qa_t256t_floor);
-qa_variant!(T512T, qa_t512t_ceil, qa_t512t_floor);
-
-// Quintuplet track (9)
-qa_variant!(T2Q, qa_t2q_ceil, qa_t2q_floor);
-qa_variant!(T4Q, qa_t4q_ceil, qa_t4q_floor);
-qa_variant!(T8Q, qa_t8q_ceil, qa_t8q_floor);
-qa_variant!(T16Q, qa_t16q_ceil, qa_t16q_floor);
-qa_variant!(T32Q, qa_t32q_ceil, qa_t32q_floor);
-qa_variant!(T64Q, qa_t64q_ceil, qa_t64q_floor);
-qa_variant!(T128Q, qa_t128q_ceil, qa_t128q_floor);
-qa_variant!(T256Q, qa_t256q_ceil, qa_t256q_floor);
-qa_variant!(T512Q, qa_t512q_ceil, qa_t512q_floor);
-
-// 15-tuplet (p) track (9)
-qa_variant!(T2P, qa_t2p_ceil, qa_t2p_floor);
-qa_variant!(T4P, qa_t4p_ceil, qa_t4p_floor);
-qa_variant!(T8P, qa_t8p_ceil, qa_t8p_floor);
-qa_variant!(T16P, qa_t16p_ceil, qa_t16p_floor);
-qa_variant!(T32P, qa_t32p_ceil, qa_t32p_floor);
-qa_variant!(T64P, qa_t64p_ceil, qa_t64p_floor);
-qa_variant!(T128P, qa_t128p_ceil, qa_t128p_floor);
-qa_variant!(T256P, qa_t256p_ceil, qa_t256p_floor);
-qa_variant!(T512P, qa_t512p_ceil, qa_t512p_floor);
 
 /// Quantise a `Tick` to the nearest `Time` on the `g` grid, keeping
-/// the result on that grid (no further nicest-coarsening, unlike
-/// [`TICKTIME`]). `fn` pointers can't close over `g`, so dispatch is a
-/// per-const `match`.
-pub fn quantize_at(g: Grid) -> RuntimeConn<Tick, Time> {
-    if g == Grid::T1 {
-        RuntimeConn::new(qa_t1_ceil, qa_inner, qa_t1_floor)
-    } else if g == Grid::T2 {
-        RuntimeConn::new(qa_t2_ceil, qa_inner, qa_t2_floor)
-    } else if g == Grid::T4 {
-        RuntimeConn::new(qa_t4_ceil, qa_inner, qa_t4_floor)
-    } else if g == Grid::T8 {
-        RuntimeConn::new(qa_t8_ceil, qa_inner, qa_t8_floor)
-    } else if g == Grid::T16 {
-        RuntimeConn::new(qa_t16_ceil, qa_inner, qa_t16_floor)
-    } else if g == Grid::T32 {
-        RuntimeConn::new(qa_t32_ceil, qa_inner, qa_t32_floor)
-    } else if g == Grid::T64 {
-        RuntimeConn::new(qa_t64_ceil, qa_inner, qa_t64_floor)
-    } else if g == Grid::T128 {
-        RuntimeConn::new(qa_t128_ceil, qa_inner, qa_t128_floor)
-    } else if g == Grid::T256 {
-        RuntimeConn::new(qa_t256_ceil, qa_inner, qa_t256_floor)
-    } else if g == Grid::T2T {
-        RuntimeConn::new(qa_t2t_ceil, qa_inner, qa_t2t_floor)
-    } else if g == Grid::T4T {
-        RuntimeConn::new(qa_t4t_ceil, qa_inner, qa_t4t_floor)
-    } else if g == Grid::T8T {
-        RuntimeConn::new(qa_t8t_ceil, qa_inner, qa_t8t_floor)
-    } else if g == Grid::T16T {
-        RuntimeConn::new(qa_t16t_ceil, qa_inner, qa_t16t_floor)
-    } else if g == Grid::T32T {
-        RuntimeConn::new(qa_t32t_ceil, qa_inner, qa_t32t_floor)
-    } else if g == Grid::T64T {
-        RuntimeConn::new(qa_t64t_ceil, qa_inner, qa_t64t_floor)
-    } else if g == Grid::T128T {
-        RuntimeConn::new(qa_t128t_ceil, qa_inner, qa_t128t_floor)
-    } else if g == Grid::T256T {
-        RuntimeConn::new(qa_t256t_ceil, qa_inner, qa_t256t_floor)
-    } else if g == Grid::T512T {
-        RuntimeConn::new(qa_t512t_ceil, qa_inner, qa_t512t_floor)
-    } else if g == Grid::T2Q {
-        RuntimeConn::new(qa_t2q_ceil, qa_inner, qa_t2q_floor)
-    } else if g == Grid::T4Q {
-        RuntimeConn::new(qa_t4q_ceil, qa_inner, qa_t4q_floor)
-    } else if g == Grid::T8Q {
-        RuntimeConn::new(qa_t8q_ceil, qa_inner, qa_t8q_floor)
-    } else if g == Grid::T16Q {
-        RuntimeConn::new(qa_t16q_ceil, qa_inner, qa_t16q_floor)
-    } else if g == Grid::T32Q {
-        RuntimeConn::new(qa_t32q_ceil, qa_inner, qa_t32q_floor)
-    } else if g == Grid::T64Q {
-        RuntimeConn::new(qa_t64q_ceil, qa_inner, qa_t64q_floor)
-    } else if g == Grid::T128Q {
-        RuntimeConn::new(qa_t128q_ceil, qa_inner, qa_t128q_floor)
-    } else if g == Grid::T256Q {
-        RuntimeConn::new(qa_t256q_ceil, qa_inner, qa_t256q_floor)
-    } else if g == Grid::T512Q {
-        RuntimeConn::new(qa_t512q_ceil, qa_inner, qa_t512q_floor)
-    } else if g == Grid::T2P {
-        RuntimeConn::new(qa_t2p_ceil, qa_inner, qa_t2p_floor)
-    } else if g == Grid::T4P {
-        RuntimeConn::new(qa_t4p_ceil, qa_inner, qa_t4p_floor)
-    } else if g == Grid::T8P {
-        RuntimeConn::new(qa_t8p_ceil, qa_inner, qa_t8p_floor)
-    } else if g == Grid::T16P {
-        RuntimeConn::new(qa_t16p_ceil, qa_inner, qa_t16p_floor)
-    } else if g == Grid::T32P {
-        RuntimeConn::new(qa_t32p_ceil, qa_inner, qa_t32p_floor)
-    } else if g == Grid::T64P {
-        RuntimeConn::new(qa_t64p_ceil, qa_inner, qa_t64p_floor)
-    } else if g == Grid::T128P {
-        RuntimeConn::new(qa_t128p_ceil, qa_inner, qa_t128p_floor)
-    } else if g == Grid::T256P {
-        RuntimeConn::new(qa_t256p_ceil, qa_inner, qa_t256p_floor)
-    } else if g == Grid::T512P {
-        RuntimeConn::new(qa_t512p_ceil, qa_inner, qa_t512p_floor)
-    } else {
-        unreachable!("Grid::ALL is exhaustive — every Grid value matched above")
-    }
+/// finite results on that grid (no further nicest-coarsening, unlike
+/// [`TICKTIME`]).
+pub fn quantize_at(g: Grid) -> QuantizeAt {
+    QuantizeAt { grid: g }
 }
 
 // ── timetime: (Time, Time) ↔ Time marker ─────────────────────────
@@ -916,23 +782,18 @@ mod tests {
 
         // ── quantize_at ──────────────────────────────────────────
         //
-        // `c.ceil(n)` returns `Time::At { beats: n.0.div_ceil(tc), base: g }`
-        // where `tc = g.tick_count()`. For `n` near the `arb_tick`
-        // horizon and `g` finer than `T1`, `beats` can exceed
-        // `u32::MAX` and the macro's `try_from` panics. `arb_tick`
-        // is now capped at `u32::MAX × Grid::T1.tick_count()` so the
-        // upper anchor only fits at `g == T1`; the per-property
-        // `prop_assume!(ceil_fits(n, g))` filters everything else.
-        // Composing `time_to_tick(c.ceil(n))` is then panic-free,
-        // and `<=` (which means magnitude on `Tick` and `Time` and
-        // divisibility on `Grid`) replaces the old `.ple()` calls.
+        // The Haskell `quantizeAt tb` definition rounds with
+        // `floor = n div t` and `ceil = (n + t - 1) div t`, but its
+        // connection laws only make sense when the `Time` side is
+        // restricted to the selected grid. Agogo's `Time` type does
+        // not encode that subset, so `quantize_at` is a total
+        // fixed-grid rounder rather than a `Conn`.
 
         #[test]
         fn quantize_at_brackets_input(
-            g in arb_grid(), n in arb_tick(),
+            g in arb_grid(), n in arb_any_tick(),
         ) {
             let c = quantize_at(g);
-            prop_assume!(ceil_fits(n, g));
             let lo = time_to_tick(c.floor(n));
             let hi = time_to_tick(c.ceil(n));
             prop_assert!(lo <= n);
@@ -951,10 +812,9 @@ mod tests {
 
         #[test]
         fn quantize_at_adjoint(
-            g in arb_grid(), n in arb_tick(), k in 0u32..=10_000,
+            g in arb_grid(), n in arb_any_tick(), k in any::<u32>(),
         ) {
             let c = quantize_at(g);
-            prop_assume!(ceil_fits(n, g));
             let t = Time::At { beats: k, base: g };
             let lhs = c.ceil(n) <= t;
             let rhs = n <= c.inner(t);
@@ -962,9 +822,35 @@ mod tests {
         }
 
         #[test]
-        fn quantize_at_closed(g in arb_grid(), n in arb_tick()) {
+        fn quantize_at_ceil_adjoint_at_end(g in arb_grid(), n in arb_any_tick()) {
             let c = quantize_at(g);
-            prop_assume!(ceil_fits(n, g));
+            let lhs = c.ceil(n) <= Time::End;
+            let rhs = n <= c.inner(Time::End);
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        #[test]
+        fn quantize_at_floor_adjoint(
+            g in arb_grid(), n in arb_any_tick(), k in any::<u32>(),
+        ) {
+            let c = quantize_at(g);
+            let t = Time::At { beats: k, base: g };
+            let lhs = c.inner(t) <= n;
+            let rhs = t <= c.floor(n);
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        #[test]
+        fn quantize_at_floor_adjoint_at_end(g in arb_grid(), n in arb_any_tick()) {
+            let c = quantize_at(g);
+            let lhs = c.inner(Time::End) <= n;
+            let rhs = Time::End <= c.floor(n);
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        #[test]
+        fn quantize_at_closed(g in arb_grid(), n in arb_any_tick()) {
+            let c = quantize_at(g);
             prop_assert!(n <= c.inner(c.ceil(n)));
         }
 
@@ -978,10 +864,9 @@ mod tests {
         #[test]
         fn quantize_at_monotonic(
             g in arb_grid(),
-            a1 in arb_tick(), a2 in arb_tick(),
+            a1 in arb_any_tick(), a2 in arb_any_tick(),
         ) {
             let c = quantize_at(g);
-            prop_assume!(ceil_fits(a1, g) && ceil_fits(a2, g));
             if a1 <= a2 {
                 prop_assert!(c.ceil(a1) <= c.ceil(a2));
                 prop_assert!(c.floor(a1) <= c.floor(a2));
@@ -989,9 +874,8 @@ mod tests {
         }
 
         #[test]
-        fn quantize_at_idempotent(g in arb_grid(), n in arb_tick()) {
+        fn quantize_at_idempotent(g in arb_grid(), n in arb_any_tick()) {
             let c = quantize_at(g);
-            prop_assume!(ceil_fits(n, g));
             let once = c.inner(c.ceil(n));
             let twice = c.inner(c.ceil(once));
             prop_assert_eq!(once, twice);
@@ -1117,16 +1001,6 @@ mod tests {
         ceil: timetime_ceil,
         inner: timetime_inner,
         floor: timetime_floor,
-    }
-
-    /// True when `quantize_at(g).ceil(n)` fits back through
-    /// `time_to_tick` — i.e. `n.0.div_ceil(tc) ≤ u32::MAX`, the
-    /// horizon of finite `Time::At { beats, .. }`. Used to skip
-    /// `arb_tick()`'s upper boundary in proptests that compose
-    /// `time_to_tick` on the ceil result.
-    fn ceil_fits(n: Tick, g: Grid) -> bool {
-        let tc = u64::from(g.tick_count());
-        n.0.div_ceil(tc) <= u64::from(u32::MAX)
     }
 
     proptest! {
