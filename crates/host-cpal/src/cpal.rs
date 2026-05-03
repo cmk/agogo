@@ -509,6 +509,20 @@ mod tests {
     }
 
     #[test]
+    fn output_channel_selection_uses_smallest_f32_fallback() {
+        let caps = [
+            caps(44_100, 96_000, SampleFormat::F32, 8),
+            caps(44_100, 96_000, SampleFormat::F32, 6),
+            caps(44_100, 96_000, SampleFormat::F32, 2),
+            caps(44_100, 96_000, SampleFormat::I16, 1),
+        ];
+
+        let got = select_f32_channels_at_rate(caps, 48_000, 1, "output", true).unwrap();
+
+        assert_eq!(got, 2);
+    }
+
+    #[test]
     fn input_validation_rejects_channel_fallback() {
         let caps = [caps(44_100, 96_000, SampleFormat::F32, 2)];
 

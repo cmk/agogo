@@ -74,3 +74,28 @@ Fixed in the follow-up patch. The output callback now processes the physical buf
 #### ↳ cmk ([2026-05-03 21:21 UTC](https://github.com/cmk/agogo/pull/68#discussion_r3178789675))
 
 Fixed by mirroring the GitHub review comments into `review-00068.md` and adding a round response that supersedes the earlier local-review note. The original local review remains as history, but the record now names the discovered issue and the corrective patch.
+
+<!-- gh-id: 4216862692 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-03 21:28 UTC](https://github.com/cmk/agogo/pull/68#pullrequestreview-4216862692))
+
+Copilot reviewed 4 out of 4 changed files in this pull request and generated 1 comment.
+
+<!-- gh-id: 3178797671 -->
+### Copilot on [`crates/host-cpal/src/cpal.rs:353`](https://github.com/cmk/agogo/pull/68#discussion_r3178797671) (2026-05-03 21:28 UTC)
+
+The new fallback-selection logic is only tested with a single non-mono candidate. There is no test covering the documented behavior of choosing the smallest supported physical channel count when several f32 configs are available at the requested rate, so a regression to "pick the first supported config" would still pass while breaking multi-channel-only devices.
+
+## Review round response (2026-05-03, rebase)
+
+- Rebased `fix-audio-click-stereo-output` onto `origin/main` at `d0190a1`.
+- `crates/host-cpal/src/cpal.rs`: added `output_channel_selection_uses_smallest_f32_fallback`, which includes 8-channel, 6-channel, and 2-channel f32 candidates plus a mono non-f32 distractor. The test pins the documented "smallest supported f32 physical channel count" fallback and would fail if selection regressed to first-match behavior.
+
+Validation:
+
+- `cargo test --manifest-path crates/host-cpal/Cargo.toml`
+- `cargo clippy --manifest-path crates/host-cpal/Cargo.toml --all-targets -- -D warnings`
+
+<!-- gh-id: 3178802425 -->
+#### ↳ cmk ([2026-05-03 21:35 UTC](https://github.com/cmk/agogo/pull/68#discussion_r3178802425))
+
+Fixed after rebasing onto latest `origin/main`. Added `output_channel_selection_uses_smallest_f32_fallback`, which covers multiple f32 non-mono candidates (8, 6, and 2 channels) plus a mono non-f32 distractor. The test now pins the documented smallest-supported-f32 fallback and would fail if selection regressed to first-match behavior.
