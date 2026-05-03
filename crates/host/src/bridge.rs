@@ -1551,6 +1551,30 @@ mod tests {
     }
 
     #[test]
+    fn command_transport_rejects_link_driven_policy() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let (producer, mut consumer) = spsc(4, bpm);
+        let mut playhead = playhead(
+            bpm,
+            TransportPolicy::LinkDriven {
+                prev_playing: false,
+                query: Box::new(|| false),
+            },
+        );
+
+        let start = producer.admit_ordered(ControlCommand::Start, metadata(1, 1));
+        let stop = producer.admit_ordered(ControlCommand::Stop, metadata(2, 1));
+        assert_eq!(start.status, AdmissionStatus::Accepted);
+        assert_eq!(stop.status, AdmissionStatus::Accepted);
+
+        let report = apply_control_to_playhead(&mut consumer, &mut playhead);
+
+        assert_eq!(report.applied_commands, 0);
+        assert_eq!(report.unsupported_commands, 2);
+        assert!(playhead.is_running());
+    }
+
+    #[test]
     fn late_ordered_command_reports_fault() {
         let bpm = Tempo::from_bpm_integer(120);
         let (producer, mut consumer) = spsc(4, bpm);

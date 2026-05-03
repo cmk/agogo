@@ -357,6 +357,9 @@ impl<R: SampleTime> Playhead<R> {
     /// [`Self::on_buffer`] call emits the start byte for internal
     /// transport and resumes clock output.
     pub fn apply_transport_start(&mut self) -> bool {
+        if !matches!(self.transport.policy, TransportPolicy::Internal { .. }) {
+            return false;
+        }
         self.command_transport.push_back(MidiRtByte::Start)
     }
 
@@ -365,6 +368,9 @@ impl<R: SampleTime> Playhead<R> {
     /// clock output unless a later queued command starts transport
     /// again in FIFO order.
     pub fn apply_transport_stop(&mut self) -> bool {
+        if !matches!(self.transport.policy, TransportPolicy::Internal { .. }) {
+            return false;
+        }
         self.command_transport.push_back(MidiRtByte::Stop)
     }
 
