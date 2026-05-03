@@ -42,3 +42,14 @@ Review comment:
 
 - [P2] Add inherent methods for SxxxI064 conns — crates/core/src/conn/sample.rs:331-341
   Callers using the new sample-count conns as advertised, e.g. `use agogo_core::conn::sample::S048I064; S048I064.inner(1)`, will not compile unless they also import `connections::conn::ViewL`. The existing rate and pico conns in this module expose inherent `ceil`/`inner` wrappers, so the new public `SxxxI064` family should do the same to keep the intended API usable and consistent.
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-03-02
+**Commits:** 4 (origin/main..plan-2026-05-03-02)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The changes compile and the workspace tests pass. I did not find any discrete introduced defects that would break existing behavior or the documented migration to explicit sample-rate connections.
+
