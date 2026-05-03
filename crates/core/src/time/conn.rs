@@ -44,7 +44,7 @@ use num_rational::Rational64;
 
 use crate::conn::tempo::Tempo;
 use crate::time::grid::Grid;
-use crate::time::tick::{PPQN, Tick, Time, from_ticks, from_ticks_floor, time_to_tick};
+use crate::time::tick::{PPQN, Tick, Time, from_ticks, time_to_tick};
 use connections::lattice::{Join, Meet};
 
 /// A rational whole-note duration. `Whole::new(1, 4)` = quarter note.
@@ -118,14 +118,50 @@ impl<A: Copy, B: Copy> RuntimeConn<A, B> {
 
 // ── ticktime: Tick ↔ Time marker ─────────────────────────────────
 
-/// Precondition: `n.0 ≤ u32::MAX × Grid::T1.tick_count()`. The
-/// `ticktime` Conn unwraps `from_ticks` here because `Conn::ceil` is
-/// total `fn(Tick) -> Time`. Proptest callers stay inside the
-/// horizon via [`arb_tick`](crate::arb::arb_tick); runtime callers
-/// (transport, scheduler) call `from_ticks` directly and pick their
-/// own out-of-range semantics.
+fn finite_time_ceil(n: Tick) -> Option<Time> {
+    let mut best: Option<(u64, Time)> = None;
+    for g in Grid::ALL {
+        let tc = u64::from(g.tick_count());
+        let beats = n.0.div_ceil(tc);
+        if beats <= u64::from(u32::MAX) {
+            let ticks = beats * tc;
+            if best.is_none_or(|(best_ticks, _)| ticks < best_ticks) {
+                best = Some((
+                    ticks,
+                    Time::At {
+                        beats: beats as u32,
+                        base: g,
+                    },
+                ));
+            }
+        }
+    }
+    best.map(|(_, time)| time)
+}
+
+fn finite_time_floor(n: Tick) -> Time {
+    let mut best_ticks = 0;
+    let mut best_time = Time::At {
+        beats: 0,
+        base: Grid::T1,
+    };
+    for g in Grid::ALL {
+        let tc = u64::from(g.tick_count());
+        let beats = (n.0 / tc).min(u64::from(u32::MAX));
+        let ticks = beats * tc;
+        if ticks > best_ticks {
+            best_ticks = ticks;
+            best_time = Time::At {
+                beats: beats as u32,
+                base: g,
+            };
+        }
+    }
+    best_time
+}
+
 fn ticktime_ceil(n: Tick) -> Time {
-    from_ticks(n).expect("ticktime Conn requires n ≤ u32::MAX × Grid::T1.tick_count()")
+    finite_time_ceil(n).unwrap_or(Time::End)
 }
 
 fn ticktime_inner(t: Time) -> Tick {
@@ -133,13 +169,17 @@ fn ticktime_inner(t: Time) -> Tick {
 }
 
 fn ticktime_floor(n: Tick) -> Time {
-    from_ticks_floor(n).expect("ticktime Conn requires n ≤ u32::MAX × Grid::T1.tick_count()")
+    if n.0 == u64::MAX {
+        Time::End
+    } else {
+        finite_time_floor(n)
+    }
 }
 
-// Master `Tick ↔ Time` connection. Ceiling rounds up to the
-// `Grid::T512P` grid (= 1 tick at 960 PPQN, so every tick is
-// already aligned) then canonicalises; floor rounds down; embed is
-// exact.
+// Master `Tick ↔ Time` connection. Finite values canonicalise to
+// the nearest representable `Time`; values above the finite horizon
+// ceil to `End`. The right adjoint maps only `Tick::MAX` to `End`;
+// lower overflow ticks floor to the greatest finite `Time`.
 def_conn_marker!(
     TICKTIME,
     Tick,
@@ -205,7 +245,7 @@ macro_rules! qa_variant {
         fn $ceil(n: Tick) -> Time {
             let tc = u64::from(Grid::$variant.tick_count());
             let beats = n.0.div_ceil(tc);
-            Time {
+            Time::At {
                 beats: u32::try_from(beats)
                     .expect("quantize_at Conn requires n.0.div_ceil(tc) ≤ u32::MAX"),
                 base: Grid::$variant,
@@ -214,7 +254,7 @@ macro_rules! qa_variant {
         fn $floor(n: Tick) -> Time {
             let tc = u64::from(Grid::$variant.tick_count());
             let beats = n.0 / tc;
-            Time {
+            Time::At {
                 beats: u32::try_from(beats).expect("quantize_at Conn requires n.0 / tc ≤ u32::MAX"),
                 base: Grid::$variant,
             }
@@ -532,7 +572,7 @@ mod tests {
     use super::*;
     use crate::conn::arb::arb_rational_nonneg;
     use crate::time::arb::arb_grid;
-    use crate::time::arb::{arb_small_time, arb_tick, arb_time};
+    use crate::time::arb::{arb_any_tick, arb_small_time, arb_tick, arb_time};
     use proptest::prelude::*;
 
     // ── Spot checks ──────────────────────────────────────────────
@@ -540,7 +580,7 @@ mod tests {
     #[test]
     fn ticktime_inner_is_exact() {
         let c = TICKTIME;
-        let t = Time {
+        let t = Time::At {
             beats: 3,
             base: Grid::T16,
         };
@@ -554,7 +594,7 @@ mod tests {
         // 240 ticks → exactly 1 T16.
         assert_eq!(
             c.ceil(Tick(240)),
-            Time {
+            Time::At {
                 beats: 1,
                 base: Grid::T16
             }
@@ -569,7 +609,7 @@ mod tests {
         // 50 / Grid::T256Q.tick_count() should hit. T256Q = 6, doesn't
         // divide 50. Walk the list: T512P=1 divides everything → 50 T512P.
         let t = c.floor(Tick(50));
-        assert_eq!(time_to_tick(t).0, 50);
+        assert_eq!(c.inner(t).0, 50);
     }
 
     #[test]
@@ -578,7 +618,32 @@ mod tests {
         // At 960 PPQN every Tick is on Grid::T512P (=1). So ceil and
         // floor both yield the canonical form for `n` itself.
         let t = c.ceil(Tick(50));
-        assert_eq!(time_to_tick(t).0, 50);
+        assert_eq!(c.inner(t).0, 50);
+    }
+
+    #[test]
+    fn ticktime_ceil_overflow_is_top() {
+        let c = TICKTIME;
+        assert_eq!(c.ceil(Tick(u64::MAX)), Time::End);
+    }
+
+    #[test]
+    fn ticktime_floor_max_is_top() {
+        let c = TICKTIME;
+        assert_eq!(c.floor(Tick(u64::MAX)), Time::End);
+    }
+
+    #[test]
+    fn ticktime_floor_high_overflow_is_greatest_finite_below_max() {
+        let c = TICKTIME;
+        let t = c.floor(Tick(u64::MAX - 1));
+        assert_eq!(
+            t,
+            Time::At {
+                beats: u32::MAX,
+                base: Grid::T1,
+            }
+        );
     }
 
     #[test]
@@ -609,14 +674,14 @@ mod tests {
         // 240 ticks = 1 T16 step at 960 PPQN.
         assert_eq!(
             c.floor(Tick(240)),
-            Time {
+            Time::At {
                 beats: 1,
                 base: Grid::T16
             }
         );
         assert_eq!(
             c.ceil(Tick(240)),
-            Time {
+            Time::At {
                 beats: 1,
                 base: Grid::T16
             }
@@ -629,14 +694,14 @@ mod tests {
         // 250 ticks: floor = 240/240 = 1 T16; ceil = 480/240 = 2 T16.
         assert_eq!(
             c.floor(Tick(250)),
-            Time {
+            Time::At {
                 beats: 1,
                 base: Grid::T16
             }
         );
         assert_eq!(
             c.ceil(Tick(250)),
-            Time {
+            Time::At {
                 beats: 2,
                 base: Grid::T16
             }
@@ -646,18 +711,18 @@ mod tests {
     #[test]
     fn timetime_ceil_gcd_of_t4_t8() {
         let c = TIMETIME;
-        let a = Time {
+        let a = Time::At {
             beats: 1,
             base: Grid::T4,
         }; // 960 ticks
-        let b = Time {
+        let b = Time::At {
             beats: 1,
             base: Grid::T8,
         }; // 480 ticks
         // gcd(960, 480) = 480 → Time 1 T8
         assert_eq!(
             c.ceil((a, b)),
-            Time {
+            Time::At {
                 beats: 1,
                 base: Grid::T8
             }
@@ -667,18 +732,18 @@ mod tests {
     #[test]
     fn timetime_floor_lcm_of_t16_and_t16t() {
         let c = TIMETIME;
-        let a = Time {
+        let a = Time::At {
             beats: 1,
             base: Grid::T16,
         }; // 240 ticks
-        let b = Time {
+        let b = Time::At {
             beats: 1,
             base: Grid::T16T,
         }; // 160 ticks
         // lcm(240, 160) = 480 → Time 1 T8
         assert_eq!(
             c.floor((a, b)),
-            Time {
+            Time::At {
                 beats: 1,
                 base: Grid::T8
             }
@@ -705,7 +770,7 @@ mod tests {
         // ── ticktime ─────────────────────────────────────────────
 
         #[test]
-        fn ticktime_adjoint(a in arb_tick(), b in arb_time()) {
+        fn ticktime_adjoint(a in arb_any_tick(), b in arb_time()) {
             let c = TICKTIME;
             let lhs = c.ceil(a) <= b;
             let rhs = a <= c.inner(b);
@@ -713,7 +778,15 @@ mod tests {
         }
 
         #[test]
-        fn ticktime_closed(a in arb_tick()) {
+        fn ticktime_floor_adjoint(a in arb_any_tick(), b in arb_time()) {
+            let c = TICKTIME;
+            let lhs = c.inner(b) <= a;
+            let rhs = b <= c.floor(a);
+            prop_assert_eq!(lhs, rhs);
+        }
+
+        #[test]
+        fn ticktime_closed(a in arb_any_tick()) {
             let c = TICKTIME;
             prop_assert!(a <= c.inner(c.ceil(a)));
         }
@@ -726,12 +799,13 @@ mod tests {
 
         #[test]
         fn ticktime_monotonic(
-            a1 in arb_tick(), a2 in arb_tick(),
+            a1 in arb_any_tick(), a2 in arb_any_tick(),
             b1 in arb_time(), b2 in arb_time(),
         ) {
             let c = TICKTIME;
             if a1 <= a2 {
                 prop_assert!(c.ceil(a1) <= c.ceil(a2));
+                prop_assert!(c.floor(a1) <= c.floor(a2));
             }
             if b1 <= b2 {
                 prop_assert!(c.inner(b1) <= c.inner(b2));
@@ -739,7 +813,7 @@ mod tests {
         }
 
         #[test]
-        fn ticktime_idempotent(a in arb_tick()) {
+        fn ticktime_idempotent(a in arb_any_tick()) {
             let c = TICKTIME;
             let once = c.inner(c.ceil(a));
             let twice = c.inner(c.ceil(once));
@@ -811,7 +885,7 @@ mod tests {
 
         // ── quantize_at ──────────────────────────────────────────
         //
-        // `c.ceil(n)` returns `Time { beats: n.0.div_ceil(tc), base: g }`
+        // `c.ceil(n)` returns `Time::At { beats: n.0.div_ceil(tc), base: g }`
         // where `tc = g.tick_count()`. For `n` near the `arb_tick`
         // horizon and `g` finer than `T1`, `beats` can exceed
         // `u32::MAX` and the macro's `try_from` panics. `arb_tick`
@@ -850,7 +924,7 @@ mod tests {
         ) {
             let c = quantize_at(g);
             prop_assume!(ceil_fits(n, g));
-            let t = Time { beats: k, base: g };
+            let t = Time::At { beats: k, base: g };
             let lhs = c.ceil(n) <= t;
             let rhs = n <= c.inner(t);
             prop_assert_eq!(lhs, rhs);
@@ -866,7 +940,7 @@ mod tests {
         #[test]
         fn quantize_at_kernel(g in arb_grid(), k in 0u32..=10_000) {
             let c = quantize_at(g);
-            let t = Time { beats: k, base: g };
+            let t = Time::At { beats: k, base: g };
             prop_assert!(c.ceil(c.inner(t)) <= t);
         }
 
@@ -913,9 +987,9 @@ mod tests {
 
     /// True when `quantize_at(g).ceil(n)` fits back through
     /// `time_to_tick` — i.e. `n.0.div_ceil(tc) ≤ u32::MAX`, the
-    /// horizon of `Time.beats`. Used to skip `arb_tick()`'s upper
-    /// boundary in proptests that compose `time_to_tick` on the ceil
-    /// result.
+    /// horizon of finite `Time::At { beats, .. }`. Used to skip
+    /// `arb_tick()`'s upper boundary in proptests that compose
+    /// `time_to_tick` on the ceil result.
     fn ceil_fits(n: Tick, g: Grid) -> bool {
         let tc = u64::from(g.tick_count());
         n.0.div_ceil(tc) <= u64::from(u32::MAX)

@@ -16,7 +16,8 @@
 //!   Heyting implication.
 //! - Five Galois connections built on `connections::Conn<A, B>`:
 //!   `quantize_at(g: Grid)`, `ticks`, `rat_tick`, `time`, `grid`.
-//! - `Tick` (960 PPQN master counter) and `Time { beats, base: Grid }`.
+//! - `Tick` (960 PPQN master counter) and `Time::At { beats, base }`
+//!   / `Time::End`.
 //! - Integer-valued swing on a binary resolution with alignment
 //!   helpers.
 //! - Linear and Hermite-smoothstep envelopes.

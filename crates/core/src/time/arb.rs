@@ -75,6 +75,24 @@ pub fn arb_swing() -> impl Strategy<Value = SwingConfig> {
 
 // ── Tick / Time ───────────────────────────────────────────────────
 
+/// Full-domain [`Tick`] strategy. Use this for connection laws over
+/// the declared `Tick(u64)` type.
+pub fn arb_any_tick() -> impl Strategy<Value = Tick> {
+    prop_oneof![
+        1 => Just(Tick(0)),
+        1 => Just(Tick(1)),
+        1 => Just(Tick(u64::from(u32::MAX))),
+        1 => Just(Tick(u64::from(u32::MAX) * u64::from(Grid::T1.tick_count()))),
+        1 => Just(Tick(u64::MAX - 1)),
+        1 => Just(Tick(u64::MAX)),
+        8 => any::<u64>().prop_map(Tick),
+    ]
+}
+
+/// Representable finite [`Tick`] strategy. This intentionally covers
+/// only ticks that can round-trip through [`Time`]. Do not use it for
+/// full-domain `Tick` connection laws.
+///
 /// Per CLAUDE.md's full-domain rule, named boundaries (0,
 /// `Grid::T512P` = 1, `Grid::T1` = 3840 ticks per bar, the
 /// `from_ticks` horizon at `u32::MAX × Grid::T1.tick_count()`) get
@@ -82,9 +100,8 @@ pub fn arb_swing() -> impl Strategy<Value = SwingConfig> {
 /// uniform arm covers the 0..=1M range where most musically-
 /// meaningful tick values live; the upper bound is the largest
 /// `Tick` for which [`from_ticks`](crate::time::tick::from_ticks)
-/// returns `Some(_)`, so `arb_tick` never produces a value the
-/// [`TICKTIME`](crate::time::conn::TICKTIME) Conn cannot
-/// canonicalise.
+/// returns `Some(_)`, so `arb_tick` never produces a value outside
+/// finite `Time`.
 pub fn arb_tick() -> impl Strategy<Value = Tick> {
     let horizon: u64 = u64::from(u32::MAX) * u64::from(Grid::T1.tick_count());
     prop_oneof![
@@ -97,9 +114,12 @@ pub fn arb_tick() -> impl Strategy<Value = Tick> {
 }
 
 pub fn arb_time() -> impl Strategy<Value = Time> {
-    (any::<u32>(), arb_grid()).prop_map(|(beats, base)| Time { beats, base })
+    prop_oneof![
+        1 => Just(Time::End),
+        8 => (any::<u32>(), arb_grid()).prop_map(|(beats, base)| Time::At { beats, base }),
+    ]
 }
 
 pub fn arb_small_time() -> impl Strategy<Value = Time> {
-    (0u32..=50, arb_grid()).prop_map(|(beats, base)| Time { beats, base })
+    (0u32..=50, arb_grid()).prop_map(|(beats, base)| Time::At { beats, base })
 }
