@@ -26,7 +26,7 @@
 //! **Orientation of `timetime` and `gridgrid`.** These are lattice
 //! connections: the pair side carries the divisibility product order,
 //! not magnitude. Following the Haskell convention,
-//! `ceil = join (GCD)` and `floor = meet (LCM)`. The generic
+//! `ceil = meet (GCD)` and `floor = join (LCM)`. The generic
 //! adjoint-law tests from `connections/src/conn.rs` use a single
 //! `PartialOrd` and therefore need a *divisibility* `≤` on the
 //! input/output side — `Time`'s and `Grid`'s magnitude order would
