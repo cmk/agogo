@@ -31,7 +31,7 @@
 //! **Orientation of `timetime` and `gridgrid`.** These are lattice
 //! connections: the pair side carries the divisibility product order,
 //! not magnitude. Following the Haskell convention,
-//! `ceil = meet (GCD)` and `floor = join (LCM)`. The generic
+//! `ceil = join (GCD)` and `floor = meet (LCM)`. The generic
 //! adjoint-law tests from `connections/src/conn.rs` use a single
 //! `PartialOrd` and therefore need a *divisibility* `≤` on the
 //! input/output side — `Time`'s and `Grid`'s magnitude order would
@@ -409,6 +409,9 @@ fn checked_lcm_u64(a: u64, b: u64) -> Option<u64> {
 
 fn timetime_ceil(ab: (Time, Time)) -> Time {
     let (a, b) = ab;
+    if matches!(a, Time::End) || matches!(b, Time::End) {
+        return Time::End;
+    }
     let g = gcd_u64(time_to_tick(a).0, time_to_tick(b).0);
     from_ticks(Tick(g)).unwrap_or(Time::End)
 }
@@ -419,9 +422,17 @@ fn timetime_inner(t: Time) -> (Time, Time) {
 
 fn timetime_floor(ab: (Time, Time)) -> Time {
     let (a, b) = ab;
+    match (a, b) {
+        (Time::End, Time::End) => return Time::End,
+        (Time::End, finite) | (finite, Time::End) => return finite,
+        _ => {}
+    }
     checked_lcm_u64(time_to_tick(a).0, time_to_tick(b).0)
         .and_then(|l| from_ticks(Tick(l)))
-        .unwrap_or(Time::End)
+        .unwrap_or(Time::At {
+            beats: 0,
+            base: Grid::T1,
+        })
 }
 
 // Divisibility-lattice connection on `Time`.
@@ -430,7 +441,8 @@ fn timetime_floor(ab: (Time, Time)) -> Time {
 // Following Haskell convention — the relevant order here is
 // divisibility of tick counts, not magnitude.
 //
-// Overflow or finite-horizon misses map to `Time::End`.
+// `Time::End` is the refinement top. LCM overflow or finite-horizon
+// misses map to the existing refinement bottom, finite zero.
 def_conn_marker!(
     TIMETIME,
     (Time, Time),
@@ -567,6 +579,7 @@ mod tests {
     use crate::time::arb::arb_grid;
     use crate::time::arb::{arb_any_tick, arb_small_time, arb_tick, arb_time};
     use proptest::prelude::*;
+    use std::cmp::Ordering;
 
     // ── Spot checks ──────────────────────────────────────────────
 
@@ -750,13 +763,23 @@ mod tests {
     }
 
     #[test]
-    fn timetime_floor_end_and_finite_is_end() {
+    fn timetime_floor_end_and_finite_is_finite() {
         let c = TIMETIME;
         let finite = Time::At {
             beats: 1,
             base: Grid::T4,
         };
-        assert_eq!(c.floor((Time::End, finite)), Time::End);
+        assert_eq!(c.floor((Time::End, finite)), finite);
+    }
+
+    #[test]
+    fn timetime_ceil_end_and_finite_is_end() {
+        let c = TIMETIME;
+        let finite = Time::At {
+            beats: 1,
+            base: Grid::T4,
+        };
+        assert_eq!(c.ceil((Time::End, finite)), Time::End);
     }
 
     #[test]
@@ -978,7 +1001,7 @@ mod tests {
 
     // ── Lattice-connection laws for `TIMETIME` and `GRIDGRID` ────
     //
-    // The adjoint structure `meet ⊣ diag ⊣ join` holds under the
+    // The adjoint structure `join ⊣ diag ⊣ meet` holds under the
     // "refine-to" order: `a ≤ b ⟺ tc(b) divides tc(a)` (i.e. "b is at
     // least as fine as a"). The standard divisibility `PartialOrd`
     // for `Grid` orients the other way around and would give a non-
@@ -989,9 +1012,88 @@ mod tests {
     }
 
     fn timetime_refine_le(a: Time, b: Time) -> bool {
+        if matches!(b, Time::End) {
+            return true;
+        }
+        if matches!(a, Time::End) {
+            return false;
+        }
         let ta = time_to_tick(a).0;
         let tb = time_to_tick(b).0;
         if tb == 0 { ta == 0 } else { ta % tb == 0 }
+    }
+
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    struct RefinedTime(Time);
+
+    impl PartialOrd for RefinedTime {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            match (
+                timetime_refine_le(self.0, other.0),
+                timetime_refine_le(other.0, self.0),
+            ) {
+                (true, true) => Some(Ordering::Equal),
+                (true, false) => Some(Ordering::Less),
+                (false, true) => Some(Ordering::Greater),
+                (false, false) => None,
+            }
+        }
+    }
+
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    struct RefinedTimePair(RefinedTime, RefinedTime);
+
+    impl RefinedTimePair {
+        fn product_le(self, other: Self) -> bool {
+            self.0 <= other.0 && self.1 <= other.1
+        }
+    }
+
+    impl PartialOrd for RefinedTimePair {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            match (self.product_le(*other), other.product_le(*self)) {
+                (true, true) => Some(Ordering::Equal),
+                (true, false) => Some(Ordering::Less),
+                (false, true) => Some(Ordering::Greater),
+                (false, false) => None,
+            }
+        }
+    }
+
+    fn refined_timetime_ceil(ab: RefinedTimePair) -> RefinedTime {
+        RefinedTime(TIMETIME.ceil((ab.0.0, ab.1.0)))
+    }
+
+    fn refined_timetime_inner(t: RefinedTime) -> RefinedTimePair {
+        let (a, b) = TIMETIME.inner(t.0);
+        RefinedTimePair(RefinedTime(a), RefinedTime(b))
+    }
+
+    fn refined_timetime_floor(ab: RefinedTimePair) -> RefinedTime {
+        RefinedTime(TIMETIME.floor((ab.0.0, ab.1.0)))
+    }
+
+    fn arb_refined_time() -> impl Strategy<Value = RefinedTime> {
+        arb_time().prop_map(RefinedTime)
+    }
+
+    fn arb_refined_time_pair() -> impl Strategy<Value = RefinedTimePair> {
+        (arb_time(), arb_time()).prop_map(|(a, b)| RefinedTimePair(RefinedTime(a), RefinedTime(b)))
+    }
+
+    connections::triple! {
+        RefinedTimeTime : RefinedTimePair => RefinedTime {
+            ceil: refined_timetime_ceil,
+            inner: refined_timetime_inner,
+            floor: refined_timetime_floor,
+        }
+    }
+
+    connections::law_battery! {
+        mod timetime_law_battery,
+        conn: RefinedTimeTime,
+        fine: arb_refined_time_pair(),
+        coarse: arb_refined_time(),
     }
 
     /// True when `quantize_at(g).ceil(n)` fits back through
