@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::channel::time::validate_schedule_params;
 use crate::channel::{Channel, ScheduledEvent};
-use crate::conn::rate::{R044, R048, R088, R096, R176, R192};
+use crate::conn::rate::{R044, R048, R088, R096, R176, R192, SampleRate};
 use crate::conn::tempo::Tempo;
 use crate::control::PhaseSource;
 use crate::event::tick_stream_into;
@@ -297,6 +297,57 @@ impl PlayheadStopHandle {
         self.flag.load(Ordering::Acquire)
     }
 }
+
+/// Configuration for a deterministic, hardware-free render pass.
+#[derive(Clone, Debug)]
+pub struct OfflineRenderConfig {
+    pub channels: Vec<Channel>,
+    pub bpm: Tempo,
+    pub sample_rate: u32,
+    pub buffer_frames: u32,
+    pub total_frames: u64,
+}
+
+/// MIDI event captured during [`render_offline`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OfflineMidiRecord {
+    pub at_sample: u64,
+    pub bytes: Vec<u8>,
+}
+
+/// Deterministic render report produced without opening host devices.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OfflineRenderReport {
+    pub sample_rate: u32,
+    pub buffer_frames: u32,
+    pub total_frames: u64,
+    pub buffers_rendered: u64,
+    pub midi: Vec<OfflineMidiRecord>,
+    pub dropped: u64,
+    pub audio_nonzero_samples: u64,
+    pub audio_peak_q15: u16,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum OfflineRenderError {
+    EmptyBuffer,
+    EmptyDuration,
+    UnsupportedSampleRate(u32),
+}
+
+impl std::fmt::Display for OfflineRenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyBuffer => write!(f, "buffer_frames must be >= 1"),
+            Self::EmptyDuration => write!(f, "total_frames must be >= 1"),
+            Self::UnsupportedSampleRate(sr) => {
+                write!(f, "sample rate {sr} is not supported")
+            }
+        }
+    }
+}
+
+impl std::error::Error for OfflineRenderError {}
 
 impl<R> Playhead<R> {
     /// Construct a new [`Playhead`]. `sr` and `bpm` configure the
@@ -575,6 +626,109 @@ impl_playhead_rate!(R096);
 impl_playhead_rate!(R176);
 impl_playhead_rate!(R192);
 
+/// Run a deterministic offline render through the same buffer path as
+/// host callbacks. This opens no cpal/midir devices; it uses silent
+/// input, an in-memory MIDI sink, and a scratch audio output buffer.
+pub fn render_offline(
+    config: OfflineRenderConfig,
+) -> Result<OfflineRenderReport, OfflineRenderError> {
+    if config.buffer_frames == 0 {
+        return Err(OfflineRenderError::EmptyBuffer);
+    }
+    if config.total_frames == 0 {
+        return Err(OfflineRenderError::EmptyDuration);
+    }
+
+    match config.sample_rate {
+        rate if rate == R044::HZ => render_offline_with_rate::<R044>(config),
+        rate if rate == R048::HZ => render_offline_with_rate::<R048>(config),
+        rate if rate == R088::HZ => render_offline_with_rate::<R088>(config),
+        rate if rate == R096::HZ => render_offline_with_rate::<R096>(config),
+        rate if rate == R176::HZ => render_offline_with_rate::<R176>(config),
+        rate if rate == R192::HZ => render_offline_with_rate::<R192>(config),
+        other => Err(OfflineRenderError::UnsupportedSampleRate(other)),
+    }
+}
+
+trait OfflineRate: SampleRate + Sized {
+    fn drive_offline(playhead: &mut Playhead<Self>, io: &mut AudioIo, sink: &dyn MidiSink);
+}
+
+macro_rules! impl_offline_rate {
+    ($Rate:ident) => {
+        impl OfflineRate for $Rate {
+            fn drive_offline(playhead: &mut Playhead<Self>, io: &mut AudioIo, sink: &dyn MidiSink) {
+                playhead.on_buffer(io, sink);
+            }
+        }
+    };
+}
+
+impl_offline_rate!(R044);
+impl_offline_rate!(R048);
+impl_offline_rate!(R088);
+impl_offline_rate!(R096);
+impl_offline_rate!(R176);
+impl_offline_rate!(R192);
+
+fn render_offline_with_rate<R: OfflineRate>(
+    config: OfflineRenderConfig,
+) -> Result<OfflineRenderReport, OfflineRenderError> {
+    let mut playhead = Playhead::<R>::new(
+        config.channels,
+        PhaseSource::Internal { bpm: config.bpm },
+        config.sample_rate,
+        config.bpm,
+        TransportPolicy::Internal {
+            start_emitted: false,
+        },
+        config.buffer_frames as usize,
+    );
+    let sink = crate::sink::midi::TestSink::new();
+    let mut sample = 0_u64;
+    let mut buffers_rendered = 0_u64;
+    let mut audio_nonzero_samples = 0_u64;
+    let mut audio_peak_q15 = 0_u16;
+
+    while sample < config.total_frames {
+        let remaining = config.total_frames - sample;
+        let frames = remaining.min(u64::from(config.buffer_frames)) as usize;
+        let input = vec![0.0_f32; frames]; // PCM ABI
+        let mut output = vec![0.0_f32; frames]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, sample, config.sample_rate, frames);
+        R::drive_offline(&mut playhead, &mut io, &sink);
+
+        for sample_value in output {
+            if sample_value != 0.0 {
+                audio_nonzero_samples += 1;
+            }
+            let q15 = (sample_value.abs().min(1.0) * 32767.0_f32).round() as u16;
+            audio_peak_q15 = audio_peak_q15.max(q15);
+        }
+
+        sample = sample.saturating_add(frames as u64);
+        buffers_rendered += 1;
+    }
+
+    Ok(OfflineRenderReport {
+        sample_rate: config.sample_rate,
+        buffer_frames: config.buffer_frames,
+        total_frames: config.total_frames,
+        buffers_rendered,
+        midi: sink
+            .records()
+            .into_iter()
+            .map(|record| OfflineMidiRecord {
+                at_sample: record.at_sample,
+                bytes: record.bytes,
+            })
+            .collect(),
+        dropped: 0,
+        audio_nonzero_samples,
+        audio_peak_q15,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,6 +799,39 @@ mod tests {
             .map(|r| r.at_sample)
             .collect();
         assert_eq!(samples, vec![0, 24_000, 48_000, 72_000]);
+    }
+
+    #[test]
+    fn offline_render_uses_playhead_buffer_path() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let report = render_offline(OfflineRenderConfig {
+            channels: vec![zero_channel(Grid::T4)],
+            bpm,
+            sample_rate: 48_000,
+            buffer_frames: 4_096,
+            total_frames: 48_000,
+        })
+        .unwrap();
+
+        assert_eq!(report.sample_rate, 48_000);
+        assert_eq!(report.total_frames, 48_000);
+        assert_eq!(report.buffers_rendered, 12);
+
+        let transport: Vec<(u64, u8)> = report
+            .midi
+            .iter()
+            .filter_map(|record| record.bytes.first().map(|byte| (record.at_sample, *byte)))
+            .filter(|(_, byte)| *byte == MIDI_START)
+            .collect();
+        assert_eq!(transport, vec![(0, MIDI_START)]);
+
+        let clocks: Vec<u64> = report
+            .midi
+            .iter()
+            .filter(|record| record.bytes == vec![MIDI_CLOCK])
+            .map(|record| record.at_sample)
+            .collect();
+        assert_eq!(clocks, vec![0, 24_000]);
     }
 
     /// `TransportPolicy::Internal` emits exactly one `0xFA` at
@@ -760,6 +947,64 @@ mod tests {
     }
 
     proptest! {
+        // Offline render is a CLI/report contract, so the strategy uses
+        // the currently supported rate plus a boundary-heavy matrix of
+        // grids and buffer sizes instead of the full numeric input space.
+        // The spot tests above pin one-bar and event-boundary examples.
+        #[test]
+        fn offline_render_identity(
+            divider in prop::sample::select(&[
+                Grid::T4, Grid::T8, Grid::T16, Grid::T16T, Grid::T16Q, Grid::T32,
+            ]),
+            buffer_frames in prop::sample::select(&[127_u32, 128, 511, 512, 1024, 4096]),
+            n_buffers in 1_u64..=8,
+        ) {
+            let bpm = Tempo::from_bpm_integer(120);
+            let total_frames = u64::from(buffer_frames) * n_buffers;
+            let left = render_offline(OfflineRenderConfig {
+                channels: vec![zero_channel(divider)],
+                bpm,
+                sample_rate: 48_000,
+                buffer_frames,
+                total_frames,
+            }).unwrap();
+            let right = render_offline(OfflineRenderConfig {
+                channels: vec![zero_channel(divider)],
+                bpm,
+                sample_rate: 48_000,
+                buffer_frames,
+                total_frames,
+            }).unwrap();
+
+            prop_assert_eq!(left, right);
+        }
+
+        // Same scoped domain as `offline_render_identity`: this verifies
+        // equivalent scheduling state across multiple buffer epochs without
+        // expanding the sprint into arbitrary parsed channel generation.
+        #[test]
+        fn equivalent_channel_scheduling_identity(
+            divider in prop::sample::select(&[
+                Grid::T4, Grid::T8, Grid::T16, Grid::T16T, Grid::T16Q, Grid::T32,
+            ]),
+            buffer_frames in prop::sample::select(&[127_usize, 128, 511, 512, 1024, 4096]),
+            n_buffers in 1_u64..=8,
+        ) {
+            let bpm = Tempo::from_bpm_integer(120);
+            let common = *zero_channel(divider).common();
+            let mut left = Vec::new();
+            let mut right = Vec::new();
+
+            for b in 0..n_buffers {
+                let start = b * buffer_frames as u64;
+                tick_stream_into(&mut left, &common, 48_000, bpm, start, buffer_frames).unwrap();
+                tick_stream_into(&mut right, &common, 48_000, bpm, start, buffer_frames).unwrap();
+                prop_assert_eq!(&left, &right);
+                left.clear();
+                right.clear();
+            }
+        }
+
         /// For an arbitrary `is_playing[0..N]` sequence, `LinkDriven`
         /// emits `0xFA` at false→true and `0xFC` at true→false
         /// transitions, no transport byte otherwise.

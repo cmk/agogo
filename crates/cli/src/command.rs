@@ -24,6 +24,8 @@ mod demo;
 mod link;
 #[cfg(feature = "core")]
 mod midi;
+#[cfg(feature = "core")]
+mod render;
 #[cfg(feature = "run")]
 mod run;
 #[cfg(feature = "core")]
@@ -76,6 +78,13 @@ enum Command {
         #[bpaf(external(midi::midi_sub))]
         sub: midi::MidiSub,
     },
+    /// Deterministic offline render report.
+    #[cfg(feature = "core")]
+    #[bpaf(command("render"))]
+    Render {
+        #[bpaf(external(render::render_args))]
+        args: render::RenderArgs,
+    },
     /// Ableton Link integration utilities.
     #[cfg(feature = "link")]
     #[bpaf(command("link"))]
@@ -119,6 +128,8 @@ pub fn dispatch(cli: Cli) -> Result<(), String> {
         Some(Command::Channel { sub }) => channel::dispatch(sub),
         #[cfg(feature = "core")]
         Some(Command::Midi { sub }) => midi::dispatch(sub),
+        #[cfg(feature = "core")]
+        Some(Command::Render { args }) => render::render(&args),
         #[cfg(feature = "link")]
         Some(Command::Link { sub }) => {
             link::dispatch(sub);

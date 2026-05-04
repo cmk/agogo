@@ -30,5 +30,6 @@ pub use event::{max_events_for_buffer, tick_stream, tick_stream_into};
 pub use runtime::{Runtime, RuntimeStepReport, RuntimeSurface, RuntimeToolMetadata};
 pub use snapshot::{AgogoSnapshot, SnapshotSlot};
 pub use transport::{
-    Playhead, PlayheadStopHandle, TransportCommandApply, TransportPolicy, TransportState,
+    OfflineMidiRecord, OfflineRenderConfig, OfflineRenderError, OfflineRenderReport, Playhead,
+    PlayheadStopHandle, TransportCommandApply, TransportPolicy, TransportState, render_offline,
 };

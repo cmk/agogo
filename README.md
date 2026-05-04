@@ -82,15 +82,25 @@ cargo run -p agogo-cli --bin agogo -- midi trace \
   --bpm 120 --sr 48000 --grid t32t --buffers 96 --frames 256
 ```
 
+Drive the runtime `Playhead::on_buffer` path offline and print deterministic
+JSON:
+
+```bash
+cargo run -p agogo-cli --bin agogo -- render \
+  --source internal \
+  --bpm 120 \
+  --sr 48000 \
+  --duration-bars 1 \
+  --ch 'id=three,dev=midi,mode=clock,grid=t2t,out=diag' \
+  --ch 'id=two,dev=midi,mode=clock,grid=t2,out=diag'
+```
+
 Run the synthetic audio-clock PLL trace:
 
 ```bash
 cargo run -p agogo-cli --bin agogo -- sync trace \
   --bpm 120 --sr 48000 --ppq 4 --pulses 16
 ```
-
-Plan 2026-05-04-03 adds a fuller deterministic offline render demo that drives
-the same runtime path used by `agogo run` without opening hardware devices.
 
 ## Hardware-Backed Runs
 
