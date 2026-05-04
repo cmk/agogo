@@ -35,3 +35,14 @@ Verification run locally:
 - `scripts/check-boundary-panics.sh`
 - `scripts/check-pii.sh`
 - `git diff --check`
+
+## Local review (2026-05-03)
+
+**Branch:** plan/2026-05-04-01
+**Commits:** 3 (origin/main..plan/2026-05-04-01)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The changes are a mechanical CLI module reshaping with imports, feature gates, layer checks, and float allowlists updated consistently. I did not find any actionable regressions in the diff, and the relevant CLI checks/tests compile successfully.
+
