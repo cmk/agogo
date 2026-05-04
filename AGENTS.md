@@ -193,28 +193,28 @@ code based on it.
       snapshot  → (leaf)
       event     → (leaf)
 
-	  Host adapter crates declare only the modules they actually have.
-	  `host-cpal` currently has `cpal` as a leaf layer; `host-midi`
-	  has `midir` as a leaf layer; `host-link` has:
+  Host adapter crates declare only the modules they actually have.
+  `host-cpal` currently has `cpal` as a leaf layer; `host-midi`
+  has `midir` as a leaf layer; `host-link` has:
 
       session   → link, quantum, transport
       source    → session
       link      → quantum
-	      transport → (leaf)
-	      quantum   → (leaf)
+      transport → (leaf)
+      quantum   → (leaf)
 
-	  `agogo-cli` (`crates/cli/src`) is the binary shell:
+  `agogo-cli` (`crates/cli/src`) is the binary shell:
 
-	      command → parse
-	      parse   → (leaf)
+      command → parse
+      parse   → (leaf)
 
-	  Optional future CLI roots such as `log` or `test` should be
-	  added to the gate only when the module exists. `src/test.rs`, if
-	  ever added, must stay limited like `chan::test`; command-surface
-	  tests belong under `crates/cli/test/*.rs` with explicit
-	  `[[test]]` entries.
+  Optional future CLI roots such as `log` or `test` should be
+  added to the gate only when the module exists. `src/test.rs`, if
+  ever added, must stay limited like `chan::test`; command-surface
+  tests belong under `crates/cli/test/*.rs` with explicit
+  `[[test]]` entries.
 
-	  Each top-level module-root file declares its allowed deps in a
+  Each top-level module-root file declares its allowed deps in a
   sentinel header comment:
 
       //! layer: time
