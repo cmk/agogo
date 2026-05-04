@@ -44,3 +44,14 @@ Review comment:
 
 - [P3] Move the PLL proptest regression seed — `crates/chan/src/control.rs:14`
   Because the PLL module is flattened from `control::sync::pll` to `control::pll` here, proptest's default persistence path changes to `proptest-regressions/control/pll.txt`. The checked-in seed is still under `crates/chan/proptest-regressions/control/sync/pll.txt`, so that historical `bpm = 185.18518` regression will no longer be replayed; move the regression file with the module path.
+
+## Local review (2026-05-03)
+
+**Branch:** plan/2026-05-03-06
+**Commits:** 4 (origin/main..plan/2026-05-03-06)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The crate-boundary refactor and associated script/import updates appear consistent, and the relevant workspace and detached-crate test/doc checks pass. I did not identify any actionable correctness issues introduced by the diff.
+
