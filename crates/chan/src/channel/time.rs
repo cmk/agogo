@@ -161,6 +161,10 @@ pub struct ScheduledEvent {
 /// the adjoint-law composition `FD12FD06 ∘ pico_to_samples`. Shared
 /// by `transform` and `scheduler`.
 ///
+/// Extreme `Micro(i64)` values are clamped to the largest range that
+/// can be embedded into `Pico(i64)` before the Conn call. That keeps
+/// runtime scheduling total for out-of-band offsets without weakening
+/// the exact fixed-ladder `Conn` laws.
 pub fn micro_to_samples(m: Micro, sr: u32) -> Option<i64> {
     let clamped = Micro(m.0.clamp(PICO_SAFE_MICRO_MIN.0, PICO_SAFE_MICRO_MAX.0));
     let pico = FD12FD06.inner(clamped);

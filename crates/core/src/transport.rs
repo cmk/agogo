@@ -802,11 +802,16 @@ mod tests {
         }
     }
 
-    fn audio_cv_channel(common: ChannelCommon, role: ChannelSpecRole) -> Channel {
+    fn audio_cv_channel(common: ChannelCommon, role: AudioCvRole) -> Channel {
         match role {
-            ChannelSpecRole::Audio(role) => Channel::Audio { common, role },
-            ChannelSpecRole::Cv(role) => Channel::Cv { common, role },
-            ChannelSpecRole::Midi(role) => Channel::Midi { common, role },
+            AudioCvRole::AudioClick => Channel::Audio {
+                common,
+                role: AudioRole::Click,
+            },
+            AudioCvRole::CvPulse => Channel::Cv {
+                common,
+                role: CvRole::Pulse,
+            },
         }
     }
 
@@ -828,10 +833,11 @@ mod tests {
         );
         let sink = TestSink::new();
         let input = vec![0.0_f32; buffer_frames]; // PCM ABI
+        let mut output = vec![0.0_f32; buffer_frames]; // PCM ABI
         let mut trace = Vec::with_capacity(buffer_frames * n_buffers as usize);
 
         for b in 0..n_buffers {
-            let mut output = vec![0.0_f32; buffer_frames]; // PCM ABI
+            output.fill(0.0_f32); // PCM ABI
             let mut io = AudioIo::new(
                 &input,
                 &mut output,
@@ -844,6 +850,12 @@ mod tests {
         }
 
         trace
+    }
+
+    #[derive(Copy, Clone, Debug)]
+    enum AudioCvRole {
+        AudioClick,
+        CvPulse,
     }
 
     fn arb_audio_cv_role() -> impl Strategy<Value = ChannelSpecRole> {
@@ -908,10 +920,14 @@ mod tests {
             })
     }
 
-    fn arb_audio_cv_common() -> impl Strategy<Value = (ChannelCommon, ChannelSpecRole)> {
+    fn arb_audio_cv_runtime_role() -> impl Strategy<Value = AudioCvRole> {
+        prop_oneof![Just(AudioCvRole::AudioClick), Just(AudioCvRole::CvPulse),]
+    }
+
+    fn arb_audio_cv_common() -> impl Strategy<Value = (ChannelCommon, AudioCvRole)> {
         (
             arb_grid(),
-            arb_audio_cv_role(),
+            arb_audio_cv_runtime_role(),
             arb_swing(),
             arb_delay(),
             arb_offset(),
