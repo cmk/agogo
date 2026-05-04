@@ -18,7 +18,12 @@
 extern crate self as agogo;
 
 pub(crate) mod core {
+    #[allow(unused_imports)]
     pub(crate) use core_impl::*;
+}
+
+pub mod chan {
+    pub use core_impl::{channel, conn, control, sink, test, time};
 }
 
 pub mod quantum;
