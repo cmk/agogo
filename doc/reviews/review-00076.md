@@ -180,3 +180,34 @@ Fixed by replacing the per-event linear scan with binary_search_by_key over the 
 #### ↳ cmk ([2026-05-04 08:18 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180206816))
 
 Fixed by updating the channel-spec module docs to list lfo in the accepted mode tokens and explicitly note that dev=cv,mode=lfo is parsed but rejected until the LFO renderer lands.
+
+<!-- gh-id: 3180269394 -->
+### Copilot on [`crates/core/src/transport.rs:608`](https://github.com/cmk/agogo/pull/76#discussion_r3180269394) (2026-05-04 08:30 UTC)
+
+`Playhead::on_buffer_with` renders channels in the user-specified order, so an `Audio` click channel can run between two `Cv` pulse channels and modify a previously-written full-scale pulse sample (the click renderer mixes both positive and negative samples). That can re-enable the cross-channel cancellation you’re trying to avoid, because the later channel’s bipolar reset won’t see `1.0` anymore and will mix `-1.0` into the pulse sample. Consider making render order independent of spec order (e.g., render all `Channel::Audio` first, then all `Channel::Cv`, or do a dedicated CV pulse pass at the end) so CV pulses remain stable regardless of channel ordering.
+
+<!-- gh-id: 4218490290 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-04 08:30 UTC](https://github.com/cmk/agogo/pull/76#pullrequestreview-4218490290))
+
+## Pull request overview
+
+Copilot reviewed 19 out of 19 changed files in this pull request and generated 2 comments.
+
+
+
+
+
+<!-- gh-id: 3180269433 -->
+### Copilot on [`doc/plans/plan-2026-05-04-04.md:106`](https://github.com/cmk/agogo/pull/76#discussion_r3180269433) (2026-05-04 08:30 UTC)
+
+The plan says audio click and CV pulse channels “can coexist by summing into the same mono diagnostic buffer”, but the current implementation gives CV pulses priority (positive pulses overwrite the sample, and resets may be skipped when a pulse is present). Update this sentence to match the actual mixing/priority behavior so readers don’t assume commutative summation semantics.
+
+<!-- gh-id: 3180343148 -->
+#### ↳ cmk ([2026-05-04 08:46 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180343148))
+
+Fixed by rendering non-CV channels first and CV channels in a final pass inside Playhead::on_buffer_with. Added a regression where an audio click is ordered between two adjacent CV pulses; both CV pulse samples remain full-scale.
+
+<!-- gh-id: 3180343370 -->
+#### ↳ cmk ([2026-05-04 08:46 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180343370))
+
+Fixed by updating the plan wording: audio click and CV pulse channels coexist in the mono diagnostic buffer, but CV renders last and has full-scale priority at pulse/reset overlaps rather than pure commutative summing.

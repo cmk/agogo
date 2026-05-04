@@ -543,75 +543,81 @@ impl<R> Playhead<R> {
         }
 
         // 5. Per-channel scheduling + rendering. Channels are
-        //    independent so we can iterate them without cross-talk;
-        //    `events_pool` is reused (cleared) between channels.
-        for (idx, ch) in self.channels.iter().enumerate() {
-            let common = ch.common();
-            self.events_pool.clear();
-            if tick_stream_into(
-                &mut self.events_pool,
-                common,
-                self.sr,
-                self.bpm,
-                io.buffer_start_sample,
-                io.frames,
-            )
-            .is_err()
-            {
-                continue;
-            }
-            // Apply bar_multiplier filter pre-render (Plan
-            // 2026-04-25-03 T3): keep only every Nth event from
-            // this channel's tick stream, advancing the per-channel
-            // bar counter once per pre-filter event. Filter runs
-            // before render dispatch so the renderer (clock or
-            // click) sees only the kept ticks.
-            if let Some(m) = common.bar_multiplier {
-                let counter = &mut self.bar_counters[idx];
-                let m = m.get() as u32;
-                self.events_pool.retain(|_| {
-                    let keep = (*counter).is_multiple_of(m);
-                    *counter = counter.wrapping_add(1);
-                    keep
-                });
-            }
-            // Plan 21 (audit P3) dispatches on the outer Channel
-            // variant so the typed renderers only ever see roles
-            // for their output target.
-            match ch {
-                Channel::Midi {
-                    common: midi_common,
-                    role,
-                } => {
-                    render_midi_channel(
-                        midi_common,
-                        role,
-                        &self.events_pool,
-                        None, // transport byte already emitted globally
-                        io.buffer_start_sample,
-                        Some(&mut self.click_counters[idx]),
-                        sink,
-                    );
+        //    independent; `events_pool` is reused (cleared) between
+        //    channels. Render CV in a final pass so full-scale pulse
+        //    priority is independent of the user's channel order.
+        for cv_pass in [false, true] {
+            for (idx, ch) in self.channels.iter().enumerate() {
+                if matches!(ch, Channel::Cv { .. }) != cv_pass {
+                    continue;
                 }
-                Channel::Audio { role, .. } => {
-                    render_audio_click_block(
-                        &self.events_pool,
-                        role,
-                        &mut self.audio_click_counters[idx],
-                        io,
-                    );
+                let common = ch.common();
+                self.events_pool.clear();
+                if tick_stream_into(
+                    &mut self.events_pool,
+                    common,
+                    self.sr,
+                    self.bpm,
+                    io.buffer_start_sample,
+                    io.frames,
+                )
+                .is_err()
+                {
+                    continue;
                 }
-                Channel::Cv { role, .. } => {
-                    render_cv_pulse_block(
-                        &self.events_pool,
-                        role,
-                        &mut self.cv_pulse_states[idx],
-                        io,
-                    );
+                // Apply bar_multiplier filter pre-render (Plan
+                // 2026-04-25-03 T3): keep only every Nth event from
+                // this channel's tick stream, advancing the per-channel
+                // bar counter once per pre-filter event. Filter runs
+                // before render dispatch so the renderer (clock or
+                // click) sees only the kept ticks.
+                if let Some(m) = common.bar_multiplier {
+                    let counter = &mut self.bar_counters[idx];
+                    let m = m.get() as u32;
+                    self.events_pool.retain(|_| {
+                        let keep = (*counter).is_multiple_of(m);
+                        *counter = counter.wrapping_add(1);
+                        keep
+                    });
                 }
-                Channel::Din { .. } => {
-                    // DIN has no renderer yet; the current concrete
-                    // sinks are MIDI/audio-output based.
+                // Plan 21 (audit P3) dispatches on the outer Channel
+                // variant so the typed renderers only ever see roles
+                // for their output target.
+                match ch {
+                    Channel::Midi {
+                        common: midi_common,
+                        role,
+                    } => {
+                        render_midi_channel(
+                            midi_common,
+                            role,
+                            &self.events_pool,
+                            None, // transport byte already emitted globally
+                            io.buffer_start_sample,
+                            Some(&mut self.click_counters[idx]),
+                            sink,
+                        );
+                    }
+                    Channel::Audio { role, .. } => {
+                        render_audio_click_block(
+                            &self.events_pool,
+                            role,
+                            &mut self.audio_click_counters[idx],
+                            io,
+                        );
+                    }
+                    Channel::Cv { role, .. } => {
+                        render_cv_pulse_block(
+                            &self.events_pool,
+                            role,
+                            &mut self.cv_pulse_states[idx],
+                            io,
+                        );
+                    }
+                    Channel::Din { .. } => {
+                        // DIN has no renderer yet; the current concrete
+                        // sinks are MIDI/audio-output based.
+                    }
                 }
             }
         }
@@ -1247,6 +1253,14 @@ mod tests {
     }
 
     fn cv_pulse_channel(divider: Grid, bar_multiplier: Option<NonZeroU16>) -> Channel {
+        cv_pulse_channel_with_delay(divider, bar_multiplier, Micro::ZERO)
+    }
+
+    fn cv_pulse_channel_with_delay(
+        divider: Grid,
+        bar_multiplier: Option<NonZeroU16>,
+        delay: Micro,
+    ) -> Channel {
         Channel::Cv {
             common: ChannelCommon {
                 divider,
@@ -1254,7 +1268,7 @@ mod tests {
                     resolution: TBase::T16,
                     amount: 0,
                 },
-                delay: Micro::ZERO,
+                delay,
                 offset: Micro::ZERO,
                 bar_multiplier,
             },
@@ -1343,6 +1357,34 @@ mod tests {
         assert_eq!(io.output[0], 1.0);
         assert_eq!(io.output[1], -1.0);
         assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 2);
+    }
+
+    #[test]
+    fn cv_pulse_priority_is_independent_of_audio_channel_order() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let mut playhead = Playhead::<R048>::new(
+            vec![
+                cv_pulse_channel_with_delay(Grid::T4, None, Micro(440)),
+                audio_click_channel(Grid::T4, None),
+                cv_pulse_channel_with_delay(Grid::T4, None, Micro(420)),
+            ],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+            64,
+        );
+        let sink = TestSink::new();
+        let input = vec![0.0_f32; 64]; // PCM ABI
+        let mut output = vec![0.0_f32; 64]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 64);
+
+        playhead.on_buffer(&mut io, &sink);
+
+        assert_eq!(io.output[20], 1.0);
+        assert_eq!(io.output[21], 1.0);
     }
 
     /// Helper for the bars-filter proptest + spot check: extract a
