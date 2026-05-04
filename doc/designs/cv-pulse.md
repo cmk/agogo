@@ -7,6 +7,10 @@ and 1883–1926 (the "pending reset" flag in the full audio callback).
 layer and owns properties `cv_impulse_sample_exact` and
 `cv_impulse_one_sample_energy`.
 
+Plan 2026-05-04-04 pulls the fixed mono pulse renderer forward as a public-demo
+MVP. The heterogeneous output layer still owns multi-channel routing, hardware
+calibration, and user-facing pulse-shape controls.
+
 ## Adopt
 
 - **Single-sample Dirac impulse as the CV pulse shape.** One sample

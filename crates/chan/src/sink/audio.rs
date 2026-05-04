@@ -16,7 +16,7 @@
 
 use thiserror::Error;
 
-use crate::channel::{AudioRole, ScheduledEvent};
+use crate::channel::{AudioRole, CvRole, ScheduledEvent};
 
 const AUDIO_CLICK_ACCENT_EVERY: u32 = 4;
 const AUDIO_CLICK_NORMAL_FREQ_HZ: u32 = 1_200;
@@ -25,6 +25,8 @@ const AUDIO_CLICK_NORMAL_AMP_Q15: i32 = 14_000;
 const AUDIO_CLICK_ACCENT_AMP_Q15: i32 = 24_000;
 const AUDIO_CLICK_MIN_FRAMES: usize = 24;
 const AUDIO_CLICK_MAX_FRAMES: usize = 960;
+const CV_PULSE_POSITIVE: f32 = 1.0_f32; // PCM ABI
+const CV_PULSE_NEGATIVE: f32 = -1.0_f32; // PCM ABI
 
 /// Cross-platform audio-host trait. Concrete back-ends live in
 /// sibling crates (`host-cpal`, future `host-jack`, ...) and
@@ -43,14 +45,14 @@ pub trait AudioHost {
 
 /// Per-buffer callback payload.
 ///
-/// **Channel layout.** `input` and `output` are mono in
-/// v0.1 — back-ends enforce `Config::input_channels == 1` (and the
-/// CV output side is empty until v0.4). Multi-channel support
-/// arrives with v0.4's heterogeneous output work, at which point this
-/// struct gains explicit `input_channels` / `output_channels`
-/// fields and the buffers carry interleaved frames. Pattern
-/// matches against `AudioIo` should use `..` to ride the
-/// `#[non_exhaustive]` forward-compat.
+/// **Channel layout.** `input` and `output` are mono in the current
+/// host shape. Audio click and MVP CV pulse rendering both write to
+/// this mono output slice. Multi-channel support arrives with
+/// v0.4's heterogeneous output work, at which point this struct gains
+/// explicit `input_channels` / `output_channels` fields and the
+/// buffers carry interleaved frames. Pattern matches against
+/// `AudioIo` should use `..` to ride the `#[non_exhaustive]`
+/// forward-compat.
 ///
 /// Marked `#[non_exhaustive]` so v0.3's Link work can add a cpal
 /// `timestamp().playback` field without breaking downstream pattern
@@ -61,8 +63,7 @@ pub struct AudioIo<'a> {
     /// Captured input samples for this buffer. Empty when the host
     /// was opened without an input device.
     pub input: &'a [f32],
-    /// Output buffer for this buffer. Empty in input-only configs
-    /// (v0.1 scope — CV output arrives in v0.4).
+    /// Output buffer for this buffer. Empty in input-only configs.
     /// When non-empty, back-ends give the callback undefined-content
     /// memory and the callback must write every sample
     /// (`doc/designs/cv-pulse.md:47-52`).
@@ -109,8 +110,7 @@ pub struct Config {
     /// [`AudioHostError::DeviceNotFound`].
     pub input_device: Option<String>,
     /// Output device name; `None` selects the host's default output.
-    /// Current callers pass `None` and ignore the output slice (CV out
-    /// lands in v0.4).
+    /// Current callers pass `None` for the default output device.
     pub output_device: Option<String>,
     /// Target sample rate. Back-ends surface unsupported rates as
     /// [`AudioHostError::UnsupportedSampleRate`] rather than
@@ -130,6 +130,39 @@ pub struct Config {
 /// a platform-specific type in `agogo-core`.
 pub struct Handle {
     _payload: Box<dyn std::any::Any + Send>,
+}
+
+/// Fixed MVP CV pulse shape.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum CvPulseShape {
+    /// One positive sample per scheduled event.
+    Monopolar,
+    /// One positive sample followed by one negative reset sample.
+    Bipolar,
+}
+
+/// Per-channel CV pulse render state.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct CvPulseState {
+    shape: CvPulseShape,
+    pending_bipolar_reset: bool,
+}
+
+impl CvPulseState {
+    pub const fn new(shape: CvPulseShape) -> Self {
+        Self {
+            shape,
+            pending_bipolar_reset: false,
+        }
+    }
+
+    pub const fn bipolar() -> Self {
+        Self::new(CvPulseShape::Bipolar)
+    }
+
+    pub fn reset(&mut self) {
+        self.pending_bipolar_reset = false;
+    }
 }
 
 impl Handle {
@@ -219,6 +252,57 @@ pub fn render_audio_click_block(
     }
 }
 
+/// Render fixed-shape CV pulse events into the current output buffer.
+///
+/// The public `dev=cv,mode=pulse` surface uses bipolar pulses by
+/// default via [`CvPulseState::bipolar`]. The explicit state parameter
+/// keeps the buffer-boundary reset flag per channel and lets tests
+/// exercise the monopolar shape without adding CLI knobs.
+pub fn render_cv_pulse_block(
+    events: &[ScheduledEvent],
+    role: &CvRole,
+    state: &mut CvPulseState,
+    io: &mut AudioIo<'_>,
+) {
+    if io.output.is_empty() {
+        return;
+    }
+
+    match role {
+        CvRole::Pulse => {
+            let writable = io.output.len().min(io.frames);
+            if writable == 0 {
+                return;
+            }
+
+            if state.pending_bipolar_reset {
+                mix_pcm(&mut io.output[0], CV_PULSE_NEGATIVE);
+                state.pending_bipolar_reset = false;
+            }
+
+            for ev in events {
+                let Some(offset) = ev.sample_index.checked_sub(io.buffer_start_sample) else {
+                    continue;
+                };
+                let offset = offset as usize;
+                if offset >= writable {
+                    continue;
+                }
+                mix_pcm(&mut io.output[offset], CV_PULSE_POSITIVE);
+                if state.shape == CvPulseShape::Bipolar {
+                    let reset = offset + 1;
+                    if reset < writable {
+                        mix_pcm(&mut io.output[reset], CV_PULSE_NEGATIVE);
+                    } else {
+                        state.pending_bipolar_reset = true;
+                    }
+                }
+            }
+        }
+        CvRole::Lfo => {}
+    }
+}
+
 fn render_one_click(start: usize, accent: bool, sample_rate: u32, output: &mut [f32]) {
     let len = click_len(sample_rate);
     let freq = if accent {
@@ -257,6 +341,10 @@ fn mix_q15(dst: &mut f32, sample_q15: i32) {
     // output boundary and clamp the mixed output to the f32 PCM
     // range cpal expects.
     let sample = sample_q15 as f32 / 32_768.0_f32; // PCM ABI
+    mix_pcm(dst, sample);
+}
+
+fn mix_pcm(dst: &mut f32, sample: f32) {
     *dst = (*dst + sample).clamp(-1.0_f32, 1.0_f32); // PCM ABI
 }
 
@@ -264,6 +352,7 @@ fn mix_q15(dst: &mut f32, sample_q15: i32) {
 mod tests {
     use super::*;
     use crate::time::tick::Tick;
+    use proptest::prelude::*;
 
     /// `Handle` drops its payload, which is how back-ends signal
     /// stream teardown. Uses an `Arc<AtomicBool>` witness: the
@@ -383,6 +472,135 @@ mod tests {
 
         assert_eq!(combined_counter, split_counter);
         assert_eq!(combined, split);
+    }
+
+    #[test]
+    fn cv_monopolar_pulse_writes_one_positive_sample() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 8]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
+        let mut state = CvPulseState::new(CvPulseShape::Monopolar);
+
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut io);
+
+        assert_eq!(io.output[3], 1.0);
+        assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 1);
+    }
+
+    #[test]
+    fn cv_bipolar_pulse_writes_reset_sample() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 8]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
+        let mut state = CvPulseState::bipolar();
+
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut io);
+
+        assert_eq!(io.output[3], 1.0);
+        assert_eq!(io.output[4], -1.0);
+        assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 2);
+    }
+
+    #[test]
+    fn cv_bipolar_reset_spills_to_next_buffer() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut state = CvPulseState::bipolar();
+
+        let mut first = vec![0.0_f32; 4]; // PCM ABI
+        {
+            let mut io = AudioIo::new(&input, &mut first, 0, 48_000, 4);
+            render_cv_pulse_block(&[event(3)], &CvRole::Pulse, &mut state, &mut io);
+        }
+        assert_eq!(first, vec![0.0, 0.0, 0.0, 1.0]);
+
+        let mut second = vec![0.0_f32; 4]; // PCM ABI
+        {
+            let mut io = AudioIo::new(&input, &mut second, 4, 48_000, 4);
+            render_cv_pulse_block(&[], &CvRole::Pulse, &mut state, &mut io);
+        }
+        assert_eq!(second, vec![-1.0, 0.0, 0.0, 0.0]);
+    }
+
+    proptest! {
+        // Renderer-level property over bounded buffers: the input type
+        // is a per-buffer PCM slice, so the meaningful domain is the
+        // finite slice length handed to this function. Larger scheduling
+        // domains are covered by transport/offline render tests.
+        #[test]
+        fn cv_impulse_sample_exact(
+            frames in 1usize..=512,
+            offset in 0usize..512,
+            sample_rate in prop::sample::select(&[44_100_u32, 48_000, 88_200, 96_000, 176_400, 192_000]),
+        ) {
+            let offset = offset % frames;
+            let input: [f32; 0] = []; // PCM ABI
+            let mut output = vec![0.0_f32; frames]; // PCM ABI
+            let start = 1_000_u64;
+            let mut io = AudioIo::new(&input, &mut output, start, sample_rate, frames);
+            let mut state = CvPulseState::bipolar();
+
+            render_cv_pulse_block(
+                &[event(start + offset as u64)],
+                &CvRole::Pulse,
+                &mut state,
+                &mut io,
+            );
+
+            prop_assert_eq!(io.output[offset], 1.0);
+        }
+
+        // Same bounded per-buffer domain as `cv_impulse_sample_exact`.
+        // This pins the monopolar shape used by future cancellation
+        // and calibration tests without exposing it on the CLI yet.
+        #[test]
+        fn cv_impulse_one_sample_energy(
+            frames in 1usize..=512,
+            offset in 0usize..512,
+        ) {
+            let offset = offset % frames;
+            let input: [f32; 0] = []; // PCM ABI
+            let mut output = vec![0.0_f32; frames]; // PCM ABI
+            let start = 1_000_u64;
+            let mut io = AudioIo::new(&input, &mut output, start, 48_000, frames);
+            let mut state = CvPulseState::new(CvPulseShape::Monopolar);
+
+            render_cv_pulse_block(
+                &[event(start + offset as u64)],
+                &CvRole::Pulse,
+                &mut state,
+                &mut io,
+            );
+
+            prop_assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 1);
+            prop_assert_eq!(io.output[offset], 1.0);
+        }
+
+        #[test]
+        fn cv_bipolar_reset_crosses_buffer(frames in 1usize..=512) {
+            let input: [f32; 0] = []; // PCM ABI
+            let mut state = CvPulseState::bipolar();
+            let start = 8_000_u64;
+
+            let mut first = vec![0.0_f32; frames]; // PCM ABI
+            {
+                let mut io = AudioIo::new(&input, &mut first, start, 48_000, frames);
+                render_cv_pulse_block(
+                    &[event(start + frames as u64 - 1)],
+                    &CvRole::Pulse,
+                    &mut state,
+                    &mut io,
+                );
+            }
+            prop_assert_eq!(first[frames - 1], 1.0);
+
+            let mut second = vec![0.0_f32; frames]; // PCM ABI
+            {
+                let mut io = AudioIo::new(&input, &mut second, start + frames as u64, 48_000, frames);
+                render_cv_pulse_block(&[], &CvRole::Pulse, &mut state, &mut io);
+            }
+            prop_assert_eq!(second[0], -1.0);
+            prop_assert_eq!(second.iter().filter(|&&s| s != 0.0).count(), 1);
+        }
     }
 
     /// Sanity match over every `AudioHostError` variant.

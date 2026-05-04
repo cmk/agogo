@@ -30,7 +30,7 @@ use crate::conn::rate::{R044, R048, R088, R096, R176, R192, SampleRate};
 use crate::conn::tempo::Tempo;
 use crate::control::PhaseSource;
 use crate::event::tick_stream_into;
-use crate::sink::audio::{AudioIo, render_audio_click_block};
+use crate::sink::audio::{AudioIo, CvPulseState, render_audio_click_block, render_cv_pulse_block};
 use crate::sink::midi::{MidiRtByte, MidiSink, render_midi_channel};
 
 const COMMAND_TRANSPORT_CAPACITY: usize = 128;
@@ -85,6 +85,10 @@ pub struct Playhead<R> {
     /// accents. Index parallels `channels`; meaningful only for
     /// `Channel::Audio { role: AudioRole::Click }` channels.
     audio_click_counters: Vec<u32>,
+    /// Per-channel CV pulse renderer state. Index parallels
+    /// `channels`; meaningful only for `Channel::Cv { role:
+    /// CvRole::Pulse }` channels.
+    cv_pulse_states: Vec<CvPulseState>,
     /// Cross-thread stop signal. `PlayheadStopHandle::request_stop`
     /// flips this; the next [`Playhead::on_buffer`] reads it and
     /// emits [`MidiRtByte::Stop`].
@@ -326,6 +330,8 @@ pub struct OfflineRenderReport {
     pub dropped: u64,
     pub audio_nonzero_samples: u64,
     pub audio_peak_q15: u16,
+    pub audio_positive_peak_q15: u16,
+    pub audio_negative_peak_q15: u16,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -374,6 +380,7 @@ impl<R> Playhead<R> {
             bar_counters: vec![0; n],
             click_counters: vec![0; n],
             audio_click_counters: vec![0; n],
+            cv_pulse_states: vec![CvPulseState::bipolar(); n],
             stop_flag: Arc::new(AtomicBool::new(false)),
             command_transport: CommandTransportQueue::new(),
         }
@@ -529,6 +536,9 @@ impl<R> Playhead<R> {
             self.bar_counters.iter_mut().for_each(|c| *c = 0);
             self.click_counters.iter_mut().for_each(|c| *c = 0);
             self.audio_click_counters.iter_mut().for_each(|c| *c = 0);
+            self.cv_pulse_states
+                .iter_mut()
+                .for_each(CvPulseState::reset);
             return;
         }
 
@@ -566,12 +576,8 @@ impl<R> Playhead<R> {
                 });
             }
             // Plan 21 (audit P3) dispatches on the outer Channel
-            // variant so the typed `render_midi_channel` only ever
-            // sees MIDI roles. `Din` / `Cv` channels have no
-            // renderer in v0.1 — same effective behaviour as the
-            // pre-P3 silent no-op, but now the lack-of-renderer is
-            // visible at the dispatch site rather than buried in a
-            // catch-all match arm inside the renderer.
+            // variant so the typed renderers only ever see roles
+            // for their output target.
             match ch {
                 Channel::Midi {
                     common: midi_common,
@@ -595,9 +601,17 @@ impl<R> Playhead<R> {
                         io,
                     );
                 }
-                Channel::Din { .. } | Channel::Cv { .. } => {
-                    // No renderer for these targets in v0.1; the
-                    // sink is MIDI-only.
+                Channel::Cv { role, .. } => {
+                    render_cv_pulse_block(
+                        &self.events_pool,
+                        role,
+                        &mut self.cv_pulse_states[idx],
+                        io,
+                    );
+                }
+                Channel::Din { .. } => {
+                    // DIN has no renderer yet; the current concrete
+                    // sinks are MIDI/audio-output based.
                 }
             }
         }
@@ -689,6 +703,8 @@ fn render_offline_with_rate<R: OfflineRate>(
     let mut buffers_rendered = 0_u64;
     let mut audio_nonzero_samples = 0_u64;
     let mut audio_peak_q15 = 0_u16;
+    let mut audio_positive_peak_q15 = 0_u16;
+    let mut audio_negative_peak_q15 = 0_u16;
 
     while sample < config.total_frames {
         let remaining = config.total_frames - sample;
@@ -704,6 +720,12 @@ fn render_offline_with_rate<R: OfflineRate>(
             }
             let q15 = (sample_value.abs().min(1.0) * 32767.0_f32).round() as u16;
             audio_peak_q15 = audio_peak_q15.max(q15);
+            if sample_value > 0.0 {
+                audio_positive_peak_q15 = audio_positive_peak_q15.max(q15);
+            }
+            if sample_value < 0.0 {
+                audio_negative_peak_q15 = audio_negative_peak_q15.max(q15);
+            }
         }
 
         sample = sample.saturating_add(frames as u64);
@@ -726,13 +748,15 @@ fn render_offline_with_rate<R: OfflineRate>(
         dropped: 0,
         audio_nonzero_samples,
         audio_peak_q15,
+        audio_positive_peak_q15,
+        audio_negative_peak_q15,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channel::{AudioRole, ChannelCommon, MidiRole};
+    use crate::channel::{AudioRole, ChannelCommon, CvRole, MidiRole};
     use crate::conn::fixed::Micro;
     use crate::conn::rate::R048;
     use crate::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
@@ -1222,6 +1246,22 @@ mod tests {
         }
     }
 
+    fn cv_pulse_channel(divider: Grid, bar_multiplier: Option<NonZeroU16>) -> Channel {
+        Channel::Cv {
+            common: ChannelCommon {
+                divider,
+                shuffle: SwingConfig {
+                    resolution: TBase::T16,
+                    amount: 0,
+                },
+                delay: Micro::ZERO,
+                offset: Micro::ZERO,
+                bar_multiplier,
+            },
+            role: CvRole::Pulse,
+        }
+    }
+
     /// Plan 2026-04-25-03 spot check: a click channel with no
     /// `bar_multiplier` emits Note On at every scheduled tick
     /// produced by the divider. At T4 / 120 BPM / 48 kHz, that's
@@ -1278,6 +1318,31 @@ mod tests {
 
         assert!(io.output.iter().any(|&s| s != 0.0));
         assert_eq!(playhead.audio_click_counters[0], 1);
+    }
+
+    #[test]
+    fn cv_pulse_channel_writes_bipolar_pcm_per_divider_tick() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let mut playhead = Playhead::<R048>::new(
+            vec![cv_pulse_channel(Grid::T4, None)],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+            24_000,
+        );
+        let sink = TestSink::new();
+        let input = vec![0.0_f32; 24_000]; // PCM ABI
+        let mut output = vec![0.0_f32; 24_000]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 24_000);
+
+        playhead.on_buffer(&mut io, &sink);
+
+        assert_eq!(io.output[0], 1.0);
+        assert_eq!(io.output[1], -1.0);
+        assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 2);
     }
 
     /// Helper for the bars-filter proptest + spot check: extract a

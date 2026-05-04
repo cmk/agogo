@@ -11,7 +11,7 @@
 use core::num::{NonZeroU16, NonZeroU32};
 
 use crate::channel::dsl;
-use crate::channel::role::{AudioRole, MidiClickAccent, MidiClickConfig, MidiRole};
+use crate::channel::role::{AudioRole, CvRole, MidiClickAccent, MidiClickConfig, MidiRole};
 use crate::conn::fixed::Micro;
 use crate::conn::float::F064FD06;
 use crate::conn::midi::{U4, U7};
@@ -34,9 +34,9 @@ impl ChannelSpec {
 
         let mut id: Option<String> = None;
         // The `dev=` key is required. MIDI remains the default
-        // production target; audio is limited to generated
-        // `mode=click` test output.
-        let mut dev_kw: Option<&'static str> = None; // "midi" | "audio"
+        // production target; audio and CV are generated-output
+        // surfaces with fixed MVP renderer settings.
+        let mut dev_kw: Option<&'static str> = None; // "midi" | "audio" | "cv"
         let mut out: Option<String> = None;
         let mut grid_str: Option<String> = None;
         let mut swing: SwingConfig = SwingConfig {
@@ -51,7 +51,7 @@ impl ChannelSpec {
         // after the loop: cross-key constraints (mode=click requires
         // note+vel; clock rejects click keys) are easier to enforce
         // in one pass at the end.
-        let mut mode_kw: Option<&'static str> = None; // "clock" | "click"
+        let mut mode_kw: Option<&'static str> = None; // "clock" | "click" | "pulse" | "lfo"
         let mut note: Option<U7> = None;
         let mut vel: Option<U7> = None;
         let mut mch_zero_based: Option<U4> = None;
@@ -67,6 +67,7 @@ impl ChannelSpec {
                     dev_kw = Some(match v.as_str() {
                         "midi" => "midi",
                         "audio" => "audio",
+                        "cv" => "cv",
                         other => {
                             return Err(ChannelSpecError::BadValue("dev", other.to_string()));
                         }
@@ -80,10 +81,14 @@ impl ChannelSpec {
                     mode_kw = Some(match v.as_str() {
                         "clock" => "clock",
                         "click" => "click",
+                        "pulse" => "pulse",
+                        "lfo" => "lfo",
                         other => {
                             return Err(ChannelSpecError::BadValue(
                                 "mode",
-                                format!("expected `clock` or `click`, got `{other}`"),
+                                format!(
+                                    "expected `clock`, `click`, `pulse`, or `lfo`, got `{other}`"
+                                ),
                             ));
                         }
                     });
@@ -246,12 +251,19 @@ impl ChannelSpec {
 
         let dev = dev_kw.ok_or(ChannelSpecError::MissingKey("dev"))?;
 
+        let default_mode = match dev {
+            "midi" => "clock",
+            "audio" => "clock",
+            "cv" => "pulse",
+            _ => unreachable!("dev_kw is constrained at parse"),
+        };
+
         // Cross-key validation: assemble target-specific role from
         // `dev=` + `mode=`. `dev=midi` keeps the historical
         // default `mode=clock`; `dev=audio` must spell
         // `mode=click` so an accidental audio clock spec does not
-        // silently turn into a no-op.
-        let role = match (dev, mode_kw.unwrap_or("clock")) {
+        // silently turn into a no-op; `dev=cv` defaults to pulse.
+        let role = match (dev, mode_kw.unwrap_or(default_mode)) {
             ("midi", "clock") => {
                 // Reject click-only keys when mode is clock — they're
                 // silently ignored otherwise, which hides typos.
@@ -352,7 +364,52 @@ impl ChannelSpec {
                     "dev=audio supports mode=click only".into(),
                 ));
             }
-            _ => unreachable!("mode_kw is constrained to clock|click at parse"),
+            ("audio", "pulse" | "lfo") => {
+                return Err(ChannelSpecError::BadValue(
+                    "mode",
+                    "dev=audio supports mode=click only".into(),
+                ));
+            }
+            ("cv", "pulse") => {
+                const NON_CV_KEYS: &[&str] = &[
+                    "note",
+                    "vel",
+                    "mch",
+                    "accent-every",
+                    "accent-note",
+                    "accent-vel",
+                ];
+                let presence = [
+                    note.is_some(),
+                    vel.is_some(),
+                    mch_zero_based.is_some(),
+                    accent_every.is_some(),
+                    accent_note.is_some(),
+                    accent_vel.is_some(),
+                ];
+                for (i, &key) in NON_CV_KEYS.iter().enumerate() {
+                    if presence[i] {
+                        return Err(ChannelSpecError::BadValue(
+                            key,
+                            "only valid with dev=midi,mode=click".into(),
+                        ));
+                    }
+                }
+                ChannelSpecRole::Cv(CvRole::Pulse)
+            }
+            ("cv", "lfo") => {
+                return Err(ChannelSpecError::BadValue(
+                    "mode",
+                    "dev=cv,mode=lfo is not implemented yet".into(),
+                ));
+            }
+            ("cv", "clock" | "click") => {
+                return Err(ChannelSpecError::BadValue(
+                    "mode",
+                    "dev=cv supports mode=pulse only".into(),
+                ));
+            }
+            _ => unreachable!("dev_kw and mode_kw are constrained at parse"),
         };
 
         Ok(Self {
@@ -770,6 +827,42 @@ mod tests {
     fn parse_accepts_audio_click() {
         let spec = ChannelSpec::parse("dev=audio,mode=click,grid=t4", &[]).unwrap();
         assert_eq!(spec.role, ChannelSpecRole::Audio(AudioRole::Click));
+    }
+
+    #[test]
+    fn parse_accepts_cv_pulse() {
+        let spec = ChannelSpec::parse("dev=cv,mode=pulse,grid=t4", &[]).unwrap();
+        assert_eq!(spec.role, ChannelSpecRole::Cv(CvRole::Pulse));
+    }
+
+    #[test]
+    fn parse_cv_defaults_to_pulse() {
+        let spec = ChannelSpec::parse("dev=cv,grid=t4", &[]).unwrap();
+        assert_eq!(spec.role, ChannelSpecRole::Cv(CvRole::Pulse));
+    }
+
+    #[test]
+    fn parse_rejects_cv_lfo_until_renderer_exists() {
+        let err = ChannelSpec::parse("dev=cv,mode=lfo,grid=t4", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, msg) => {
+                assert_eq!(key, "mode");
+                assert!(msg.contains("not implemented"), "got: {msg}");
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_cv_pulse_with_midi_keys() {
+        let err = ChannelSpec::parse("dev=cv,mode=pulse,grid=t4,note=37", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, msg) => {
+                assert_eq!(key, "note");
+                assert!(msg.contains("dev=midi"), "got: {msg}");
+            }
+            other => panic!("unexpected: {:?}", other),
+        }
     }
 
     #[test]

@@ -29,6 +29,14 @@ not make false sample-accuracy claims.
   - reader round-trip tests
 - Snapshot extensions for per-output health and timing capability.
 
+## Earlier MVP Slice
+
+Plan 2026-05-04-04 pulls forward a mono `dev=cv,mode=pulse` MVP so public
+GitHub demos can exercise CV-style sync output before the full heterogeneous
+output layer lands. The v0.4 work still owns interleaved multi-output routing,
+latency profiles, calibration, pulse-width/amplitude controls, and mixed-format
+dispatch.
+
 ## Properties
 
 | Property | Invariant |

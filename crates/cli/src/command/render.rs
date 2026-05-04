@@ -96,6 +96,8 @@ pub fn render(args: &RenderArgs) -> Result<(), String> {
         "audio": {
             "nonzero_samples": report.audio_nonzero_samples,
             "peak_q15": report.audio_peak_q15,
+            "positive_peak_q15": report.audio_positive_peak_q15,
+            "negative_peak_q15": report.audio_negative_peak_q15,
         },
     });
     println!(

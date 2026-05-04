@@ -2,11 +2,12 @@
 
 cpal back-end for `agogo::chan::sink::audio::AudioHost`. This is the
 first platform-audio integration; v0.1 wires the audio-in path, and
-Plan 2026-05-02-06 adds output-only support for the generated audio
-metronome test feature. CV/gate output remains part of the
-heterogeneous output layer.
+Plan 2026-05-02-06 added output-only support for the generated audio
+metronome test feature, and Plan 2026-05-04-04 adds the mono CV pulse
+MVP. Per-output CV/gate routing remains part of the heterogeneous
+output layer.
 
-The core `AudioIo` output buffer remains mono for this test feature.
+The core `AudioIo` output buffer remains mono for this feature slice.
 `CpalHost` prefers a mono physical output config, but if the device is
 stereo-only it renders the mono callback buffer once and fans the
 sample stream out to every physical channel.

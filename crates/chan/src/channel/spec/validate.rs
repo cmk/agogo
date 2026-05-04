@@ -53,6 +53,7 @@ impl ChannelSpec {
         Ok(match self.role {
             ChannelSpecRole::Midi(role) => Channel::Midi { common, role },
             ChannelSpecRole::Audio(role) => Channel::Audio { common, role },
+            ChannelSpecRole::Cv(role) => Channel::Cv { common, role },
         })
     }
 }
@@ -60,7 +61,7 @@ impl ChannelSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channel::role::{AudioRole, MidiRole};
+    use crate::channel::role::{AudioRole, CvRole, MidiRole};
     use crate::conn::midi::U4;
     use core::num::NonZeroU16;
     use proptest::prelude::*;
@@ -118,6 +119,19 @@ mod tests {
                 common,
             } => assert_eq!(common.bar_multiplier, NonZeroU16::new(4)),
             _ => panic!("expected Channel::Audio {{ role: Click }}"),
+        }
+    }
+
+    #[test]
+    fn into_channel_cv_pulse_returns_cv_variant() {
+        let spec = ChannelSpec::parse("dev=cv,mode=pulse,grid=t4,bars=4", &[]).unwrap();
+        let ch = spec.into_channel().unwrap();
+        match ch {
+            Channel::Cv {
+                role: CvRole::Pulse,
+                common,
+            } => assert_eq!(common.bar_multiplier, NonZeroU16::new(4)),
+            _ => panic!("expected Channel::Cv {{ role: Pulse }}"),
         }
     }
 
