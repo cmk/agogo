@@ -55,3 +55,14 @@ Review comment:
 
 The crate-boundary refactor and associated script/import updates appear consistent, and the relevant workspace and detached-crate test/doc checks pass. I did not identify any actionable correctness issues introduced by the diff.
 
+<!-- gh-id: 3179181298 -->
+### Copilot on [`AGENTS.md:189`](https://github.com/cmk/agogo/pull/71#discussion_r3179181298) (2026-05-04 02:40 UTC)
+
+The `agogo-core` layer diagram is described as a "partial order", but the edges `driver -> ..., runtime` and `runtime -> ..., driver` form a cycle, so it isn't a partial order as written. Please revise the diagram to be acyclic (e.g., remove `runtime` from `driver`'s dependencies if runtime is intended to depend on driver only, matching the actual imports).
+
+<!-- gh-id: 3179187367 -->
+#### ↳ cmk (2026-05-04 02:44 UTC)
+
+Fixed by removing `runtime` from the `driver` layer's `depends-on:` sentinel and from the AGENTS `agogo-core` layer diagram. The resulting order matches the actual imports: `runtime` depends on `driver`, but `driver` does not depend on `runtime`.
+
+Verified with `scripts/check-layers.sh` and `cargo test -p agogo-core --quiet`.

@@ -186,7 +186,7 @@ code based on it.
   `agogo-core` (`crates/core/src`) is the runtime orchestration
   crate:
 
-      driver    → bridge, snapshot, transport, event, runtime
+      driver    → bridge, snapshot, transport, event
       runtime   → bridge, driver, snapshot, transport, event
       bridge    → transport, event, snapshot
       transport → event
