@@ -151,3 +151,8 @@ Copilot reviewed 53 out of 54 changed files in this pull request and generated 1
 | Cargo.lock | Records new dependency edges for `agogo-chan` and `serde_json`. |
 | AGENTS.md | Updates repository guidance for `float_boundary`, `rate`, and `Rxxx` naming. |
 </details>
+
+<!-- gh-id: 3179945850 -->
+#### ↳ cmk ([2026-05-04 07:23 UTC](https://github.com/cmk/agogo/pull/75#discussion_r3179945850))
+
+Fixed in dc1392b. agogo render now validates diagnostic routing before lowering ChannelSpec into Channel: omitted out= plus out=diag/out=diagnostic are accepted, and concrete targets like out=hw-port are rejected with a boundary-level error. Added render_rejects_real_output_targets to cover the regression.
