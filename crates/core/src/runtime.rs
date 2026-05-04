@@ -11,7 +11,7 @@ use crate::conn::sample::S048;
 use crate::control::PhaseSource;
 use crate::sink::audio::AudioIo;
 use crate::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
-use crate::{Playhead, TransportPolicy};
+use crate::transport::{Playhead, TransportPolicy};
 use serde_json::Value;
 
 use crate::bridge::{CommandApplyReport, ControlConsumer, apply_control_to_playhead};
