@@ -11,7 +11,7 @@
 //! See `doc/designs/output.md` ("Two-phase dispatch") for the
 //! upstream design rationale.
 
-use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
+use agogo::chan::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -255,7 +255,7 @@ impl Drop for DrainHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo::core::sink::midi::{
+    use agogo::chan::sink::midi::{
         AtSampleSupport, MidiLatencyCompensation, MidiSchedulingClass, TestSink,
     };
     use proptest::prelude::*;

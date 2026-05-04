@@ -6,7 +6,7 @@
 //! integer sample count plus 16 bits of sub-sample fraction.
 //!
 //! Distinct types per rate prevent accidental rate mixing at compile
-//! time: you cannot add an `S044` to an `S048`. To cross rates, apply the
+//! time: you cannot add an `R044` to an `R048`. To cross rates, apply the
 //! appropriate Galois [`Conn`](connections::conn::Conn), which expresses the rounding semantics
 //! explicitly.
 //!
@@ -21,36 +21,36 @@
 //!
 //! For every ordered pair `(Fine, Coarse)` where `Fine` has the
 //! higher Q48.16-bits-per-second rate, a
-//! [`Conn`](connections::conn::Conn)`<Fine, Coarse>` constant `SXX_SYY` exists:
+//! [`Conn`](connections::conn::Conn)`<Fine, Coarse>` constant `RXX_RYY` exists:
 //!
 //! ```text
 //!   Fine────────────ratio──────────Coarse   exactness
-//!   S088   <─×2─>   S044                      integer
-//!   S176  <─×4─>   S044                      integer
-//!   S176  <─×2─>   S088                      integer
-//!   S096   <─×2─>   S048                      integer
-//!   S192  <─×4─>   S048                      integer
-//!   S192  <─×2─>   S096                      integer
-//!   S048   <─160:147─>  S044                  rational (lossy)
-//!   S088   <─147:80─>   S048                  rational
-//!   S176  <─147:40─>   S048                  rational
-//!   S096   <─320:147─>  S044                  rational
-//!   S096   <─160:147─>  S088                  rational
-//!   S176  <─147:80─>   S096                  rational
-//!   S192  <─640:147─>  S044                  rational
-//!   S192  <─320:147─>  S088                  rational
-//!   S192  <─160:147─>  S176                 rational
+//!   R088   <─×2─>   R044                      integer
+//!   R176  <─×4─>   R044                      integer
+//!   R176  <─×2─>   R088                      integer
+//!   R096   <─×2─>   R048                      integer
+//!   R192  <─×4─>   R048                      integer
+//!   R192  <─×2─>   R096                      integer
+//!   R048   <─160:147─>  R044                  rational (lossy)
+//!   R088   <─147:80─>   R048                  rational
+//!   R176  <─147:40─>   R048                  rational
+//!   R096   <─320:147─>  R044                  rational
+//!   R096   <─160:147─>  R088                  rational
+//!   R176  <─147:80─>   R096                  rational
+//!   R192  <─640:147─>  R044                  rational
+//!   R192  <─320:147─>  R088                  rational
+//!   R192  <─160:147─>  R176                 rational
 //!
 //! Ratio labels read `NUM:DEN`, i.e. the `inner(Coarse) = Coarse ·
 //! NUM/DEN Fine` multiplier (always ≥ 1 because Fine is the higher-
 //! bits-per-second type).
 //! ```
 //!
-//! Plus one `Conn<FD12, Sxx>` per rate connecting the sample tier to
+//! Plus one `Conn<FD12, Rxx>` per rate connecting the sample tier to
 //! the decimal SI-time tier from [`crate::conn::fixed`].
-//! Each `Sxx` type also has an explicit transparent iso to
-//! `FixedI64<U16>` (`S048Q016`) and a composed left connection to
-//! whole `i64` sample counts (`S048I064`). Call sites that need a
+//! Each `Rxx` type also has an explicit transparent iso to
+//! `FixedI64<U16>` (`R048Q016`) and a composed left connection to
+//! whole `i64` sample counts (`R048I064`). Call sites that need a
 //! semantic sample-count conversion use those named conns; raw Q48.16
 //! representation access stays on the newtype.
 //!
@@ -129,12 +129,12 @@ macro_rules! def_rate {
     };
 }
 
-def_rate!(S044, 44_100);
-def_rate!(S048, 48_000);
-def_rate!(S088, 88_200);
-def_rate!(S096, 96_000);
-def_rate!(S176, 176_400);
-def_rate!(S192, 192_000);
+def_rate!(R044, 44_100);
+def_rate!(R048, 48_000);
+def_rate!(R088, 88_200);
+def_rate!(R096, 96_000);
+def_rate!(R176, 176_400);
+def_rate!(R192, 192_000);
 
 // ─────────────────────────────────────────────────────────────────
 // Rate ↔ Rate connections
@@ -204,48 +204,48 @@ macro_rules! rate_conn {
 }
 
 // Integer ratios (power-of-two intra-family).
-rate_conn!(S088S044, S088, S044, 2, 1);
-rate_conn!(S176S044, S176, S044, 4, 1);
-rate_conn!(S176S088, S176, S088, 2, 1);
-rate_conn!(S096S048, S096, S048, 2, 1);
-rate_conn!(S192S048, S192, S048, 4, 1);
-rate_conn!(S192S096, S192, S096, 2, 1);
+rate_conn!(R088R044, R088, R044, 2, 1);
+rate_conn!(R176R044, R176, R044, 4, 1);
+rate_conn!(R176R088, R176, R088, 2, 1);
+rate_conn!(R096R048, R096, R048, 2, 1);
+rate_conn!(R192R048, R192, R048, 4, 1);
+rate_conn!(R192R096, R192, R096, 2, 1);
 
-// Rational ratios (cross-family). Naming convention: `SXX_SYY` has
-// `SXX` as the Fine side (higher Q48.16-bits-per-second) and `SYY` as
+// Rational ratios (cross-family). Naming convention: `RXXRYY` has
+// `RXX` as the Fine side (higher Q48.16-bits-per-second) and `RYY` as
 // Coarse. NUM ≥ DEN ≥ 1 so `inner(coarse) = coarse · NUM / DEN` is an
 // upscale. Reduced ratios; gcd(NUM, 147) = 1 in every case so 147
 // (= 3² · 7²) stays in the denominator whenever one side is from the
 // 44.1k family.
-rate_conn!(S048S044, S048, S044, 160, 147);
-rate_conn!(S088S048, S088, S048, 147, 80);
-rate_conn!(S176S048, S176, S048, 147, 40);
-rate_conn!(S096S044, S096, S044, 320, 147);
-rate_conn!(S096S088, S096, S088, 160, 147);
-rate_conn!(S176S096, S176, S096, 147, 80);
-rate_conn!(S192S044, S192, S044, 640, 147);
-rate_conn!(S192S088, S192, S088, 320, 147);
-rate_conn!(S192S176, S192, S176, 160, 147);
+rate_conn!(R048R044, R048, R044, 160, 147);
+rate_conn!(R088R048, R088, R048, 147, 80);
+rate_conn!(R176R048, R176, R048, 147, 40);
+rate_conn!(R096R044, R096, R044, 320, 147);
+rate_conn!(R096R088, R096, R088, 160, 147);
+rate_conn!(R176R096, R176, R096, 147, 80);
+rate_conn!(R192R044, R192, R044, 640, 147);
+rate_conn!(R192R088, R192, R088, 320, 147);
+rate_conn!(R192R176, R192, R176, 160, 147);
 
 // ─────────────────────────────────────────────────────────────────
 // Rate ↔ FD12 connections
 //
-// FD12 has 10¹² bits per second; an Sxxx rate has `R · 2¹⁶` bits per
+// FD12 has 10¹² bits per second; an Rxxx rate has `R · 2¹⁶` bits per
 // second (where `R` is the kHz-side sample rate). FD12 is the finer
 // tier (more bits/sec), so the connections are `Conn<Fine=FD12,
-// Coarse=Sxx>` with the relation NUM · sample_bit = DEN · pico after
-// reducing by gcd. One Sxx-bit spans NUM/DEN picoseconds.
+// Coarse=Rxx>` with the relation NUM · sample_bit = DEN · pico after
+// reducing by gcd. One Rxx-bit spans NUM/DEN picoseconds.
 //
 // Simplified ratios (computed once):
-//   S048:  gcd(10^12, 48_000·2^16) = 512_000
+//   R048:  gcd(10^12, 48_000·2^16) = 512_000
 //         num/den = (10^12 / 512_000) / ((48_000·2^16) / 512_000)
 //                 = 1_953_125 / 6144
-//   S096:  ratio = 1_953_125 / 12_288   (half of S048)
-//   S192:  ratio = 1_953_125 / 24_576   (quarter of S048)
-//   S044:  gcd(10^12, 44_100·2^16) = 102_400
+//   R096:  ratio = 1_953_125 / 12_288   (half of R048)
+//   R192:  ratio = 1_953_125 / 24_576   (quarter of R048)
+//   R044:  gcd(10^12, 44_100·2^16) = 102_400
 //         num/den = 9_765_625 / 28_224
-//   S088:  ratio = 9_765_625 / 56_448   (half of S044)
-//   S176:  ratio = 9_765_625 / 112_896  (quarter of S044)
+//   R088:  ratio = 9_765_625 / 56_448   (half of R044)
+//   R176:  ratio = 9_765_625 / 112_896  (quarter of R044)
 // ─────────────────────────────────────────────────────────────────
 
 macro_rules! pico_conn {
@@ -262,10 +262,10 @@ macro_rules! pico_conn {
 
         #[allow(non_camel_case_types)]
         impl $CONN {
-            // Conn<Fine=FD12, Coarse=Sxx>:
-            //   inner: Coarse → Fine. inner(s: Sxx) = floor_div(s_bits · NUM, DEN) picoseconds
-            //   ceil:  Fine → Coarse. ceil(p: FD12)  = ceil_div(p · DEN, NUM) Sxx-bits
-            //   floor: Fine → Coarse. floor(p: FD12) = floor_div(p · DEN + DEN − 1, NUM) Sxx-bits
+            // Conn<Fine=FD12, Coarse=Rxx>:
+            //   inner: Coarse → Fine. inner(s: Rxx) = floor_div(s_bits · NUM, DEN) picoseconds
+            //   ceil:  Fine → Coarse. ceil(p: FD12)  = ceil_div(p · DEN, NUM) Rxx-bits
+            //   floor: Fine → Coarse. floor(p: FD12) = floor_div(p · DEN + DEN − 1, NUM) Rxx-bits
             // The `floor(p) = floor_div((p+1)·DEN − 1, NUM)` form is
             // the Galois upper adjoint of a lossy `inner` (see module
             // docs); it collapses to the familiar `floor_div(p, NUM)`
@@ -306,12 +306,12 @@ macro_rules! pico_conn {
     };
 }
 
-pico_conn!(FD12S044, S044, 9_765_625, 28_224);
-pico_conn!(FD12S048, S048, 1_953_125, 6_144);
-pico_conn!(FD12S088, S088, 9_765_625, 56_448);
-pico_conn!(FD12S096, S096, 1_953_125, 12_288);
-pico_conn!(FD12S176, S176, 9_765_625, 112_896);
-pico_conn!(FD12S192, S192, 1_953_125, 24_576);
+pico_conn!(FD12R044, R044, 9_765_625, 28_224);
+pico_conn!(FD12R048, R048, 1_953_125, 6_144);
+pico_conn!(FD12R088, R088, 9_765_625, 56_448);
+pico_conn!(FD12R096, R096, 1_953_125, 12_288);
+pico_conn!(FD12R176, R176, 9_765_625, 112_896);
+pico_conn!(FD12R192, R192, 1_953_125, 24_576);
 
 // ────────────────────────────────────────────────────────────────────
 // Rate ↔ Q16 / i64 connections
@@ -359,12 +359,12 @@ macro_rules! sample_whole_conn {
     };
 }
 
-sample_whole_conn!(S044Q016, S044I064, S044);
-sample_whole_conn!(S048Q016, S048I064, S048);
-sample_whole_conn!(S088Q016, S088I064, S088);
-sample_whole_conn!(S096Q016, S096I064, S096);
-sample_whole_conn!(S176Q016, S176I064, S176);
-sample_whole_conn!(S192Q016, S192I064, S192);
+sample_whole_conn!(R044Q016, R044I064, R044);
+sample_whole_conn!(R048Q016, R048I064, R048);
+sample_whole_conn!(R088Q016, R088I064, R088);
+sample_whole_conn!(R096Q016, R096I064, R096);
+sample_whole_conn!(R176Q016, R176I064, R176);
+sample_whole_conn!(R192Q016, R192I064, R192);
 
 #[cfg(test)]
 mod tests {
@@ -379,83 +379,83 @@ mod tests {
     // ─────────────────────────────────────────────
 
     #[test]
-    fn s048_from_sample_bits() {
-        assert_eq!(S048::from_sample(0).to_bits(), 0);
-        assert_eq!(S048::from_sample(1).to_bits(), 1 << 16);
-        assert_eq!(S048::from_sample(-1).to_bits(), -(1 << 16));
-        assert_eq!(S048::ONE_SAMPLE.to_bits(), 1 << 16);
+    fn r048_from_sample_bits() {
+        assert_eq!(R048::from_sample(0).to_bits(), 0);
+        assert_eq!(R048::from_sample(1).to_bits(), 1 << 16);
+        assert_eq!(R048::from_sample(-1).to_bits(), -(1 << 16));
+        assert_eq!(R048::ONE_SAMPLE.to_bits(), 1 << 16);
     }
 
     #[test]
-    fn s048_sample_and_sub() {
-        let s = S048::from_sample(42);
+    fn r048_sample_and_sub() {
+        let s = R048::from_sample(42);
         assert_eq!(s.sample(), 42);
         assert_eq!(s.sub_q16(), 0);
 
         // 1 sample + 1/4 sub-sample = 0x1_4000 bits (16384 = 0x4000)
-        let s = S048::from_bits((1 << 16) | 0x4000);
+        let s = R048::from_bits((1 << 16) | 0x4000);
         assert_eq!(s.sample(), 1);
         assert_eq!(s.sub_q16(), 0x4000);
     }
 
     #[test]
-    fn s048_i064_spots() {
-        assert_eq!(S048I064.inner(0).to_bits(), 0);
-        assert_eq!(S048I064.inner(1).to_bits(), 1 << 16);
-        assert_eq!(S048I064.ceil(S048::from_bits((1 << 16) - 1)), 1);
-        assert_eq!(S048I064.ceil(S048::from_bits(-1)), 0);
-        assert_eq!(S048I064.ceil(S048::from_bits(-(1 << 16) - 1)), -1);
+    fn r048_i064_spots() {
+        assert_eq!(R048I064.inner(0).to_bits(), 0);
+        assert_eq!(R048I064.inner(1).to_bits(), 1 << 16);
+        assert_eq!(R048I064.ceil(R048::from_bits((1 << 16) - 1)), 1);
+        assert_eq!(R048I064.ceil(R048::from_bits(-1)), 0);
+        assert_eq!(R048I064.ceil(R048::from_bits(-(1 << 16) - 1)), -1);
     }
 
     #[test]
-    fn s088_s044_power_of_two_exact_embed() {
-        // 1 S044 sample = 2 S088 samples, bit-exact.
-        assert_eq!(S088S044.inner(S044::from_sample(7)), S088::from_sample(14));
+    fn r088_r044_power_of_two_exact_embed() {
+        // 1 R044 sample = 2 R088 samples, bit-exact.
+        assert_eq!(R088R044.inner(R044::from_sample(7)), R088::from_sample(14));
         // ceil and floor agree on values that land cleanly.
-        assert_eq!(S088S044.ceil(S088::from_sample(14)), S044::from_sample(7));
-        assert_eq!(S088S044.floor(S088::from_sample(14)), S044::from_sample(7));
-        // Off-by-one S088 bit → ceil/floor differ by 1 S044 bit.
-        let s088_odd = S088::from_bits(S088::from_sample(14).to_bits() + 1);
+        assert_eq!(R088R044.ceil(R088::from_sample(14)), R044::from_sample(7));
+        assert_eq!(R088R044.floor(R088::from_sample(14)), R044::from_sample(7));
+        // Off-by-one R088 bit → ceil/floor differ by 1 R044 bit.
+        let s088_odd = R088::from_bits(R088::from_sample(14).to_bits() + 1);
         assert_eq!(
-            S088S044.ceil(s088_odd),
-            S044::from_bits(S044::from_sample(7).to_bits() + 1)
+            R088R044.ceil(s088_odd),
+            R044::from_bits(R044::from_sample(7).to_bits() + 1)
         );
         assert_eq!(
-            S088S044.floor(s088_odd),
-            S044::from_bits(S044::from_sample(7).to_bits())
+            R088R044.floor(s088_odd),
+            R044::from_bits(R044::from_sample(7).to_bits())
         );
     }
 
     #[test]
-    fn s048_s044_rational_boundary() {
-        // 1 S044 bit = 160/147 S048 bits (floor), so inner(S044(147)) = S048(160) exactly.
-        let s044 = S044::from_bits(147);
-        assert_eq!(S048S044.inner(s044), S048::from_bits(160));
+    fn r048_r044_rational_boundary() {
+        // 1 R044 bit = 160/147 R048 bits (floor), so inner(R044(147)) = R048(160) exactly.
+        let r044 = R044::from_bits(147);
+        assert_eq!(R048R044.inner(r044), R048::from_bits(160));
         // Round-trip at the boundary.
-        assert_eq!(S048S044.ceil(S048::from_bits(160)), S044::from_bits(147));
-        assert_eq!(S048S044.floor(S048::from_bits(160)), S044::from_bits(147));
+        assert_eq!(R048R044.ceil(R048::from_bits(160)), R044::from_bits(147));
+        assert_eq!(R048R044.floor(R048::from_bits(160)), R044::from_bits(147));
         // At x=161, inner(148) = floor(148·160/147) = floor(161.088) = 161. So
         // both ceil and floor of 161 land on 148.
-        assert_eq!(S048S044.ceil(S048::from_bits(161)), S044::from_bits(148));
-        assert_eq!(S048S044.floor(S048::from_bits(161)), S044::from_bits(148));
+        assert_eq!(R048R044.ceil(R048::from_bits(161)), R044::from_bits(148));
+        assert_eq!(R048R044.floor(R048::from_bits(161)), R044::from_bits(148));
         // A value skipped by the staircase: inner(11) = 11, inner(12) = 13,
         // so x=12 is not hit. ceil(12) = 12, floor(12) = 11.
-        assert_eq!(S048S044.ceil(S048::from_bits(12)), S044::from_bits(12));
-        assert_eq!(S048S044.floor(S048::from_bits(12)), S044::from_bits(11));
+        assert_eq!(R048R044.ceil(R048::from_bits(12)), R044::from_bits(12));
+        assert_eq!(R048R044.floor(R048::from_bits(12)), R044::from_bits(11));
     }
 
     #[test]
-    fn s048_pico_spot() {
-        // 1 S048 sample = 1/48000 s = 1_000_000_000_000/48_000 ps = 20_833_333.333… ps.
-        // inner(S048::from_sample(1)) should be the floor_div version.
-        // S048(1 sample) = 65_536 bits. inner = floor_div(65_536 · 1_953_125, 6_144).
+    fn r048_pico_spot() {
+        // 1 R048 sample = 1/48000 s = 1_000_000_000_000/48_000 ps = 20_833_333.333… ps.
+        // inner(R048::from_sample(1)) should be the floor_div version.
+        // R048(1 sample) = 65_536 bits. inner = floor_div(65_536 · 1_953_125, 6_144).
         // = floor_div(128_000_000_000, 6_144) = 20_833_333.
-        let p = FD12S048.inner(S048::from_sample(1));
+        let p = FD12R048.inner(R048::from_sample(1));
         assert_eq!(p.0, 20_833_333);
-        // ceil of that same FD12 is back to exactly 1 S048 sample.
-        assert_eq!(FD12S048.ceil(FD12(20_833_333)), S048::from_sample(1));
+        // ceil of that same FD12 is back to exactly 1 R048 sample.
+        assert_eq!(FD12R048.ceil(FD12(20_833_333)), R048::from_sample(1));
         // floor of one ps higher is still 1 sample.
-        assert_eq!(FD12S048.floor(FD12(20_833_333)), S048::from_sample(1));
+        assert_eq!(FD12R048.floor(FD12(20_833_333)), R048::from_sample(1));
     }
 
     // ─────────────────────────────────────────────
@@ -582,27 +582,27 @@ mod tests {
     }
 
     // Integer-ratio pairs.
-    props_for_conn!(p_s088s044, S088S044, S088, S044, 2, 1);
-    props_for_conn!(p_s176s044, S176S044, S176, S044, 4, 1);
-    props_for_conn!(p_s176s088, S176S088, S176, S088, 2, 1);
-    props_for_conn!(p_s096s048, S096S048, S096, S048, 2, 1);
-    props_for_conn!(p_s192s048, S192S048, S192, S048, 4, 1);
-    props_for_conn!(p_s192s096, S192S096, S192, S096, 2, 1);
+    props_for_conn!(p_r088r044, R088R044, R088, R044, 2, 1);
+    props_for_conn!(p_r176r044, R176R044, R176, R044, 4, 1);
+    props_for_conn!(p_r176r088, R176R088, R176, R088, 2, 1);
+    props_for_conn!(p_r096r048, R096R048, R096, R048, 2, 1);
+    props_for_conn!(p_r192r048, R192R048, R192, R048, 4, 1);
+    props_for_conn!(p_r192r096, R192R096, R192, R096, 2, 1);
 
     // Cross-family rational pairs.
-    props_for_conn!(p_s048s044, S048S044, S048, S044, 160, 147);
-    props_for_conn!(p_s088s048, S088S048, S088, S048, 147, 80);
-    props_for_conn!(p_s176s048, S176S048, S176, S048, 147, 40);
-    props_for_conn!(p_s096s044, S096S044, S096, S044, 320, 147);
-    props_for_conn!(p_s096s088, S096S088, S096, S088, 160, 147);
-    props_for_conn!(p_s176s096, S176S096, S176, S096, 147, 80);
-    props_for_conn!(p_s192s044, S192S044, S192, S044, 640, 147);
-    props_for_conn!(p_s192s088, S192S088, S192, S088, 320, 147);
-    props_for_conn!(p_s192s176, S192S176, S192, S176, 160, 147);
+    props_for_conn!(p_r048r044, R048R044, R048, R044, 160, 147);
+    props_for_conn!(p_r088r048, R088R048, R088, R048, 147, 80);
+    props_for_conn!(p_r176r048, R176R048, R176, R048, 147, 40);
+    props_for_conn!(p_r096r044, R096R044, R096, R044, 320, 147);
+    props_for_conn!(p_r096r088, R096R088, R096, R088, 160, 147);
+    props_for_conn!(p_r176r096, R176R096, R176, R096, 147, 80);
+    props_for_conn!(p_r192r044, R192R044, R192, R044, 640, 147);
+    props_for_conn!(p_r192r088, R192R088, R192, R088, 320, 147);
+    props_for_conn!(p_r192r176, R192R176, R192, R176, 160, 147);
 
-    // FD12 connections. Here Fine = FD12, Coarse = Sxx. The macro is
-    // identical but FD12 is not an Sxx — write a tailored mod per conn
-    // that reads `.0` on FD12 and `.0.to_bits()` on Sxx.
+    // FD12 connections. Here Fine = FD12, Coarse = Rxx. The macro is
+    // identical but FD12 is not an Rxx — write a tailored mod per conn
+    // that reads `.0` on FD12 and `.0.to_bits()` on Rxx.
     macro_rules! props_for_pico_conn {
         ($mod:ident, $conn:ident, $Rate:ident, $num:expr, $den:expr) => {
             mod $mod {
@@ -635,7 +635,7 @@ mod tests {
                         let pp = FD12(p);
                         prop_assert!(laws::floor_le_ceil(&$conn, pp));
                         // Stronger: rational-ratio ULP bound
-                        // (`ceil - floor ≤ 1` Sxx Q48.16 ULP).
+                        // (`ceil - floor ≤ 1` Rxx Q48.16 ULP).
                         prop_assert!(laws::ulp_bound(
                             &$conn,
                             pp,
@@ -688,12 +688,12 @@ mod tests {
         };
     }
 
-    props_for_pico_conn!(p_fd12s044, FD12S044, S044, 9_765_625, 28_224);
-    props_for_pico_conn!(p_fd12s048, FD12S048, S048, 1_953_125, 6_144);
-    props_for_pico_conn!(p_fd12s088, FD12S088, S088, 9_765_625, 56_448);
-    props_for_pico_conn!(p_fd12s096, FD12S096, S096, 1_953_125, 12_288);
-    props_for_pico_conn!(p_fd12s176, FD12S176, S176, 9_765_625, 112_896);
-    props_for_pico_conn!(p_fd12s192, FD12S192, S192, 1_953_125, 24_576);
+    props_for_pico_conn!(p_fd12r044, FD12R044, R044, 9_765_625, 28_224);
+    props_for_pico_conn!(p_fd12r048, FD12R048, R048, 1_953_125, 6_144);
+    props_for_pico_conn!(p_fd12r088, FD12R088, R088, 9_765_625, 56_448);
+    props_for_pico_conn!(p_fd12r096, FD12R096, R096, 1_953_125, 12_288);
+    props_for_pico_conn!(p_fd12r176, FD12R176, R176, 9_765_625, 112_896);
+    props_for_pico_conn!(p_fd12r192, FD12R192, R192, 1_953_125, 24_576);
 
     macro_rules! props_for_sample_whole_conn {
         ($iso_mod:ident, $l_mod:ident, $iso:ident, $whole:ident, $Rate:ident) => {
@@ -717,16 +717,16 @@ mod tests {
         };
     }
 
-    props_for_sample_whole_conn!(p_s044q016, p_s044i064, S044Q016, S044I064, S044);
-    props_for_sample_whole_conn!(p_s048q016, p_s048i064, S048Q016, S048I064, S048);
-    props_for_sample_whole_conn!(p_s088q016, p_s088i064, S088Q016, S088I064, S088);
-    props_for_sample_whole_conn!(p_s096q016, p_s096i064, S096Q016, S096I064, S096);
-    props_for_sample_whole_conn!(p_s176q016, p_s176i064, S176Q016, S176I064, S176);
-    props_for_sample_whole_conn!(p_s192q016, p_s192i064, S192Q016, S192I064, S192);
+    props_for_sample_whole_conn!(p_r044q016, p_r044i064, R044Q016, R044I064, R044);
+    props_for_sample_whole_conn!(p_r048q016, p_r048i064, R048Q016, R048I064, R048);
+    props_for_sample_whole_conn!(p_r088q016, p_r088i064, R088Q016, R088I064, R088);
+    props_for_sample_whole_conn!(p_r096q016, p_r096i064, R096Q016, R096I064, R096);
+    props_for_sample_whole_conn!(p_r176q016, p_r176i064, R176Q016, R176I064, R176);
+    props_for_sample_whole_conn!(p_r192q016, p_r192i064, R192Q016, R192I064, R192);
 
     // Sanity-check the FD12↔sample rate against the transcendental
-    // definition: inner(Sxx::from_sample(1)) should be within 0.5 ps
-    // of 10^12 / Sxx::HZ.
+    // definition: inner(Rxx::from_sample(1)) should be within 0.5 ps
+    // of 10^12 / Rxx::HZ.
     #[test]
     fn fd12_inner_matches_ideal() {
         // Use f64 for the ideal — this test only, asserts sit here as
@@ -742,11 +742,11 @@ mod tests {
                 ideal
             );
         }
-        check::<S044>(FD12S044.inner(S044::from_sample(1)));
-        check::<S048>(FD12S048.inner(S048::from_sample(1)));
-        check::<S088>(FD12S088.inner(S088::from_sample(1)));
-        check::<S096>(FD12S096.inner(S096::from_sample(1)));
-        check::<S176>(FD12S176.inner(S176::from_sample(1)));
-        check::<S192>(FD12S192.inner(S192::from_sample(1)));
+        check::<R044>(FD12R044.inner(R044::from_sample(1)));
+        check::<R048>(FD12R048.inner(R048::from_sample(1)));
+        check::<R088>(FD12R088.inner(R088::from_sample(1)));
+        check::<R096>(FD12R096.inner(R096::from_sample(1)));
+        check::<R176>(FD12R176.inner(R176::from_sample(1)));
+        check::<R192>(FD12R192.inner(R192::from_sample(1)));
     }
 }

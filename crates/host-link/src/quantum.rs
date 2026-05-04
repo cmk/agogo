@@ -23,7 +23,7 @@
 //! Default-feature builds get the type for free; the gating is on
 //! the actual `rusty_link` integration, not on the parameter shape.
 
-use agogo::core::conn::fixed::Micro;
+use agogo::chan::conn::fixed::Micro;
 
 /// Link quantum in microbeats. `Quantum::from_bars(4)` = one bar in
 /// 4/4 = 4 000 000 microbeats.

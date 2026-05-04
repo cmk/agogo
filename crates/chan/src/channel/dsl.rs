@@ -28,8 +28,8 @@ use crate::time::grid::Grid;
 /// # Examples
 ///
 /// ```ignore
-/// use agogo::core::channel::dsl;
-/// use agogo::core::time::grid::Grid;
+/// use agogo::chan::channel::dsl;
+/// use agogo::chan::time::grid::Grid;
 ///
 /// // Plain grid atom:
 /// assert_eq!(dsl::parse("T16", &[]).unwrap(), Grid::T16);

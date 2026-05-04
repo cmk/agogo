@@ -91,17 +91,16 @@ Do not call general tracing or analytics APIs from the callback. Instead, writ c
 ## 3. Module layout
 
 ```
-core/src
+chan/src
 ├── lib.rs
 ├── conn.rs
 ├── conn/
 │   ├── arb.rs
-│   ├── boundary.rs
 │   ├── fixed.rs
 │   ├── float.rs
 │   ├── midi.rs
 │   ├── phase.rs
-│   ├── sample.rs
+│   ├── rate.rs
 │   └── tempo.rs
 ├── time.rs
 ├── time/

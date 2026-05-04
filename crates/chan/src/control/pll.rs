@@ -20,14 +20,14 @@
 //! { phase, freq_hz, integrator }` stay `f64` — they are the analog
 //! control-law quantities the user explicitly exempted from the
 //! no-float rule. The only f64→fxp casts live in
-//! [`crate::conn::boundary::f64_bpm_to_tempo`] / [`crate::conn::boundary::f64_phase_to_phase`]
+//! [`crate::conn::float::f64_bpm_to_tempo`] / [`crate::conn::float::f64_phase_to_phase`]
 //! at the `PllOutput` boundary.
 
-use crate::conn::boundary::{
+use crate::conn::float::{
     bits_q48_16_to_seconds, f64_bpm_to_tempo, f64_phase_to_phase, tempo_to_hz,
 };
 use crate::conn::phase::Phase;
-use crate::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate};
+use crate::conn::rate::{R044, R048, R088, R096, R176, R192, SampleRate};
 use crate::conn::tempo::Tempo;
 
 /// Loop-filter tuning.
@@ -231,18 +231,18 @@ macro_rules! impl_pll_rate {
     };
 }
 
-impl_pll_rate!(S044);
-impl_pll_rate!(S048);
-impl_pll_rate!(S088);
-impl_pll_rate!(S096);
-impl_pll_rate!(S176);
-impl_pll_rate!(S192);
+impl_pll_rate!(R044);
+impl_pll_rate!(R048);
+impl_pll_rate!(R088);
+impl_pll_rate!(R096);
+impl_pll_rate!(R176);
+impl_pll_rate!(R192);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::conn::fixed::{FD06, FD12FD06, Pico};
-    use crate::conn::sample::{S048, SampleRate};
+    use crate::conn::rate::{R048, SampleRate};
     use crate::control::pulse::pulse_train_s048;
     use proptest::prelude::*;
 
@@ -251,8 +251,8 @@ mod tests {
     fn assert_bpm_converges(bpm: Tempo, jitter: Pico, seed: u64) {
         let ppq = 24u32;
         let n_pulses = 64u32;
-        let (_, peaks): (Vec<f32>, Vec<S048>) = pulse_train_s048(bpm, ppq, jitter, n_pulses, seed);
-        let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, ppq);
+        let (_, peaks): (Vec<f32>, Vec<R048>) = pulse_train_s048(bpm, ppq, jitter, n_pulses, seed);
+        let mut pll = Pll::<R048>::new(PllSettings::DEFAULT, bpm, ppq);
         let mut last = bpm;
         for &p in &peaks {
             last = pll.step(Some(p)).bpm;
@@ -270,8 +270,8 @@ mod tests {
     fn default_settings_track_120_at_48k() {
         let ppq = 24u32;
         let bpm = Tempo::from_bpm_integer(120);
-        let (_, peaks): (Vec<f32>, Vec<S048>) = pulse_train_s048(bpm, ppq, Pico(0), 48, 1);
-        let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, ppq);
+        let (_, peaks): (Vec<f32>, Vec<R048>) = pulse_train_s048(bpm, ppq, Pico(0), 48, 1);
+        let mut pll = Pll::<R048>::new(PllSettings::DEFAULT, bpm, ppq);
         let mut last = Tempo::ZERO;
         for &p in &peaks {
             last = pll.step(Some(p)).bpm;
@@ -295,12 +295,12 @@ mod tests {
         // the regression.
         let ppq = 24u32;
         let nominal_bpm = Tempo::from_bpm_integer(120);
-        let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, nominal_bpm, ppq);
-        let huge_spacing_samples: f64 = S048::HZ as f64 * 100.0;
+        let mut pll = Pll::<R048>::new(PllSettings::DEFAULT, nominal_bpm, ppq);
+        let huge_spacing_samples: f64 = R048::HZ as f64 * 100.0;
         let mut t: f64 = 0.0;
         for _ in 0..1000 {
             let bits_q16 = (t * 65_536.0).round() as i64;
-            let obs = S048::from_bits(bits_q16);
+            let obs = R048::from_bits(bits_q16);
             let _out = pll.step(Some(obs));
             assert!(
                 pll.state().integrator > -1.0,
@@ -327,9 +327,9 @@ mod tests {
             let jitter = FD12FD06.inner(FD06(jitter_us as i64));
             let ppq = 24u32;
             let n_pulses = 64u32;
-            let (_, peaks): (Vec<f32>, Vec<S048>) =
+            let (_, peaks): (Vec<f32>, Vec<R048>) =
                 pulse_train_s048(bpm, ppq, jitter, n_pulses, seed);
-            let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, ppq);
+            let mut pll = Pll::<R048>::new(PllSettings::DEFAULT, bpm, ppq);
             let mut last = bpm;
             for &p in &peaks {
                 last = pll.step(Some(p)).bpm;
@@ -352,9 +352,9 @@ mod tests {
             let jitter = FD12FD06.inner(FD06(jitter_us as i64));
             let ppq = 24u32;
             let n_pulses = 64u32;
-            let (_, peaks): (Vec<f32>, Vec<S048>) =
+            let (_, peaks): (Vec<f32>, Vec<R048>) =
                 pulse_train_s048(bpm, ppq, jitter, n_pulses, seed);
-            let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, ppq);
+            let mut pll = Pll::<R048>::new(PllSettings::DEFAULT, bpm, ppq);
             // True pulse spacing in seconds (for error computation only;
             // test-local f64).
             let true_spacing_secs = 1.0 / tempo_to_hz(bpm, ppq);
@@ -386,17 +386,17 @@ mod tests {
             let ppq = 24u32;
             let n_pulses = 96u32;
             let jitter = Pico(50_000_000); // 50 µs
-            let (_, mut peaks): (Vec<f32>, Vec<S048>) =
+            let (_, mut peaks): (Vec<f32>, Vec<R048>) =
                 pulse_train_s048(bpm, ppq, jitter, n_pulses, seed);
-            let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, ppq);
+            let mut pll = Pll::<R048>::new(PllSettings::DEFAULT, bpm, ppq);
             let mut pre_bpm = bpm;
             for &p in peaks.iter().take(40) {
                 pre_bpm = pll.step(Some(p)).bpm;
             }
-            // 10×σ = 500 µs in samples at S048. Spike the 40th peak.
-            let spike_samples = 500.0 * S048::HZ as f64 / 1e6;
+            // 10×σ = 500 µs in samples at R048. Spike the 40th peak.
+            let spike_samples = 500.0 * R048::HZ as f64 / 1e6;
             let spike_bits = (spike_samples * 65_536.0).round() as i64;
-            peaks[40] = S048::from_bits(peaks[40].to_bits() + spike_bits);
+            peaks[40] = R048::from_bits(peaks[40].to_bits() + spike_bits);
             let mut last_post = pre_bpm;
             for &p in &peaks[40..] {
                 last_post = pll.step(Some(p)).bpm;
@@ -415,7 +415,7 @@ mod tests {
             bpm_mbpm in 60_000_000u32..200_000_000,
         ) {
             let bpm = Tempo(bpm_mbpm);
-            let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, 24);
+            let mut pll = Pll::<R048>::new(PllSettings::DEFAULT, bpm, 24);
             for _ in 0..1000 {
                 let _ = pll.step(None);
                 // Phase and bpm are integer types — no NaN to worry about.
@@ -438,8 +438,8 @@ mod tests {
             let nominal = Tempo::from_bpm_integer(120);
             let actual = Tempo::from_bpm_integer(130);
             let ppq = 24u32;
-            let (_, peaks): (Vec<f32>, Vec<S048>) = pulse_train_s048(actual, ppq, Pico(0), 800, 1);
-            let mut pll = Pll::<S048>::new(cfg, nominal, ppq);
+            let (_, peaks): (Vec<f32>, Vec<R048>) = pulse_train_s048(actual, ppq, Pico(0), 800, 1);
+            let mut pll = Pll::<R048>::new(cfg, nominal, ppq);
             for (i, &p) in peaks.iter().enumerate() {
                 let out = pll.step(Some(p));
                 let err = out.bpm.abs_diff(actual);

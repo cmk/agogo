@@ -7,8 +7,8 @@
 //!
 //! Plan 2026-04-28-05 T2: extracted from `cli/main.rs`.
 
-use agogo::core::conn::fixed::Micro;
-use agogo::core::conn::tempo::Tempo;
+use agogo::chan::conn::fixed::Micro;
+use agogo::chan::conn::tempo::Tempo;
 use agogo::core::tick_stream;
 use bpaf::Bpaf;
 
@@ -24,7 +24,7 @@ pub enum ChannelSub {
     Trace {
         /// Tempo in beats per minute.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo::core::conn::tempo::Tempo,
+        bpm: agogo::chan::conn::tempo::Tempo,
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
@@ -34,8 +34,8 @@ pub enum ChannelSub {
         /// Positive delay compensation in ms; clamped to `[0, 300]`
         /// inside the transform. Non-finite or negative values
         /// rejected at the CLI boundary.
-        #[bpaf(long, argument::<String>("MS"), parse(parse_ms_to_micro), fallback(agogo::core::conn::fixed::Micro::ZERO))]
-        delay: agogo::core::conn::fixed::Micro,
+        #[bpaf(long, argument::<String>("MS"), parse(parse_ms_to_micro), fallback(agogo::chan::conn::fixed::Micro::ZERO))]
+        delay: agogo::chan::conn::fixed::Micro,
         /// Audio buffer length in samples.
         #[bpaf(long, argument("FRAMES"))]
         frames: usize,

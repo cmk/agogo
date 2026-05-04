@@ -6,6 +6,7 @@ version = 4
 name = "agogo"
 version = "0.1.0"
 dependencies = [
+ "agogo-chan",
  "agogo-core",
  "agogo-host-cpal",
  "agogo-host-link",

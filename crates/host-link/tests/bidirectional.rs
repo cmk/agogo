@@ -28,8 +28,8 @@ mod agogo {
     }
 }
 
-use agogo::core::conn::tempo::Tempo;
-use agogo::core::test::fixture_or_skip;
+use agogo::chan::conn::tempo::Tempo;
+use agogo::chan::test::fixture_or_skip;
 use agogo::host::link::{HostTimeAnchor, LinkSession, LinkWriteConfig, Quantum, TransportState};
 use rusty_link::{AblLink, SessionState};
 use std::num::NonZeroU32;
@@ -204,11 +204,11 @@ fn quantum_snap_produces_positive_offset() {
     // transform pipeline wired through the real audio callback,
     // which lands with Plan 05.
     link_multicast_or_skip!();
-    use agogo::core::channel::{Channel, ChannelCommon, MAX_DELAY, MidiRole};
-    use agogo::core::conn::fixed::Micro;
-    use agogo::core::time::grid::Grid;
-    use agogo::core::time::swing::SwingConfig;
-    use agogo::core::time::tbase::TBase;
+    use agogo::chan::channel::{Channel, ChannelCommon, MAX_DELAY, MidiRole};
+    use agogo::chan::conn::fixed::Micro;
+    use agogo::chan::time::grid::Grid;
+    use agogo::chan::time::swing::SwingConfig;
+    use agogo::chan::time::tbase::TBase;
 
     let mut agogo_session = LinkSession::new(
         Tempo::from_bpm_integer(120),

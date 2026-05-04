@@ -9,9 +9,10 @@
 #   crates/chan/src/control/pll.rs           PI controller state + control law
 #   crates/chan/src/control/detect.rs        parabolic-fit ABI-local locals
 #   crates/chan/src/control/source.rs        PCM audio intake (`&[f32]`) + tests
-#   crates/chan/src/conn/boundary.rs              argv-boundary + PI-exempt helpers (split from
+#   crates/chan/src/conn/float_boundary.rs     argv-boundary + PI-exempt helpers (split from
 #                                                 the deleted fxp.rs in Plan 2026-04-28-03 T5;
-#                                                 moved under conn/ in Plan 2026-04-29-01 T2)
+#                                                 moved under conn/ in Plan 2026-04-29-01 T2;
+#                                                 public surface re-exported by conn/float.rs)
 #   crates/chan/src/control/pulse.rs         test-fixture PCM generator (synthetic Hann-bell
 #                                                 train; was crates/core/src/arb.rs's pulse_train
 #                                                 before Plan 2026-04-28-08 distributed arb.rs;
@@ -26,7 +27,7 @@
 #                                                 with f64-correction loops are intrinsic
 #                                                 (split from time/decimal.rs in Plan 2026-04-28-03 T1;
 #                                                 moved under conn/ in Plan 2026-04-29-01 T2)
-#   crates/chan/src/conn/sample.rs                vendored from connections — FD12↔Sxxx Conn
+#   crates/chan/src/conn/rate.rs                  vendored from connections — FD12↔Rxxx Conn
 #                                                 walk needs f64 internally
 #                                                 (moved under conn/ in Plan 2026-04-29-01 T2)
 #   crates/host-link/src/link.rs                  Link FFI (AblLink C++ ABI)
@@ -67,8 +68,10 @@ ALLOWED=(
   # (`tempo_to_hz`, `bits_q48_16_to_seconds`, `tempo_to_f64_bpm`,
   # `pico_to_f64_seconds`) plus the `MAX_BPM_F64` argv-bound constant.
   # Moved under conn/ in Plan 2026-04-29-01 T2 (the conn-shaped
-  # value-type seam, alongside Phase, Tempo, fixed, float, sample).
-  "crates/chan/src/conn/boundary.rs"
+  # value-type seam, alongside Phase, Tempo, fixed, float, and rate).
+  # Plan 2026-05-04-03 moved the public surface into `conn::float`;
+  # the implementation remains in this private child module.
+  "crates/chan/src/conn/float_boundary.rs"
   # Plan 2026-04-28-08 T2: `pulse_train` + `PULSE_WIDTH_PS` moved
   # out of the deleted pure-crate `arb.rs` (which aggregated
   # 9 unrelated proptest strategies plus this synthetic-signal
@@ -82,15 +85,16 @@ ALLOWED=(
   "crates/chan/src/channel/spec/parser.rs"
   # Vendored from connections — both modules ship with f64 inside
   # their float→fixed Conn machinery (`F064FDxx` correction loops
-  # for conn/float.rs; the FD12↔Sxxx adjoint walk for conn/sample.rs).
+  # for conn/float.rs; the FD12↔Rxxx adjoint walk for conn/rate.rs).
   # The f64 surface is intrinsic to the abstraction and was upstream-
   # allowlisted for the same reason; the file move downstream brings
   # the allowlist entry with it. (Plan 2026-04-28-03 T1 split float
   # out of decimal — fixed.rs (was decimal.rs) is no longer
   # allowlisted because it contains no live f64 after the split. Plan
-  # 2026-04-29-01 T2 moved both files under conn/.)
+  # 2026-04-29-01 T2 moved both files under conn/; Plan 2026-05-04-03
+  # renamed conn/sample.rs to conn/rate.rs and Sxxx markers to Rxxx.)
   "crates/chan/src/conn/float.rs"
-  "crates/chan/src/conn/sample.rs"
+  "crates/chan/src/conn/rate.rs"
   "crates/host-link/src/link.rs"
   "crates/host-link/src/source.rs"
   # Plan 2026-04-28-03 T4: `Quantum` + `f64_beats_to_quantum` +

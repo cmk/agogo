@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! midir back-end for `agogo::core::sink::midi::MidiSink`.
+//! midir back-end for `agogo::chan::sink::midi::MidiSink`.
 //!
 //! `MidirSink` opens a midir output connection by port name and
 //! forwards every `send_at` call to the underlying
@@ -9,7 +9,7 @@
 //! inherits midir's ~1 ms USB-bus-limited figure (`doc/agogo.md` §4).
 //!
 //! `MidirSink` reports
-//! [`MidiTimingCapability`](agogo::core::sink::midi::MidiTimingCapability)
+//! [`MidiTimingCapability`](agogo::chan::sink::midi::MidiTimingCapability)
 //! as immediate best-effort dispatch. Platform-native MIDI sinks that
 //! tighten this side (CoreMIDI's `MIDITimeStamp` for sub-µs scheduling,
 //! JACK's frame-indexed sends, WinMM, ALSA-MIDI) live in their own

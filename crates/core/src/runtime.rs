@@ -7,7 +7,7 @@
 //! the driver, control bridge, playhead, and snapshot publisher behind a
 //! small host-facing API that a sibling adapter can wrap.
 
-use crate::conn::sample::S048;
+use crate::conn::rate::R048;
 use crate::control::PhaseSource;
 use crate::sink::audio::AudioIo;
 use crate::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
@@ -54,7 +54,7 @@ pub struct RuntimeStepReport {
 pub struct Runtime {
     driver: AgogoDriver,
     consumer: ControlConsumer,
-    playhead: Playhead<S048>,
+    playhead: Playhead<R048>,
     snapshot_slot: SnapshotSlot,
     publisher: SnapshotPublisher,
 }
@@ -68,7 +68,7 @@ impl Runtime {
     /// Build a runtime with caller-selected driver settings.
     pub fn with_config(config: AgogoDriverConfig) -> Self {
         let (driver, consumer) = AgogoDriver::new(config);
-        let playhead = Playhead::<S048>::new(
+        let playhead = Playhead::<R048>::new(
             Vec::new(),
             PhaseSource::Internal {
                 bpm: config.initial_tempo,

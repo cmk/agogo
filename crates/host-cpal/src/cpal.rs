@@ -11,7 +11,7 @@ use ::cpal::{
     BufferSize, InputCallbackInfo, OutputCallbackInfo, SampleFormat, SampleRate, StreamConfig,
     StreamError,
 };
-use agogo::core::sink::audio::{AudioHost, AudioHostError, AudioIo, Config, Handle};
+use agogo::chan::sink::audio::{AudioHost, AudioHostError, AudioIo, Config, Handle};
 use std::sync::mpsc::Sender;
 use std::thread;
 

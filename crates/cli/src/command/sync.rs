@@ -8,11 +8,11 @@
 //! rather than in `main.rs`'s EOF test block (Plan
 //! 2026-04-28-05 T1).
 
-use agogo::core::conn::fixed::Pico;
-use agogo::core::conn::sample::{S048, SampleRate};
-use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::pulse::pulse_train_s048;
-use agogo::core::control::{DetectorConfig, PeakDetector, Pll, PllSettings};
+use agogo::chan::conn::fixed::Pico;
+use agogo::chan::conn::rate::{R048, SampleRate};
+use agogo::chan::conn::tempo::Tempo;
+use agogo::chan::control::pulse::pulse_train_s048;
+use agogo::chan::control::{DetectorConfig, PeakDetector, Pll, PllSettings};
 use bpaf::Bpaf;
 
 use crate::parse::{parse_bpm_to_tempo, parse_jitter_us_to_pico, parse_positive_u32};
@@ -25,13 +25,13 @@ pub enum SyncSub {
     #[bpaf(command("trace"))]
     Trace {
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo::core::conn::tempo::Tempo,
+        bpm: agogo::chan::conn::tempo::Tempo,
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
         #[bpaf(long, argument("PPQ"), parse(parse_positive_u32))]
         ppq: u32,
-        #[bpaf(long, argument::<String>("JITTER_US"), parse(parse_jitter_us_to_pico), fallback(agogo::core::conn::fixed::Pico::ZERO))]
-        jitter_us: agogo::core::conn::fixed::Pico,
+        #[bpaf(long, argument::<String>("JITTER_US"), parse(parse_jitter_us_to_pico), fallback(agogo::chan::conn::fixed::Pico::ZERO))]
+        jitter_us: agogo::chan::conn::fixed::Pico,
         #[bpaf(long, argument("PULSES"), parse(parse_positive_u32))]
         pulses: u32,
         #[bpaf(long, argument("SEED"), fallback(1))]
@@ -49,8 +49,7 @@ pub fn dispatch(sub: SyncSub) -> Result<(), String> {
             pulses,
             seed,
         } => {
-            if sr != <agogo::core::conn::sample::S048 as agogo::core::conn::sample::SampleRate>::HZ
-            {
+            if sr != <agogo::chan::conn::rate::R048 as agogo::chan::conn::rate::SampleRate>::HZ {
                 return Err(format!(
                     "sync trace is pinned to 48 kHz this sprint (got --sr {sr}); \
                      multi-rate support deferred"
@@ -77,7 +76,7 @@ pub fn dispatch(sub: SyncSub) -> Result<(), String> {
 /// `sample = bits >> 16`, `frac = bits & 0xFFFF` as needed.
 #[derive(Debug, Clone, Copy)]
 pub struct TraceRow {
-    /// Peak position as raw Q48.16 bits at S048's 48 kHz.
+    /// Peak position as raw Q48.16 bits at R048's 48 kHz.
     pub bits_q48_16: i64,
     /// PLL smoothed BPM × 10⁶.
     pub tempo_ubpm: u32,
@@ -86,14 +85,14 @@ pub struct TraceRow {
 }
 
 pub fn trace(bpm: Tempo, ppq: u32, jitter: Pico, pulses: u32, seed: u64) -> Vec<TraceRow> {
-    let (samples, _truth): (Vec<f32>, Vec<S048>) = pulse_train_s048(bpm, ppq, jitter, pulses, seed);
-    let pulse_rate_hz = agogo::core::conn::boundary::tempo_to_hz(bpm, ppq);
-    let spacing_samples = (S048::HZ as f64 / pulse_rate_hz) as u32;
-    let mut detector = PeakDetector::<S048>::new(DetectorConfig {
+    let (samples, _truth): (Vec<f32>, Vec<R048>) = pulse_train_s048(bpm, ppq, jitter, pulses, seed);
+    let pulse_rate_hz = agogo::chan::conn::float::tempo_to_hz(bpm, ppq);
+    let spacing_samples = (R048::HZ as f64 / pulse_rate_hz) as u32;
+    let mut detector = PeakDetector::<R048>::new(DetectorConfig {
         threshold_q15: 16_384, // 0.5 Q0.15
         hold_samples: spacing_samples / 2,
     });
-    let mut pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, ppq);
+    let mut pll = Pll::<R048>::new(PllSettings::DEFAULT, bpm, ppq);
     let peaks = detector.process(&samples, 0);
     peaks
         .into_iter()

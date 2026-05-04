@@ -6,7 +6,7 @@
 //! [`Phase`],
 //! [`Tempo`], and the
 //! [`fixed`](crate::conn::fixed) / [`float`](crate::conn::float) /
-//! [`sample`](crate::conn::sample) ladders. (Plan 2026-04-29-01 T2
+//! [`rate`](crate::conn::rate) ladders. (Plan 2026-04-29-01 T2
 //! collapsed these into one parent so the layering rule can mark
 //! `conn` as a leaf.)
 //!
@@ -20,8 +20,8 @@
 //!    user-typed decimals from the CLI are converted to fxp
 //!    immediately inside the handler.
 //! 3. **PI-exempt rate dispatch** (`pico_to_samples`): match on a
-//!    runtime sample-rate to a per-rate `FD12Sxxx` Conn, then snap to
-//!    integer samples. Each `FD12Sxxx` carries its own per-rate
+//!    runtime sample-rate to a per-rate `FD12Rxxx` Conn, then snap to
+//!    integer samples. Each `FD12Rxxx` carries its own per-rate
 //!    Galois-law battery.
 
 use connections::extended::Extended;
@@ -31,7 +31,7 @@ use connections::float::ExtendedFloat;
 use crate::conn::fixed::{FD06, Pico};
 use crate::conn::float::{F064FD06, F064FD12};
 use crate::conn::phase::Phase;
-use crate::conn::sample::{FD12S044, FD12S048, FD12S088, FD12S096, FD12S176, FD12S192};
+use crate::conn::rate::{FD12R044, FD12R048, FD12R088, FD12R096, FD12R176, FD12R192};
 use crate::conn::tempo::Tempo;
 
 /// Maximum representable BPM as `f64`: `u32::MAX as f64 / 10⁶`
@@ -46,7 +46,7 @@ use crate::conn::tempo::Tempo;
 /// conversion from micro-BPM to BPM, not a special saturation
 /// workaround.
 ///
-/// Lives here in `boundary` (rather than as `Tempo::MAX_BPM_F64`)
+/// Lives here in `float` (rather than as `Tempo::MAX_BPM_F64`)
 /// so `crate::conn::tempo` stays f64-free per the workspace's
 /// `scripts/check-floats.sh` allowlist (Plan 2026-04-28-03 review
 /// round 1).
@@ -160,19 +160,19 @@ pub fn bits_q48_16_to_seconds(bits: i64, sr: u32) -> f64 {
 
 /// Pico → whole sample count at a runtime sample rate.
 ///
-/// Dispatches on `sr` to the lawful `FD12Sxxx` Conn for that rate
-/// (defined in `crate::conn::sample`), calls its `ceil` (Pico →
+/// Dispatches on `sr` to the lawful `FD12Rxxx` Conn for that rate
+/// (defined in `crate::conn::rate`), calls its `ceil` (Pico →
 /// Q48.16), then rounds to the nearest integer sample. Returns
 /// `None` for non-audio rates — the supported set is the six
-/// standard rates `{S044, S048, S088, S096, S176, S192}`.
+/// standard rates `{R044, R048, R088, R096, R176, R192}`.
 pub fn pico_to_samples(p: Pico, sr: u32) -> Option<i64> {
     Some(match sr {
-        44_100 => FD12S044.ceil(p).0.round().to_num(),
-        48_000 => FD12S048.ceil(p).0.round().to_num(),
-        88_200 => FD12S088.ceil(p).0.round().to_num(),
-        96_000 => FD12S096.ceil(p).0.round().to_num(),
-        176_400 => FD12S176.ceil(p).0.round().to_num(),
-        192_000 => FD12S192.ceil(p).0.round().to_num(),
+        44_100 => FD12R044.ceil(p).0.round().to_num(),
+        48_000 => FD12R048.ceil(p).0.round().to_num(),
+        88_200 => FD12R088.ceil(p).0.round().to_num(),
+        96_000 => FD12R096.ceil(p).0.round().to_num(),
+        176_400 => FD12R176.ceil(p).0.round().to_num(),
+        192_000 => FD12R192.ceil(p).0.round().to_num(),
         _ => return None,
     })
 }
@@ -320,17 +320,17 @@ mod tests {
     }
 
     // `pico_to_samples` is a hand-written `match` dispatching on `sr`
-    // to the lawful `FD12Sxxx` conns from `crate::conn::sample`.
+    // to the lawful `FD12Rxxx` conns from `crate::conn::rate`.
     // Each conn's own per-rate Galois-law battery
     // (`time::sample::tests::p_fd12s0??`) catches arithmetic bugs
     // inside the conn itself, but nothing there catches a local
-    // wiring mistake like "oops, the 96k arm calls FD12S088 by
+    // wiring mistake like "oops, the 96k arm calls FD12R088 by
     // accident." These tests lock in the dispatch table.
 
     #[test]
     fn pico_to_samples_one_second_maps_to_sr() {
         // 1 second = 10¹² pico = `sr` samples at every supported rate.
-        // Any cross-wired arm (e.g. 96k → FD12S088) would return 88_200
+        // Any cross-wired arm (e.g. 96k → FD12R088) would return 88_200
         // instead of 96_000 and fail here.
         let one_second = Pico(1_000_000_000_000);
         for sr in [44_100, 48_000, 88_200, 96_000, 176_400, 192_000] {

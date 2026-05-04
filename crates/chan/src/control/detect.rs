@@ -161,7 +161,7 @@ fn process_detector<R>(
 
 macro_rules! impl_peak_detector_rate {
     ($Rate:ident) => {
-        impl PeakDetector<crate::conn::sample::$Rate> {
+        impl PeakDetector<crate::conn::rate::$Rate> {
             /// Process a block of samples and return all peaks discovered in it.
             ///
             /// `start_index` is the stream-global sample count of `samples[0]`,
@@ -171,27 +171,27 @@ macro_rules! impl_peak_detector_rate {
                 &mut self,
                 samples: &[f32],
                 start_index: u64,
-            ) -> Vec<Peak<crate::conn::sample::$Rate>> {
-                self.process_with(samples, start_index, crate::conn::sample::$Rate::from_bits)
+            ) -> Vec<Peak<crate::conn::rate::$Rate>> {
+                self.process_with(samples, start_index, crate::conn::rate::$Rate::from_bits)
             }
         }
     };
 }
 
-impl_peak_detector_rate!(S044);
-impl_peak_detector_rate!(S048);
-impl_peak_detector_rate!(S088);
-impl_peak_detector_rate!(S096);
-impl_peak_detector_rate!(S176);
-impl_peak_detector_rate!(S192);
+impl_peak_detector_rate!(R044);
+impl_peak_detector_rate!(R048);
+impl_peak_detector_rate!(R088);
+impl_peak_detector_rate!(R096);
+impl_peak_detector_rate!(R176);
+impl_peak_detector_rate!(R192);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::conn::arb::arb_bpm;
-    use crate::conn::boundary::tempo_to_hz;
     use crate::conn::fixed::Pico;
-    use crate::conn::sample::{S048, SampleRate};
+    use crate::conn::float::tempo_to_hz;
+    use crate::conn::rate::{R048, SampleRate};
     use crate::conn::tempo::Tempo;
     use crate::control::pulse::pulse_train_s048;
     use proptest::prelude::*;
@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn empty_block_yields_no_peaks() {
-        let mut det = PeakDetector::<S048>::new(DetectorConfig {
+        let mut det = PeakDetector::<R048>::new(DetectorConfig {
             threshold_q15: 3_277, // ≈ 0.1
             hold_samples: 10,
         });
@@ -237,7 +237,7 @@ mod tests {
         for &c in &centres {
             emit_hann(&mut buf, c, 72.0);
         }
-        let mut det = PeakDetector::<S048>::new(DetectorConfig {
+        let mut det = PeakDetector::<R048>::new(DetectorConfig {
             threshold_q15: THRESHOLD_HALF,
             hold_samples: 500,
         });
@@ -260,7 +260,7 @@ mod tests {
         // Place a peak that straddles two process() calls.
         let mut buf = vec![0.0_f32; 1024];
         emit_hann(&mut buf, 510.0, 72.0);
-        let mut det = PeakDetector::<S048>::new(DetectorConfig {
+        let mut det = PeakDetector::<R048>::new(DetectorConfig {
             threshold_q15: THRESHOLD_HALF,
             hold_samples: 100,
         });
@@ -273,7 +273,7 @@ mod tests {
 
     proptest! {
         // P1: every truth peak is reported exactly once, no extras.
-        // Pinned to S048 for this sprint; multi-rate coverage deferred
+        // Pinned to R048 for this sprint; multi-rate coverage deferred
         // (the detector algorithm is rate-agnostic — it operates on
         // &[f32] — so the rate only affected the test's own expected-
         // values math).
@@ -283,14 +283,14 @@ mod tests {
             seed in any::<u64>(),
             n_pulses in 4u32..32u32,
         ) {
-            let sr = S048::HZ;
+            let sr = R048::HZ;
             let ppq = 24u32;
-            let (samples, truth): (Vec<f32>, Vec<S048>) =
+            let (samples, truth): (Vec<f32>, Vec<R048>) =
                 pulse_train_s048(bpm, ppq, Pico(0), n_pulses, seed);
             let pulse_rate_hz = tempo_to_hz(bpm, ppq);
             let spacing_samples = sr as f64 / pulse_rate_hz;
             let hold = (spacing_samples * 0.5) as u32;
-            let mut det = PeakDetector::<S048>::new(DetectorConfig {
+            let mut det = PeakDetector::<R048>::new(DetectorConfig {
                 threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
@@ -323,14 +323,14 @@ mod tests {
             seed in any::<u64>(),
             n_pulses in 4u32..16u32,
         ) {
-            let sr = S048::HZ;
+            let sr = R048::HZ;
             let ppq = 24u32;
-            let (samples, truth): (Vec<f32>, Vec<S048>) =
+            let (samples, truth): (Vec<f32>, Vec<R048>) =
                 pulse_train_s048(bpm, ppq, Pico(0), n_pulses, seed);
             let pulse_rate_hz = tempo_to_hz(bpm, ppq);
             let spacing_samples = sr as f64 / pulse_rate_hz;
             let hold = (spacing_samples * 0.5) as u32;
-            let mut det = PeakDetector::<S048>::new(DetectorConfig {
+            let mut det = PeakDetector::<R048>::new(DetectorConfig {
                 threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
@@ -363,7 +363,7 @@ mod tests {
             let mut buf = Vec::new();
             emit_hann(&mut buf, first_centre, pulse_width);
             emit_hann(&mut buf, second_centre, pulse_width);
-            let mut det = PeakDetector::<S048>::new(DetectorConfig {
+            let mut det = PeakDetector::<R048>::new(DetectorConfig {
                 threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });
@@ -389,7 +389,7 @@ mod tests {
             let mut buf = Vec::new();
             emit_hann(&mut buf, first_centre, pulse_width);
             emit_hann(&mut buf, second_centre, pulse_width);
-            let mut det = PeakDetector::<S048>::new(DetectorConfig {
+            let mut det = PeakDetector::<R048>::new(DetectorConfig {
                 threshold_q15: THRESHOLD_HALF,
                 hold_samples: hold,
             });

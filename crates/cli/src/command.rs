@@ -6,15 +6,15 @@
 use bpaf::Bpaf;
 
 #[cfg(feature = "core")]
-use agogo::core::channel::ChannelCommon;
+use agogo::chan::channel::ChannelCommon;
 #[cfg(feature = "core")]
-use agogo::core::conn::fixed::Micro;
+use agogo::chan::conn::fixed::Micro;
 #[cfg(feature = "core")]
-use agogo::core::time::grid::Grid;
+use agogo::chan::time::grid::Grid;
 #[cfg(feature = "core")]
-use agogo::core::time::swing::SwingConfig;
+use agogo::chan::time::swing::SwingConfig;
 #[cfg(feature = "core")]
-use agogo::core::time::tbase::TBase;
+use agogo::chan::time::tbase::TBase;
 
 #[cfg(feature = "core")]
 mod channel;

@@ -13,13 +13,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["core", "host"]
-core = ["dep:core_impl"]
+core = ["dep:chan_impl", "dep:core_impl"]
 host = ["core"]
 cpal = ["core", "host", "dep:cpal_impl"]
 link = ["core", "host", "dep:link_impl", "link_impl/rusty-link"]
 midi = ["core", "host", "dep:midi_impl"]
 
 [dependencies]
+chan_impl = { package = "agogo-chan", path = "../chan", optional = true }
 core_impl = { package = "agogo-core", path = "../core", optional = true }
 cpal_impl = { package = "agogo-host-cpal", path = "../host-cpal", optional = true }
 link_impl = { package = "agogo-host-link", path = "../host-link", optional = true }

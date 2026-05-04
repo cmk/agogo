@@ -17,8 +17,8 @@
 //!    offset.
 
 use crate::channel::role::{AudioRole, ChannelCommon, CvRole, DinRole, MidiRole};
-use crate::conn::boundary::pico_to_samples;
 use crate::conn::fixed::{FD12FD06, Micro};
+use crate::conn::float::pico_to_samples;
 use crate::conn::tempo::Tempo;
 use crate::time::conn::tick_to_whole_samples;
 use crate::time::grid::Grid;

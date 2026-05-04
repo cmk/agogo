@@ -13,11 +13,15 @@ use connections::conn::{ViewL, ViewR};
 
 // Re-export the float-boundary primitive types so downstream crates
 // that don't depend on `connections` directly (cli, host-link) can
-// reach them through `agogo::core::conn::float::{Extended, ExtendedFloat}`.
+// reach them through `agogo::chan::conn::float::{Extended, ExtendedFloat}`.
 pub use connections::extended::Extended;
 pub use connections::float::ExtendedFloat;
 
 use super::fixed::{FD00, FD01, FD02, FD03, FD06, FD09, FD12};
+
+#[path = "float_boundary.rs"]
+mod float_boundary;
+pub use float_boundary::*;
 
 // ExtendedFloat<f??> → Extended<Rung>. Lawful under `PartialOrd` on both
 // sides.

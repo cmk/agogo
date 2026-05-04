@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::channel::time::validate_schedule_params;
 use crate::channel::{Channel, ScheduledEvent};
-use crate::conn::sample::{S044, S048, S088, S096, S176, S192};
+use crate::conn::rate::{R044, R048, R088, R096, R176, R192};
 use crate::conn::tempo::Tempo;
 use crate::control::PhaseSource;
 use crate::event::tick_stream_into;
@@ -52,7 +52,7 @@ pub struct Playhead<R> {
     /// the `Playhead`'s lifetime — matches the struct-level
     /// "never mutated from the control thread thereafter" contract.
     pub(crate) channels: Vec<Channel>,
-    /// Sample-rate-typed phase source. The concrete `Sxxx` type binds the
+    /// Sample-rate-typed phase source. The concrete `Rxxx` type binds the
     /// rate at compile time so the Internal/External arms inside
     /// `PhaseSource` can monomorphise.
     pub phase_source: PhaseSource<R>,
@@ -568,19 +568,19 @@ macro_rules! impl_playhead_rate {
     };
 }
 
-impl_playhead_rate!(S044);
-impl_playhead_rate!(S048);
-impl_playhead_rate!(S088);
-impl_playhead_rate!(S096);
-impl_playhead_rate!(S176);
-impl_playhead_rate!(S192);
+impl_playhead_rate!(R044);
+impl_playhead_rate!(R048);
+impl_playhead_rate!(R088);
+impl_playhead_rate!(R096);
+impl_playhead_rate!(R176);
+impl_playhead_rate!(R192);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::channel::{AudioRole, ChannelCommon, MidiRole};
     use crate::conn::fixed::Micro;
-    use crate::conn::sample::S048;
+    use crate::conn::rate::R048;
     use crate::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
@@ -604,7 +604,7 @@ mod tests {
     }
 
     fn drive_buffers(
-        playhead: &mut Playhead<S048>,
+        playhead: &mut Playhead<R048>,
         sink: &TestSink,
         n_buffers: u64,
         frames: usize,
@@ -626,7 +626,7 @@ mod tests {
     #[test]
     fn playhead_buffer_matches_plan13_demo() {
         let bpm = Tempo::from_bpm_integer(120);
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -662,7 +662,7 @@ mod tests {
     #[test]
     fn transport_internal_emits_start_then_stop() {
         let bpm = Tempo::from_bpm_integer(120);
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -725,7 +725,7 @@ mod tests {
     #[test]
     fn command_start_does_not_cancel_teardown_stop() {
         let bpm = Tempo::from_bpm_integer(120);
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -771,7 +771,7 @@ mod tests {
             let queue: Arc<std::sync::Mutex<VecDeque<bool>>> =
                 Arc::new(std::sync::Mutex::new(states.iter().copied().collect()));
             let q_for_query = Arc::clone(&queue);
-            let mut playhead = Playhead::<S048>::new(
+            let mut playhead = Playhead::<R048>::new(
                 vec![zero_channel(Grid::T4)],
                 PhaseSource::Internal { bpm },
                 48_000,
@@ -824,7 +824,7 @@ mod tests {
             None,
             Some(MidiRtByte::Stop),
         ]);
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -873,7 +873,7 @@ mod tests {
             let frames = 4_096usize;
 
             // Multi-channel run.
-            let mut multi = Playhead::<S048>::new(
+            let mut multi = Playhead::<R048>::new(
                 dividers.iter().copied().map(zero_channel).collect(),
                 PhaseSource::Internal { bpm },
                 48_000,
@@ -901,7 +901,7 @@ mod tests {
             let mut reference: Vec<u64> = Vec::new();
             for b in 0..n_buffers {
                 for d in &dividers {
-                    let mut single = Playhead::<S048>::new(
+                    let mut single = Playhead::<R048>::new(
                         vec![zero_channel(*d)],
                         PhaseSource::Internal { bpm },
                         48_000,
@@ -990,7 +990,7 @@ mod tests {
             ch: U4(9),
             accent: None,
         };
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![click_channel(Grid::T4, cfg, None)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -1014,7 +1014,7 @@ mod tests {
     #[test]
     fn audio_click_channel_writes_pcm_per_divider_tick() {
         let bpm = Tempo::from_bpm_integer(120);
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![audio_click_channel(Grid::T4, None)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -1105,14 +1105,14 @@ mod tests {
                 role: make_role(),
             };
 
-            let mut m_un = Playhead::<S048>::new(
+            let mut m_un = Playhead::<R048>::new(
                 vec![mk_channel(None)],
                 PhaseSource::Internal { bpm },
                 sr, bpm,
                 TransportPolicy::Scripted { schedule: VecDeque::new() },
                 frames,
             );
-            let mut m_fi = Playhead::<S048>::new(
+            let mut m_fi = Playhead::<R048>::new(
                 vec![mk_channel(Some(NonZeroU16::new(bars).unwrap()))],
                 PhaseSource::Internal { bpm },
                 sr, bpm,
@@ -1153,7 +1153,7 @@ mod tests {
             ch: U4(9),
             accent: None,
         };
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![click_channel(Grid::T16, cfg, NonZeroU16::new(u16::MAX))],
             PhaseSource::Internal { bpm },
             48_000,
@@ -1201,7 +1201,7 @@ mod tests {
                     note: U7(38), vel: U7(120),
                 }),
             };
-            let mut playhead = Playhead::<S048>::new(
+            let mut playhead = Playhead::<R048>::new(
                 vec![click_channel(divider, cfg, NonZeroU16::new(bars))],
                 PhaseSource::Internal { bpm },
                 48_000, bpm,
@@ -1240,7 +1240,7 @@ mod tests {
     #[test]
     fn audio_click_counter_resets_on_transport_stop() {
         let bpm = Tempo::from_bpm_integer(120);
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![audio_click_channel(Grid::T4, None)],
             PhaseSource::Internal { bpm },
             48_000,
@@ -1284,7 +1284,7 @@ mod tests {
                 vel: U7(120),
             }),
         };
-        let mut playhead = Playhead::<S048>::new(
+        let mut playhead = Playhead::<R048>::new(
             vec![click_channel(
                 Grid::T1,
                 cfg,

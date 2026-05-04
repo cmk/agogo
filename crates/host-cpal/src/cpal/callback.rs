@@ -11,9 +11,9 @@
 //! integer arithmetic and one ring-buffer push per emitted event.
 
 use crate::cpal::control::RtProducer;
+use agogo::chan::conn::rate::{R044, R048, R088, R096, R176, R192};
+use agogo::chan::sink::audio::AudioIo;
 use agogo::core::Playhead;
-use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192};
-use agogo::core::sink::audio::AudioIo;
 
 /// State the audio thread owns by-value across the stream's
 /// lifetime. Built on the control thread, moved into the cpal
@@ -22,7 +22,7 @@ use agogo::core::sink::audio::AudioIo;
 ///
 /// The concrete `Sxxx` parameter binds the [`Playhead`]'s rate at
 /// compile time. The CLI dispatches it via a static match on
-/// `--sr` (`S044 | S048 | S088 | S096 | S176 | S192`).
+/// `--sr` (`R044 | R048 | R088 | R096 | R176 | R192`).
 pub struct CallbackState<R> {
     /// N-channel orchestrator. Owns channels, phase source,
     /// transport policy, and the per-channel scratch buffer.
@@ -49,12 +49,12 @@ macro_rules! impl_callback_state_rate {
     };
 }
 
-impl_callback_state_rate!(S044);
-impl_callback_state_rate!(S048);
-impl_callback_state_rate!(S088);
-impl_callback_state_rate!(S096);
-impl_callback_state_rate!(S176);
-impl_callback_state_rate!(S192);
+impl_callback_state_rate!(R044);
+impl_callback_state_rate!(R048);
+impl_callback_state_rate!(R088);
+impl_callback_state_rate!(R096);
+impl_callback_state_rate!(R176);
+impl_callback_state_rate!(R192);
 
 /// Re-export of the canonical helper. The implementation moved to
 /// [`agogo::core::max_events_for_buffer`] in
@@ -67,22 +67,22 @@ pub use core_impl::max_events_for_buffer;
 mod tests {
     use super::*;
     use crate::cpal::control::spsc;
+    use agogo::chan::channel::{Channel, ChannelCommon, MidiRole};
+    use agogo::chan::conn::fixed::Micro;
+    use agogo::chan::conn::rate::R048;
+    use agogo::chan::conn::tempo::Tempo;
+    use agogo::chan::control::PhaseSource;
+    use agogo::chan::time::grid::Grid;
+    use agogo::chan::time::swing::SwingConfig;
+    use agogo::chan::time::tbase::TBase;
     use agogo::core::TransportPolicy;
-    use agogo::core::channel::{Channel, ChannelCommon, MidiRole};
-    use agogo::core::conn::fixed::Micro;
-    use agogo::core::conn::sample::S048;
-    use agogo::core::conn::tempo::Tempo;
-    use agogo::core::control::PhaseSource;
-    use agogo::core::time::grid::Grid;
-    use agogo::core::time::swing::SwingConfig;
-    use agogo::core::time::tbase::TBase;
     use std::collections::VecDeque;
 
     fn build_state(
         bpm: Tempo,
         divider: Grid,
         frames: usize,
-    ) -> (CallbackState<S048>, crate::cpal::control::ControlConsumer) {
+    ) -> (CallbackState<R048>, crate::cpal::control::ControlConsumer) {
         let (producer, consumer) = spsc(1024);
         let channel = Channel::Midi {
             common: ChannelCommon {
@@ -97,7 +97,7 @@ mod tests {
             },
             role: MidiRole::Clock,
         };
-        let playhead = Playhead::<S048>::new(
+        let playhead = Playhead::<R048>::new(
             vec![channel],
             PhaseSource::Internal { bpm },
             48_000,
@@ -108,7 +108,7 @@ mod tests {
             },
             frames,
         );
-        let state = CallbackState::<S048> { playhead, producer };
+        let state = CallbackState::<R048> { playhead, producer };
         (state, consumer)
     }
 

@@ -9,10 +9,10 @@
 //!
 //! Plan 2026-04-28-05 T3: extracted from `cli/main.rs`.
 
-use agogo::core::time::grid::Grid;
-use agogo::core::time::swing::{self, SwingConfig};
-use agogo::core::time::tbase::TBase;
-use agogo::core::time::tick::Tick;
+use agogo::chan::time::grid::Grid;
+use agogo::chan::time::swing::{self, SwingConfig};
+use agogo::chan::time::tbase::TBase;
+use agogo::chan::time::tick::Tick;
 use bpaf::Bpaf;
 
 #[derive(Debug, Clone, Bpaf)]
@@ -105,7 +105,7 @@ pub fn swing_to_config(swing: f64) -> SwingConfig {
 pub fn schedule_ticks(args: &ScheduleArgs) -> Vec<Tick> {
     let cfg = swing_to_config(args.swing);
     // 4/4 assumption: one bar = 4 * PPQN ticks.
-    let ticks_per_bar = 4 * agogo::core::time::tick::PPQN;
+    let ticks_per_bar = 4 * agogo::chan::time::tick::PPQN;
     let step_tc = args.grid.tick_count();
     let steps_per_bar = ticks_per_bar / step_tc;
     // `bars` is `u16`; `u32::from(bars) * steps_per_bar` is bounded

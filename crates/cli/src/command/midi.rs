@@ -7,10 +7,10 @@
 //!
 //! Plan 2026-04-28-05 T6: extracted from `cli/main.rs`.
 
-use agogo::core::channel::MidiRole;
-use agogo::core::conn::fixed::Micro;
-use agogo::core::conn::tempo::Tempo;
-use agogo::core::sink::midi::{MidiRtByte, TestSink, render_midi_channel};
+use agogo::chan::channel::MidiRole;
+use agogo::chan::conn::fixed::Micro;
+use agogo::chan::conn::tempo::Tempo;
+use agogo::chan::sink::midi::{MidiRtByte, TestSink, render_midi_channel};
 use agogo::core::tick_stream;
 use bpaf::Bpaf;
 
@@ -32,7 +32,7 @@ pub enum MidiSub {
     Trace {
         /// Tempo in beats per minute.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo::core::conn::tempo::Tempo,
+        bpm: agogo::chan::conn::tempo::Tempo,
         /// Sample rate in Hz.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
         sr: u32,
@@ -151,11 +151,11 @@ pub fn trace(args: &TraceArgs) -> Result<Vec<TraceRow>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo::core::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP};
+    use agogo::chan::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP};
 
     fn base_args() -> TraceArgs {
         TraceArgs {
-            bpm: agogo::core::conn::tempo::Tempo::from_bpm_integer(120),
+            bpm: agogo::chan::conn::tempo::Tempo::from_bpm_integer(120),
             sr: 48_000,
             grid: "t4".to_string(),
             frames: 24_000,

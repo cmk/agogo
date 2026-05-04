@@ -9,9 +9,9 @@
 //! proptest strategy. It lives in `sync/` because every consumer
 //! sits in the sync subsystem.
 
-use crate::conn::boundary::{pico_to_f64_seconds, tempo_to_f64_bpm};
 use crate::conn::fixed::Pico;
-use crate::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate};
+use crate::conn::float::{pico_to_f64_seconds, tempo_to_f64_bpm};
+use crate::conn::rate::{R044, R048, R088, R096, R176, R192, SampleRate};
 use crate::conn::tempo::Tempo;
 use rand::SeedableRng;
 use rand_distr::{Distribution, Normal};
@@ -147,12 +147,12 @@ macro_rules! pulse_train_rate {
     };
 }
 
-pulse_train_rate!(pulse_train_s044, S044);
-pulse_train_rate!(pulse_train_s048, S048);
-pulse_train_rate!(pulse_train_s088, S088);
-pulse_train_rate!(pulse_train_s096, S096);
-pulse_train_rate!(pulse_train_s176, S176);
-pulse_train_rate!(pulse_train_s192, S192);
+pulse_train_rate!(pulse_train_s044, R044);
+pulse_train_rate!(pulse_train_s048, R048);
+pulse_train_rate!(pulse_train_s088, R088);
+pulse_train_rate!(pulse_train_s096, R096);
+pulse_train_rate!(pulse_train_s176, R176);
+pulse_train_rate!(pulse_train_s192, R192);
 
 #[cfg(test)]
 mod tests {

@@ -36,8 +36,8 @@ pub fn arb_bpm() -> impl Strategy<Value = Tempo> {
 
 /// Sample rate strategy: standard audio rates only. (`u32` so it can
 /// be used by callers that pick a rate type at the callsite; the
-/// typed variants `S044` / `S048` / … expose the same values via
-/// [`SampleRate::HZ`](crate::conn::sample::SampleRate::HZ).)
+/// typed variants `R044` / `R048` / … expose the same values via
+/// [`SampleRate::HZ`](crate::conn::rate::SampleRate::HZ).)
 pub fn arb_sample_rate() -> impl Strategy<Value = u32> {
     prop_oneof![
         Just(44_100u32),
@@ -352,7 +352,7 @@ pub fn pico_safe(num: i128) -> impl Strategy<Value = i64> {
 
 // `extended_float_f64` is intentionally NOT vendored — it still
 // ships in `connections::property::arb` and is imported directly
-// by `conn::float::tests` / `conn::sample::tests`.
+// by `conn::float::tests` / `conn::rate::tests`.
 
 #[cfg(test)]
 mod tests {
