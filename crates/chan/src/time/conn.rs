@@ -1,6 +1,6 @@
 //! Marker-backed Galois connections for `Tick`, `Time`, and `Grid`.
 //!
-//! Three static marker values port the Haskell Cirklon conversions:
+//! Three static marker values port the Haskell Recologic conversions:
 //!
 //! | Rust            | Haskell      | Public API                                |
 //! |-----------------|--------------|-------------------------------------------|

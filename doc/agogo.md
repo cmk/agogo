@@ -6,7 +6,8 @@ A Rust port/re-imagining of the E-RM Multiclock hardware (4-channel multi-format
 
 **Target**: software-only standalone binary, macOS-first but cross-platform from day one (Linux, Windows). "DAW-level precision" — defined concretely in §4.
 
-**Library home**: new sibling crate at `~/Music/Software/Anarkhiya/agogo/`. Companion to the in-development `connections` library (Galois-connection primitives, N5 preorder).
+**Library home**: new sibling crate. Companion to the in-development
+`connections` library (Galois-connection primitives, N5 preorder).
 
 **Not in v1**: VST/AU plugin wrapper, hardware firmware replacement, the device UI (LEDs/encoder/menus), pitch-bend/CC remote control, DIN physical wiring (library emits the bit pattern; user provides the interface). See §11.
 

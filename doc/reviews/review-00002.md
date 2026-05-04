@@ -1,9 +1,9 @@
-# PR #2 — time/: port Cirklon grid-and-tick algebra
+# PR #2 — time/: port Recologic grid-and-tick algebra
 
 ## Summary
 
 Delivers `agogo-core::time` as a complete, property-tested Rust port
-of the Haskell Cirklon `Control.Cirklon.Type.Time` module, plus an
+of the Haskell Recologic `Control.Recologic.Type.Time` module, plus an
 `agogo-cli time schedule` subcommand. Pure logic only — no I/O, no
 audio, no tempo coupling. Tempo/sample-rate integration is
 deliberately deferred (see plan-2026-04-22-01 "Deferred").
@@ -93,7 +93,7 @@ master `ticks` connection. A later integration sprint will add
 
 ### Commit Hygiene
 
-Two commits on the branch (`plan: time/ — port Cirklon grid-and-tick algebra` and the implementation commit). The plan commit lands the plan doc only; the implementation commit bundles all source files, tests, Cargo changes, and the finalised plan+review doc together. The pre-commit hook (fmt check, PII scan, `cargo test`, `cargo clippy -D warnings`) would have run before each commit. Both commits carry the correct prefix (`plan:` and `feat:` respectively based on context), though I cannot verify the exact commit messages without running `git log` here. Step 7 of the TDD workflow calls for a separate `doc:` commit to finalise the plan and create the review file before running `/sprint-review` — if those were folded into the implementation commit, that is a minor workflow deviation but not a blocking issue.
+Two commits on the branch (`plan: time/ — port Recologic grid-and-tick algebra` and the implementation commit). The plan commit lands the plan doc only; the implementation commit bundles all source files, tests, Cargo changes, and the finalised plan+review doc together. The pre-commit hook (fmt check, PII scan, `cargo test`, `cargo clippy -D warnings`) would have run before each commit. Both commits carry the correct prefix (`plan:` and `feat:` respectively based on context), though I cannot verify the exact commit messages without running `git log` here. Step 7 of the TDD workflow calls for a separate `doc:` commit to finalise the plan and create the review file before running `/sprint-review` — if those were folded into the implementation commit, that is a minor workflow deviation but not a blocking issue.
 
 No merge commits in the log. Commit subjects appear to stay under 72 characters.
 
@@ -279,7 +279,7 @@ The review says the CLI “prints one tick offset per grid step” and that `--s
 
 ## Pull request overview
 
-Adds the `agogo-core::time` layer as a Rust port of Cirklon’s grid/tick algebra (TBase lattice, Tick/Time canonicalization, swing, envelopes, and associated Galois connections), plus a `agogo-cli time schedule` subcommand for emitting a swung schedule.
+Adds the `agogo-core::time` layer as a Rust port of Recologic’s grid/tick algebra (TBase lattice, Tick/Time canonicalization, swing, envelopes, and associated Galois connections), plus a `agogo-cli time schedule` subcommand for emitting a swung schedule.
 
 **Changes:**
 - Introduces `agogo-core::time` module tree (`tbase`, `tick`, `conn`, `swing`, `envelope`) with property tests and shared proptest strategies.

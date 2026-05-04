@@ -55,7 +55,7 @@ enum Command {
         #[bpaf(external(sync::sync_sub))]
         sub: sync::SyncSub,
     },
-    /// Musical-time operations (Cirklon grid algebra).
+    /// Musical-time operations (Recologic grid algebra).
     #[cfg(feature = "core")]
     #[bpaf(command("time"))]
     Time {
