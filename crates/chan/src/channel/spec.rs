@@ -4,9 +4,10 @@
 //! separate; values may be quoted `"..."` to embed spaces or commas.
 //!
 //! Required keys: `dev`. Optional keys: `grid` (DSL expression,
-//! default `T4`), `id`, `out`, `mode` (`clock`|`click`|`pulse`;
+//! default `T4`), `id`, `out`, `mode` (`clock`|`click`|`pulse`|`lfo`;
 //! `dev=midi` defaults to `clock`, `dev=audio` requires `click`,
-//! `dev=cv` defaults to `pulse`), `swing` (`[TBase:]i8`,
+//! `dev=cv` defaults to `pulse`, and `dev=cv,mode=lfo` is parsed but
+//! rejected until the LFO renderer lands), `swing` (`[TBase:]i8`,
 //! default `T8:0`), `offset` (signed `i32` ticks — **note:**
 //! non-zero values are currently rejected until the
 //! tempo-dependent Tick→Micro conversion is wired), `delay` (ms),
