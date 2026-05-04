@@ -876,7 +876,7 @@ mod tests {
 
     fn arb_offset() -> impl Strategy<Value = Micro> {
         // Runtime identity coverage includes the documented calibration scale
-        // plus numeric extremes now that FD06→FD12 inner conversion saturates.
+        // plus numeric extremes handled by `micro_to_samples`' boundary clamp.
         prop_oneof![
             1 => Just(Micro::ZERO),
             1 => Just(Micro(-5_000)),

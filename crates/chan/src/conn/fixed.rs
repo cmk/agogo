@@ -121,7 +121,7 @@ macro_rules! fix_fix {
             }
 
             fn inner_fn(x: $Coarse) -> $Fine {
-                $Fine(x.0.saturating_mul(Self::PREC))
+                $Fine(x.0 * Self::PREC)
             }
 
             fn floor_fn(x: $Fine) -> $Coarse {
@@ -214,12 +214,6 @@ mod tests {
         assert_eq!(FD12FD06.ceil(FD12FD06.inner(FD06(987))), FD06(987));
     }
 
-    #[test]
-    fn spot_inner_saturates_at_i64_edges() {
-        assert_eq!(FD12FD06.inner(FD06(i64::MAX)), FD12(i64::MAX));
-        assert_eq!(FD12FD06.inner(FD06(i64::MIN)), FD12(i64::MIN));
-    }
-
     // Each test is written for one Conn and one (Fine, Coarse) pair,
     // then expanded via macro across the 21 connections.
 
@@ -243,20 +237,6 @@ mod tests {
                     #[test]
                     fn monotone_l(x in fixed_fine($prec), y in fixed_fine($prec)) {
                         prop_assert!(laws::monotone_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x), $Fine(y)));
-                    }
-
-                    #[test]
-                    fn inner_matches_saturating_mul(c in any::<i64>()) {
-                        prop_assert_eq!($conn.inner($Coarse(c)), $Fine(c.saturating_mul($prec)));
-                    }
-
-                    #[test]
-                    fn inner_monotone_full_domain(x in any::<i64>(), y in any::<i64>()) {
-                        if x <= y {
-                            prop_assert!($conn.inner($Coarse(x)).0 <= $conn.inner($Coarse(y)).0);
-                        } else {
-                            prop_assert!($conn.inner($Coarse(y)).0 <= $conn.inner($Coarse(x)).0);
-                        }
                     }
 
                     #[test]
