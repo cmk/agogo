@@ -32,7 +32,7 @@ pub struct RenderArgs {
     /// Render duration in 4/4 bars.
     #[bpaf(long, argument("BARS"), parse(parse_positive_u32), fallback(1))]
     pub duration_bars: u32,
-    /// Per-channel spec, repeatable. Uses the same parser as `agogo run`.
+    /// Per-channel spec, repeatable. Use `out=diag` for offline diagnostics.
     #[bpaf(long, argument("SPEC"), many)]
     pub ch: Vec<String>,
 }
@@ -122,10 +122,28 @@ fn parse_channels(raw: &[String]) -> Result<Vec<Channel>, String> {
         }
     };
 
+    validate_diagnostic_outputs(&named)?;
+
     named
         .into_iter()
         .map(|(id, spec)| spec.into_channel().map_err(|e| format!("--ch {id}: {e}")))
         .collect()
+}
+
+fn validate_diagnostic_outputs(
+    named: &[(String, agogo::chan::channel::spec::ChannelSpec)],
+) -> Result<(), String> {
+    for (id, spec) in named {
+        match spec.out.as_deref() {
+            None | Some("diag" | "diagnostic") => {}
+            Some(out) => {
+                return Err(format!(
+                    "--ch {id}: out={out} is unsupported for offline render; use out=diag"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn frames_for_bars(bars: u32, bpm: Tempo, sr: u32) -> Result<u64, String> {

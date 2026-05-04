@@ -62,3 +62,26 @@ fn render_rejects_non_internal_source() {
         "{stderr}"
     );
 }
+
+#[test]
+fn render_rejects_real_output_targets() {
+    let output = Command::new(env!("CARGO_BIN_EXE_agogo"))
+        .args([
+            "render",
+            "--source",
+            "internal",
+            "--bpm",
+            "120",
+            "--ch",
+            "dev=midi,mode=clock,grid=t4,out=hw-port",
+        ])
+        .output()
+        .expect("run agogo render");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsupported for offline render") && stderr.contains("out=diag"),
+        "{stderr}"
+    );
+}
