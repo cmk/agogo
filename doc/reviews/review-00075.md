@@ -28,6 +28,9 @@ Verification run locally:
 - `cargo test -p agogo-core render --quiet`
 - `cargo test -p agogo-cli --test render --quiet`
 - `cargo run -p agogo-cli --bin agogo -- render --source internal --bpm 120 --sr 48000 --duration-bars 1 --buffer-frames 4096 --ch id=three,dev=midi,mode=clock,grid=t2t,out=diag --ch id=two,dev=midi,mode=clock,grid=t2,out=diag`
+- `cargo check -p agogo-cli --features cpal --quiet`
+- `cargo check --manifest-path crates/host-midi/Cargo.toml --quiet`
+- `cargo check --manifest-path crates/host-link/Cargo.toml --quiet`
 - `cargo clippy --all-targets -- -D warnings`
 - `cargo test --workspace`
 
