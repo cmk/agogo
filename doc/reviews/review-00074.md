@@ -23,14 +23,14 @@ by mechanical public-API cleanup: `agogo::chan` facade migration,
 `conn::rate`, and `SXYZ` sample-rate names becoming `RXYZ`.
 
 Screens out additional public-tree naming/path leaks by replacing Recologic's
-former product name in tracked prose and removing two local Anarkhiya path
+former product name in tracked prose and removing two local product-family path
 references while preserving the surrounding design context.
 
 Verification run locally:
 
 - `scripts/check-pii.sh --tree`
 - `scripts/check-pii.sh --staged`
-- `rg -n "Cirklon|Anarkhiya" .`
+- targeted scan for the additional screened terms
 - `bash -n scripts/check-pii.sh`
 - `cargo run -p agogo-cli --bin agogo -- --help`
 - `cargo run -p agogo-cli --bin agogo -- channel trace --help`
