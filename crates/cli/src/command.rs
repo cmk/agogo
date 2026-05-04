@@ -1,6 +1,35 @@
+//! layer: command
+//! depends-on: parse
+//!
 //! Top-level CLI parser and dispatcher.
 
 use bpaf::Bpaf;
+
+#[cfg(feature = "core")]
+use agogo::core::channel::ChannelCommon;
+#[cfg(feature = "core")]
+use agogo::core::conn::fixed::Micro;
+#[cfg(feature = "core")]
+use agogo::core::time::grid::Grid;
+#[cfg(feature = "core")]
+use agogo::core::time::swing::SwingConfig;
+#[cfg(feature = "core")]
+use agogo::core::time::tbase::TBase;
+
+#[cfg(feature = "core")]
+mod channel;
+#[cfg(feature = "demo")]
+mod demo;
+#[cfg(feature = "link")]
+mod link;
+#[cfg(feature = "core")]
+mod midi;
+#[cfg(feature = "run")]
+mod run;
+#[cfg(feature = "core")]
+mod sync;
+#[cfg(feature = "core")]
+mod time;
 
 /// agogo workspace CLI
 #[derive(Debug, Clone, Bpaf)]
@@ -23,52 +52,52 @@ enum Command {
     #[cfg(feature = "core")]
     #[bpaf(command("sync"))]
     Sync {
-        #[bpaf(external(crate::trace::sync_sub))]
-        sub: crate::trace::SyncSub,
+        #[bpaf(external(sync::sync_sub))]
+        sub: sync::SyncSub,
     },
     /// Musical-time operations (Cirklon grid algebra).
     #[cfg(feature = "core")]
     #[bpaf(command("time"))]
     Time {
-        #[bpaf(external(crate::time::time_op))]
-        op: crate::time::TimeOp,
+        #[bpaf(external(time::time_op))]
+        op: time::TimeOp,
     },
     /// Per-channel scheduler utilities.
     #[cfg(feature = "core")]
     #[bpaf(command("channel"))]
     Channel {
-        #[bpaf(external(crate::trace::channel_sub))]
-        sub: crate::trace::ChannelSub,
+        #[bpaf(external(channel::channel_sub))]
+        sub: channel::ChannelSub,
     },
     /// MIDI output utilities.
     #[cfg(feature = "core")]
     #[bpaf(command("midi"))]
     Midi {
-        #[bpaf(external(crate::trace::midi_sub))]
-        sub: crate::trace::MidiSub,
+        #[bpaf(external(midi::midi_sub))]
+        sub: midi::MidiSub,
     },
     /// Ableton Link integration utilities.
     #[cfg(feature = "link")]
     #[bpaf(command("link"))]
     Link {
-        #[bpaf(external(crate::link::link_sub))]
-        sub: crate::link::LinkSub,
+        #[bpaf(external(link::link_sub))]
+        sub: link::LinkSub,
     },
     /// End-to-end demo: cpal audio in -> PLL / Internal clock ->
     /// scheduler -> renderer -> SPSC drain -> midir MIDI out.
     #[cfg(feature = "demo")]
     #[bpaf(command("demo"))]
     Demo {
-        #[bpaf(external(crate::demo::demo_sub))]
-        sub: crate::demo::DemoSub,
+        #[bpaf(external(demo::demo_sub))]
+        sub: demo::DemoSub,
     },
     /// End-to-end runner. N-channel Playhead, six-rate dispatch,
     /// internal/external/link sources, Ctrl-C teardown.
     #[cfg(feature = "run")]
     #[bpaf(command("run"))]
     Run {
-        #[bpaf(external(crate::run::run_args))]
-        args: crate::run::RunArgs,
+        #[bpaf(external(run::run_args))]
+        args: run::RunArgs,
     },
 }
 
@@ -83,22 +112,22 @@ pub fn dispatch(cli: Cli) -> Result<(), String> {
     #[cfg(any(feature = "core", feature = "link", feature = "demo", feature = "run"))]
     match cli.command {
         #[cfg(feature = "core")]
-        Some(Command::Sync { sub }) => crate::trace::dispatch_sync(sub),
+        Some(Command::Sync { sub }) => sync::dispatch(sub),
         #[cfg(feature = "core")]
-        Some(Command::Time { op }) => crate::time::dispatch(op),
+        Some(Command::Time { op }) => time::dispatch(op),
         #[cfg(feature = "core")]
-        Some(Command::Channel { sub }) => crate::trace::dispatch_channel(sub),
+        Some(Command::Channel { sub }) => channel::dispatch(sub),
         #[cfg(feature = "core")]
-        Some(Command::Midi { sub }) => crate::trace::dispatch_midi(sub),
+        Some(Command::Midi { sub }) => midi::dispatch(sub),
         #[cfg(feature = "link")]
         Some(Command::Link { sub }) => {
-            crate::link::dispatch(sub);
+            link::dispatch(sub);
             Ok(())
         }
         #[cfg(feature = "demo")]
-        Some(Command::Demo { sub }) => crate::demo::dispatch(sub),
+        Some(Command::Demo { sub }) => demo::dispatch(sub),
         #[cfg(feature = "run")]
-        Some(Command::Run { args }) => crate::run::run(&args),
+        Some(Command::Run { args }) => run::run(&args),
         None => {
             #[cfg(feature = "core")]
             let tag = "with core";
@@ -108,4 +137,44 @@ pub fn dispatch(cli: Cli) -> Result<(), String> {
             Ok(())
         }
     }
+}
+
+#[cfg(feature = "core")]
+fn parse_grid_arg(grid: &str) -> Result<Grid, String> {
+    grid.parse()
+        .map_err(|e| format!("invalid --grid {grid}: {e}"))
+}
+
+#[cfg(feature = "core")]
+fn validate_audio_rate(sr: u32) -> Result<(), String> {
+    match sr {
+        44_100 | 48_000 | 88_200 | 96_000 | 176_400 | 192_000 => Ok(()),
+        _ => Err(format!(
+            "--sr {sr} unsupported; expected one of 44_100 / 48_000 / 88_200 / 96_000 / 176_400 / 192_000"
+        )),
+    }
+}
+
+#[cfg(feature = "core")]
+fn straight_common(divider: Grid, delay: Micro) -> ChannelCommon {
+    ChannelCommon {
+        divider,
+        shuffle: SwingConfig {
+            resolution: TBase::T16,
+            amount: 0,
+        },
+        delay,
+        offset: Micro::ZERO,
+        bar_multiplier: None,
+    }
+}
+
+#[cfg(feature = "core")]
+fn checked_trace_frames(frames: usize, buffers: u32) -> Result<u64, String> {
+    let frames_u64 =
+        u64::try_from(frames).map_err(|_| format!("trace range exceeds u64: --frames {frames}"))?;
+    let _ = u64::from(buffers).checked_mul(frames_u64).ok_or_else(|| {
+        format!("trace range exceeds u64: --frames {frames} × --buffers {buffers}")
+    })?;
+    Ok(frames_u64)
 }

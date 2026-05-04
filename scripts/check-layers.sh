@@ -14,6 +14,7 @@ crate_names=(
   agogo-host-cpal
   agogo-host-link
   agogo-host-midi
+  agogo-cli
 )
 
 crate_roots=(
@@ -22,6 +23,7 @@ crate_roots=(
   crates/host-cpal/src
   crates/host-link/src
   crates/host-midi/src
+  crates/cli/src
 )
 
 crate_layers=(
@@ -30,6 +32,7 @@ crate_layers=(
   "cpal"
   "link quantum session source transport"
   "midir"
+  "command parse"
 )
 
 parse_deps() {

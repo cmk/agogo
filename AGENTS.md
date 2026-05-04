@@ -193,17 +193,28 @@ code based on it.
       snapshot  → (leaf)
       event     → (leaf)
 
-  Host adapter crates declare only the modules they actually have.
-  `host-cpal` currently has `cpal` as a leaf layer; `host-midi`
-  has `midir` as a leaf layer; `host-link` has:
+	  Host adapter crates declare only the modules they actually have.
+	  `host-cpal` currently has `cpal` as a leaf layer; `host-midi`
+	  has `midir` as a leaf layer; `host-link` has:
 
       session   → link, quantum, transport
       source    → session
       link      → quantum
-      transport → (leaf)
-      quantum   → (leaf)
+	      transport → (leaf)
+	      quantum   → (leaf)
 
-  Each top-level module-root file declares its allowed deps in a
+	  `agogo-cli` (`crates/cli/src`) is the binary shell:
+
+	      command → parse
+	      parse   → (leaf)
+
+	  Optional future CLI roots such as `log` or `test` should be
+	  added to the gate only when the module exists. `src/test.rs`, if
+	  ever added, must stay limited like `chan::test`; command-surface
+	  tests belong under `crates/cli/test/*.rs` with explicit
+	  `[[test]]` entries.
+
+	  Each top-level module-root file declares its allowed deps in a
   sentinel header comment:
 
       //! layer: time
@@ -294,7 +305,9 @@ code based on it.
   `conn/sample.rs` — same allowlist eligibility, new path. The
   Plan 2026-04-30-03 moved the CLI argv parsers from
   `cli/src/main.rs` to `cli/src/parsers.rs` and grouped trace/time/link
-  handlers under subdirectories. Plan 2026-05-02-05 moved the
+  handlers under subdirectories. Plan 2026-05-04-01 reshaped the CLI
+  modules again: `parsers.rs` became `parse.rs`, and the trace/time/link
+  handlers now live under `cli/src/command/`. Plan 2026-05-02-05 moved the
   `control.rs` PCM ABI test locals into `control/transport.rs`
   alongside `Playhead`. Plan 2026-05-03-06 moved that runtime
   transport module to `crates/core/src/transport.rs` and renamed the

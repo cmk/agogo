@@ -41,3 +41,18 @@ proptest = { workspace = true }
 [[bin]]
 name = "agogo"
 path = "src/main.rs"
+
+[[test]]
+name = "demo"
+path = "test/demo.rs"
+required-features = ["demo"]
+
+[[test]]
+name = "link"
+path = "test/link.rs"
+required-features = ["link"]
+
+[[test]]
+name = "run"
+path = "test/run.rs"
+required-features = ["run"]

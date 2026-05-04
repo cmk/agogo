@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::parsers::{parse_bpm_to_tempo, parse_positive_u32};
+use crate::parse::{parse_bpm_to_tempo, parse_positive_u32};
 
 /// `--ppq 24` — MIDI clock baseline. Hard-coded for the demo;
 /// the user picks the *output* PPQN via `--grid` (`t64t` =

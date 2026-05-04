@@ -1,11 +1,11 @@
 //! Ableton Link CLI commands.
 
-pub mod commands;
-pub mod probe;
+mod commands;
+mod probe;
 
 use bpaf::Bpaf;
 
-use crate::parsers::{parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats};
+use crate::parse::{parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats};
 
 #[derive(Debug, Clone, Bpaf)]
 pub enum LinkSub {

@@ -1,22 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod command;
-mod parsers;
-
-#[cfg(feature = "core")]
-mod time;
-
-#[cfg(feature = "core")]
-mod trace;
-
-#[cfg(feature = "link")]
-mod link;
-
-#[cfg(feature = "demo")]
-mod demo;
-
-#[cfg(feature = "run")]
-mod run;
+mod parse;
 
 fn main() {
     let cli = command::cli().run();
