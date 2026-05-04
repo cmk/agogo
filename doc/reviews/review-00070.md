@@ -77,4 +77,14 @@ The new runtime helper can publish observations that diverge from the actual pla
 Review comment:
 
 - [P2] Snapshot the actual playhead tempo after applying controls — crates/host/src/runtime.rs:122-122
-  When `agogo.tempo.set` admits an integer BPM that fits `Tempo` but is invalid for the runtime sample rate (for example 1000 BPM at 48 kHz exceeds `validate_schedule_params`' limit), `playhead.apply_tempo` returns `false` and keeps the old tempo, but this line still writes `report.params.tempo` into the published snapshot. The adapter-facing observation can therefore report a tempo that was never applied; write the snapshot from the playhead's current tempo or reject these tempos before admission.
+  When `agogo.tempo.set` admits an integer BPM that fits `Tempo` but is invalid for the runtime sample rate (for example 4000 BPM at 48 kHz exceeds `validate_schedule_params`' limit), `playhead.apply_tempo` returns `false` and keeps the old tempo, but this line still writes `report.params.tempo` into the published snapshot. The adapter-facing observation can therefore report a tempo that was never applied; write the snapshot from the playhead's current tempo or reject these tempos before admission.
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-03-05
+**Commits:** 8 (origin/main..plan-2026-05-03-05)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The runtime helper changes, MSRV bump, advisory cleanup, and mechanical Rust 1.92 updates appear consistent with the intended behavior. I did not find any actionable correctness, security, or maintainability regressions in the diff.
