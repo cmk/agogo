@@ -21,6 +21,19 @@ adds new bullets, append them here under the right theme. Re-run the
 
 ---
 
+## Release readiness
+
+### GitHub open-sourcing vs. crates.io publishing
+Public GitHub readiness and registry publishing are separate milestones.
+The GitHub track only needs a safe tracked tree, accurate source-build docs,
+and no contributor-local path leaks. The crates.io track still needs package
+metadata, package-list review, dry-run publishing, and a dependency-policy pass.
+- Sources: [plan-2026-05-04-02 §Deferred](plans/plan-2026-05-04-02.md)
+- Status: **open** — GitHub readiness is in progress; crates.io remains
+  intentionally deferred.
+
+---
+
 ## PI / PLL controllers + Link follower
 
 ### LpfPid — clocked-style PID controller wrapper

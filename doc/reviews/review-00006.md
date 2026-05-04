@@ -258,7 +258,7 @@ Crate docs say `LinkClock` "in later sprints — will implement `agogo_core::con
 <!-- gh-id: 3130342220 -->
 ### Copilot on [`doc/plans/plan-2026-04-23-04.md:27`](https://github.com/cmk/agogo/pull/6#discussion_r3130342220) (2026-04-23 11:12 UTC)
 
-The plan references a local absolute path (`/Users/cmk/.claude/plans/lets-do-a-bit-hashed-dream.md`) as the "approved design doc" (also repeated later in the recommendations section). This link won't resolve for other contributors/CI artifacts; please replace it with a repo-relative path/URL, or inline the relevant design points so the plan is self-contained.
+The plan references a local absolute path to the "approved design doc" (also repeated later in the recommendations section). This link won't resolve for other contributors/CI artifacts; please replace it with a repo-relative path/URL, or inline the relevant design points so the plan is self-contained.
 ```suggestion
 This sprint lands Sprint A of the Link integration's structural slice.
 The approved design constraints relevant to this sprint are summarized
@@ -344,7 +344,7 @@ Good catch. Refactored `link_probe::probe` to take a `FnMut(ProbeRow)` callback 
 <!-- gh-id: 3130476549 -->
 #### ↳ cmk ([2026-04-23 11:39 UTC](https://github.com/cmk/agogo/pull/6#discussion_r3130476549))
 
-Right, the `/Users/cmk/...` path was an artifact of the planning session. Inlined the design constraints directly into the plan's Context section, and rewrote the Plan 07-b recommendations to spell out the bridge math rather than linking to an external file. Commit b67f9b3.
+Right, the contributor-local path was an artifact of the planning session. Inlined the design constraints directly into the plan's Context section, and rewrote the Plan 07-b recommendations to spell out the bridge math rather than linking to an external file. Commit b67f9b3.
 
 <!-- gh-id: 3130477251 -->
 #### ↳ cmk ([2026-04-23 11:39 UTC](https://github.com/cmk/agogo/pull/6#discussion_r3130477251))
