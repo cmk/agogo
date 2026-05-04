@@ -310,8 +310,11 @@ pub fn render_cv_pulse_block(
 }
 
 fn events_contain_sample(events: &[ScheduledEvent], sample_index: u64) -> bool {
-    // `transform` emits events in ascending sample order; renderer
-    // tests preserve that contract.
+    debug_assert!(
+        events
+            .windows(2)
+            .all(|pair| pair[0].sample_index <= pair[1].sample_index)
+    );
     events
         .binary_search_by_key(&sample_index, |ev| ev.sample_index)
         .is_ok()
@@ -325,7 +328,7 @@ fn write_cv_negative(dst: &mut f32) {
     if *dst == CV_PULSE_POSITIVE {
         return;
     }
-    mix_pcm(dst, CV_PULSE_NEGATIVE);
+    *dst = CV_PULSE_NEGATIVE; // PCM ABI
 }
 
 fn render_one_click(start: usize, accent: bool, sample_rate: u32, output: &mut [f32]) {
@@ -586,6 +589,34 @@ mod tests {
 
         render_cv_pulse_block(&[event(14)], &CvRole::Pulse, &mut right, &mut io);
         render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut left, &mut io);
+
+        assert_eq!(io.output[3], 1.0);
+        assert_eq!(io.output[4], 1.0);
+    }
+
+    #[test]
+    fn cv_bipolar_reset_overwrites_existing_click_sample() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 8]; // PCM ABI
+        output[4] = 0.5_f32; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
+        let mut state = CvPulseState::bipolar();
+
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut io);
+
+        assert_eq!(io.output[3], 1.0);
+        assert_eq!(io.output[4], -1.0);
+    }
+
+    #[test]
+    fn cv_bipolar_reset_preserves_existing_cv_positive_sample() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 8]; // PCM ABI
+        output[4] = 1.0_f32; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
+        let mut state = CvPulseState::bipolar();
+
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut io);
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], 1.0);

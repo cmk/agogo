@@ -607,6 +607,7 @@ impl<R> Playhead<R> {
                         );
                     }
                     Channel::Cv { role, .. } => {
+                        self.events_pool.sort_unstable_by_key(|ev| ev.sample_index);
                         render_cv_pulse_block(
                             &self.events_pool,
                             role,
