@@ -17,6 +17,11 @@ review records without deleting the underlying context. Adds `scripts/check-pii.
 staged-diff mode used by hooks. Updates `doc/todo.md` to track GitHub
 open-sourcing and crates.io publishing as separate milestones.
 
+Also updates the drafted next plan so its deterministic render work is preceded
+by mechanical public-API cleanup: `agogo::chan` facade migration,
+`conn::boundary` merger into `conn::float`, `conn::sample` rename to
+`conn::rate`, and `SXYZ` sample-rate names becoming `RXYZ`.
+
 Verification run locally:
 
 - `scripts/check-pii.sh --tree`
