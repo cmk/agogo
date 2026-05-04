@@ -29,6 +29,8 @@ use core::fmt;
 
 /// Maximum positive delay before saturation: 300 ms = 300 000 µs.
 pub const MAX_DELAY: Micro = Micro(300_000);
+const PICO_SAFE_MICRO_MIN: Micro = Micro(i64::MIN / 1_000_000);
+const PICO_SAFE_MICRO_MAX: Micro = Micro(i64::MAX / 1_000_000);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ScheduleError {
@@ -160,7 +162,8 @@ pub struct ScheduledEvent {
 /// by `transform` and `scheduler`.
 ///
 pub fn micro_to_samples(m: Micro, sr: u32) -> Option<i64> {
-    let pico = FD12FD06.inner(m);
+    let clamped = Micro(m.0.clamp(PICO_SAFE_MICRO_MIN.0, PICO_SAFE_MICRO_MAX.0));
+    let pico = FD12FD06.inner(clamped);
     pico_to_samples(pico, sr)
 }
 
@@ -484,6 +487,21 @@ mod tests {
             common.delay = Micro(delay_us);
             let ev = valid(transform([Tick(960)], &common, SR_48K, BPM_120));
             prop_assert_eq!(ev[0].sample_index, 24_000);
+        }
+
+        #[test]
+        fn micro_to_samples_clamps_to_pico_safe_range(
+            offset_us in prop_oneof![Just(i64::MIN), Just(i64::MAX)],
+        ) {
+            let expected_micro = if offset_us < 0 {
+                PICO_SAFE_MICRO_MIN
+            } else {
+                PICO_SAFE_MICRO_MAX
+            };
+            prop_assert_eq!(
+                super::micro_to_samples(Micro(offset_us), SR_48K),
+                super::micro_to_samples(expected_micro, SR_48K),
+            );
         }
 
         /// Swing is identity on T16 even-parity steps regardless of
