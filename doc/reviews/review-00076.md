@@ -80,3 +80,25 @@ Review comment:
 Resolution: fixed by making CV positive pulses full-scale writes and making
 CV negative resets skip samples that already contain a full-scale CV pulse.
 Added cross-channel spot tests for both render orders.
+
+## Local review (2026-05-04)
+
+**Branch:** plan/2026-05-04-04
+**Commits:** 6 (origin/main..plan/2026-05-04-04)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+I did not find any discrete correctness issues in the diff. The added CV pulse parsing, rendering, runtime sink selection, and offline diagnostics are covered by tests and the workspace test suite passes.
+
+
+## Local review (2026-05-04)
+
+**Branch:** plan/2026-05-04-04
+**Commits:** 6 (origin/main..plan/2026-05-04-04)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+I did not identify any actionable correctness issues in the changes relative to the base branch. The parser, runtime routing, CV pulse rendering, and offline diagnostics appear consistent with the intended MVP behavior.
+
