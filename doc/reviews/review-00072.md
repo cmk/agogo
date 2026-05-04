@@ -44,5 +44,26 @@ Verification run locally:
 
 ---
 
-The changes are a mechanical CLI module reshaping with imports, feature gates, layer checks, and float allowlists updated consistently. I did not find any actionable regressions in the diff, and the relevant CLI checks/tests compile successfully.
+The changes are a mechanical CLI module reshaping with imports, feature gates, layer checks, and float allowlists updated consistently. The relevant CLI checks/tests compile successfully.
 
+Residual caveat: `crates/cli/src/command/link/probe.rs` still contains the pre-existing LAN-sensitive `peers == 0` assertion. This refactor only moved that test; a later Link test-isolation plan should replace it with a fixture/skip gate or non-networked seam.
+
+<!-- gh-id: 3179294998 -->
+### Copilot on [`doc/reviews/review-00072.md:47`](https://github.com/cmk/agogo/pull/72#discussion_r3179294998) (2026-05-04 03:48 UTC)
+
+This local-review conclusion is no longer accurate for the current diff. `crates/cli/src/command/link/probe.rs` still contains the known LAN-sensitive `peers == 0` assertion, so saying there are no actionable regressions will mislead future readers reviewing this record.
+
+<!-- gh-id: 3179312423 -->
+#### ↳ cmk (2026-05-04 03:54 UTC)
+
+Fixed. I revised the local-review record to avoid claiming no actionable regressions and added the residual caveat that `command/link/probe.rs` still has the pre-existing LAN-sensitive `peers == 0` assertion. This refactor only moved that test; a later Link test-isolation plan should replace it with a fixture/skip gate or non-networked seam.
+
+<!-- gh-id: 3179295003 -->
+### Copilot on [`doc/plans/plan-2026-05-04-01.md:36`](https://github.com/cmk/agogo/pull/72#discussion_r3179295003) (2026-05-04 03:48 UTC)
+
+The target-tree diagram is now factually out of date: the PR actually introduces a `command/link/` subdirectory with `commands.rs` and `probe.rs`, but this section still presents `link.rs` as a single leaf file under `command/`. Because this file is meant to capture the intended post-refactor layout, readers will get the wrong module tree unless the nested Link files are shown here too.
+
+<!-- gh-id: 3179312167 -->
+#### ↳ cmk (2026-05-04 03:54 UTC)
+
+Fixed. The target tree now shows the nested `command/link/` directory with `commands.rs` and `probe.rs`, matching the implemented layout.
