@@ -211,3 +211,35 @@ Fixed by rendering non-CV channels first and CV channels in a final pass inside 
 #### ↳ cmk ([2026-05-04 08:46 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180343370))
 
 Fixed by updating the plan wording: audio click and CV pulse channels coexist in the mono diagnostic buffer, but CV renders last and has full-scale priority at pulse/reset overlaps rather than pure commutative summing.
+
+<!-- gh-id: 4218628184 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-04 08:54 UTC](https://github.com/cmk/agogo/pull/76#pullrequestreview-4218628184))
+
+## Pull request overview
+
+Copilot reviewed 19 out of 19 changed files in this pull request and generated 2 comments.
+
+
+
+
+
+<!-- gh-id: 3180384715 -->
+### Copilot on [`crates/chan/src/sink/audio.rs:317`](https://github.com/cmk/agogo/pull/76#discussion_r3180384715) (2026-05-04 08:54 UTC)
+
+`events_contain_sample` uses `binary_search_by_key`, which requires `events` to be sorted by `sample_index`. However `transform`/`tick_stream_into` only guarantee “output order matches input tick order” (and swing/offset can reorder sample indices), so this lookup can return false negatives and break the adjacent-pulse/reset overlap handling. Either ensure the scheduled `events` slice is sorted by `sample_index` before calling CV rendering (without allocating in the RT path), or change the overlap check to not rely on sorted order (e.g., a linear scan or a one-pass/moving-index approach that is correct for tick-ordered input).
+
+
+<!-- gh-id: 3180384750 -->
+### Copilot on [`crates/chan/src/sink/audio.rs:328`](https://github.com/cmk/agogo/pull/76#discussion_r3180384750) (2026-05-04 08:54 UTC)
+
+The plan/docs describe CV pulses/resets having full-scale priority when rendered last, but `write_cv_negative` mixes `-1.0` into the existing sample (and also skips entirely when the sample already happens to be `1.0`). This means a reset that overlaps an existing click sample may not end up as a full-scale `-1.0` reset, which makes the bipolar pulse shape dependent on other renderers’ content. Consider making the negative reset a full-scale write (except when a scheduled CV positive pulse is present at that sample) or otherwise documenting/encoding the intended priority semantics explicitly.
+
+<!-- gh-id: 3180423890 -->
+#### ↳ cmk ([2026-05-04 09:01 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180423890))
+
+Fixed by sorting the per-channel CV events in-place with sort_unstable_by_key before calling render_cv_pulse_block. That keeps the RT path allocation-free while making the binary search contract explicit; the renderer also has a debug assertion for sorted sample indices.
+
+<!-- gh-id: 3180424067 -->
+#### ↳ cmk ([2026-05-04 09:01 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180424067))
+
+Fixed by making CV negative resets full-scale writes unless the destination already contains the CV positive sentinel. Added tests that resets overwrite existing click content to -1.0 while preserving an existing CV positive pulse.
