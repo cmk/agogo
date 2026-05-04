@@ -1,9 +1,9 @@
 //! layer: time
 //! depends-on: conn
 //!
-//! Cirklon grid-and-tick algebra: pure, tempo-independent.
+//! Recologic grid-and-tick algebra: pure, tempo-independent.
 //!
-//! Port of `Control.Cirklon.Type.Time` from the sibling `recologic`
+//! Port of `Control.Recologic.Type.Time` from the sibling `recologic`
 //! Haskell client, extended at v0.2 to a 36-element bounded
 //! distributive Heyting lattice. The module delivers:
 //!
