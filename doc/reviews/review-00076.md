@@ -102,3 +102,81 @@ I did not find any discrete correctness issues in the diff. The added CV pulse p
 
 I did not identify any actionable correctness issues in the changes relative to the base branch. The parser, runtime routing, CV pulse rendering, and offline diagnostics appear consistent with the intended MVP behavior.
 
+
+<!-- gh-id: 3180160445 -->
+### Copilot on [`crates/chan/src/channel/spec/parser.rs:413`](https://github.com/cmk/agogo/pull/76#discussion_r3180160445) (2026-05-04 08:10 UTC)
+
+`mode` parsing now accepts `pulse`/`lfo`, but the role match does not handle `dev=midi` paired with those modes. Specs like `dev=midi,mode=pulse` (or `mode=lfo`) will hit the final `_ => unreachable!(...)` and panic instead of returning a user-facing `ChannelSpecError`. Add explicit error arms for these combinations (and any other newly-admitted (dev, mode) pairs) so invalid specs fail gracefully.
+
+<!-- gh-id: 3180160491 -->
+### Copilot on [`crates/chan/src/sink/audio.rs:314`](https://github.com/cmk/agogo/pull/76#discussion_r3180160491) (2026-05-04 08:10 UTC)
+
+`render_cv_pulse_block` calls `event_at_sample()` inside the per-event loop, and `event_at_sample()` scans the full `events` slice each time. Since the scheduler can legitimately emit up to ~`frames` events in a buffer, this makes CV rendering O(n²) per buffer in the worst case and risks RT underruns. Consider leveraging the fact that `events` are emitted in ascending `sample_index` order (e.g., compare against the next event, or use binary search / a moving index) so overlap checks are O(1) or O(log n) per event.
+
+<!-- gh-id: 3180160525 -->
+### Copilot on [`crates/chan/src/channel/spec.rs:11`](https://github.com/cmk/agogo/pull/76#discussion_r3180160525) (2026-05-04 08:10 UTC)
+
+The module docs list `mode` values as `clock|click|pulse`, but the parser also accepts `mode=lfo` (even though it currently errors for `dev=cv`). Update the documented mode value set (and/or note which modes are currently unimplemented) so the docs match the actual CLI surface and error messages.
+
+
+<!-- gh-id: 4218355547 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-04 08:10 UTC](https://github.com/cmk/agogo/pull/76#pullrequestreview-4218355547))
+
+## Pull request overview
+
+This PR adds a “CV pulse” MVP intended for public demos by allowing `dev=cv,mode=pulse` channel specs to lower into `Channel::Cv` and render fixed-shape CV pulses through the existing mono audio output path, with offline diagnostics and tests to validate behavior.
+
+**Changes:**
+- Extend channel spec parsing/validation/display to support `dev=cv` (defaulting to `mode=pulse`) and lower into `Channel::Cv`.
+- Add fixed-shape CV pulse rendering (incl. bipolar reset across buffer boundaries) via the mono `AudioIo::output` path, wired into the playhead.
+- Extend offline render JSON with positive/negative peak diagnostics and add CLI/offline tests; update docs/roadmap/README to reflect the MVP slice.
+
+### Reviewed changes
+
+Copilot reviewed 19 out of 19 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/versions/version-0.4.md | Notes the earlier CV-pulse MVP slice landing ahead of heterogeneous output work. |
+| doc/reviews/review-00076.md | Adds a review record capturing the iteration history and resolutions. |
+| doc/plans/plan-2026-05-04-04.md | New plan doc describing scope, tasks, and verification for the CV pulse MVP. |
+| doc/designs/cv-pulse.md | Updates design doc to reflect the MVP being pulled forward. |
+| crates/host-cpal/src/lib.rs | Updates backend docs to mention the mono CV-pulse path alongside audio click. |
+| crates/host-cpal/README.md | Updates backend README to describe the CV pulse MVP slice and mono output. |
+| crates/core/src/transport.rs | Wires `Channel::Cv` into playhead dispatch, tracks per-channel CV pulse state, and adds offline peak diagnostics. |
+| crates/cli/test/render.rs | Adds a hardware-free render test asserting CV pulse activity and peak diagnostics in JSON. |
+| crates/cli/src/command/run.rs | Routes CV channels through audio-output selection/mix so `agogo run` opens an output stream for CV pulse. |
+| crates/cli/src/command/render.rs | Adds `positive_peak_q15` / `negative_peak_q15` to render JSON output. |
+| crates/chan/src/sink/audio.rs | Implements CV pulse renderer + state, plus unit/property tests; updates `AudioIo` docs to reflect mono output usage. |
+| crates/chan/src/channel/spec/validate.rs | Lowers `ChannelSpecRole::Cv` into `Channel::Cv` and adds a lowering test. |
+| crates/chan/src/channel/spec/types.rs | Introduces `ChannelSpecRole::Cv(CvRole)`. |
+| crates/chan/src/channel/spec/parser.rs | Parses `dev=cv` + `mode=pulse`/`lfo` and defaults `dev=cv` to pulse; adds CV-specific parser tests. |
+| crates/chan/src/channel/spec/display.rs | Updates display/roundtrip role generation to include CV pulse. |
+| crates/chan/src/channel/spec.rs | Updates channel spec module docs for CV pulse MVP behavior. |
+| crates/chan/src/channel/role.rs | Updates CV role docs to reflect that `Pulse` now renders via audio output. |
+| crates/chan/src/channel.rs | Makes `CvRole` user-facing (while keeping `DinRole` doc-hidden) and updates comments. |
+| README.md | Updates status + adds example commands for offline CV pulse render and runtime smoke path. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3180206577 -->
+#### ↳ cmk ([2026-05-04 08:18 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180206577))
+
+Fixed by adding explicit dev=midi + mode=pulse/lfo error arms, plus a regression test covering both modes so these now return ChannelSpecError instead of reaching unreachable!.
+
+<!-- gh-id: 3180206786 -->
+#### ↳ cmk ([2026-05-04 08:18 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180206786))
+
+Fixed by replacing the per-event linear scan with binary_search_by_key over the sorted ScheduledEvent slice. The overlap checks are now logarithmic rather than O(n) scans inside the loop.
+
+<!-- gh-id: 3180206816 -->
+#### ↳ cmk ([2026-05-04 08:18 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180206816))
+
+Fixed by updating the channel-spec module docs to list lfo in the accepted mode tokens and explicitly note that dev=cv,mode=lfo is parsed but rejected until the LFO renderer lands.

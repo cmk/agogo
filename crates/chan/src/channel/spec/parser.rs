@@ -331,6 +331,12 @@ impl ChannelSpec {
                     accent,
                 }))
             }
+            ("midi", "pulse" | "lfo") => {
+                return Err(ChannelSpecError::BadValue(
+                    "mode",
+                    "dev=midi supports mode=clock or mode=click only".into(),
+                ));
+            }
             ("audio", "click") => {
                 const MIDI_ONLY_KEYS: &[&str] = &[
                     "note",
@@ -862,6 +868,21 @@ mod tests {
                 assert!(msg.contains("dev=midi"), "got: {msg}");
             }
             other => panic!("unexpected: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_midi_pulse_and_lfo_modes() {
+        for mode in ["pulse", "lfo"] {
+            let err =
+                ChannelSpec::parse(&format!("dev=midi,mode={mode},grid=t4"), &[]).unwrap_err();
+            match err {
+                ChannelSpecError::BadValue(key, msg) => {
+                    assert_eq!(key, "mode");
+                    assert!(msg.contains("mode=clock or mode=click"), "got: {msg}");
+                }
+                other => panic!("unexpected: {:?}", other),
+            }
         }
     }
 

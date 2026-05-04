@@ -276,7 +276,7 @@ pub fn render_cv_pulse_block(
             }
 
             if state.pending_bipolar_reset {
-                if !event_at_sample(events, io.buffer_start_sample) {
+                if !events_contain_sample(events, io.buffer_start_sample) {
                     write_cv_negative(&mut io.output[0]);
                 }
                 state.pending_bipolar_reset = false;
@@ -294,7 +294,7 @@ pub fn render_cv_pulse_block(
                 if state.shape == CvPulseShape::Bipolar {
                     let reset = offset + 1;
                     let reset_sample = ev.sample_index.saturating_add(1);
-                    if event_at_sample(events, reset_sample) {
+                    if events_contain_sample(events, reset_sample) {
                         continue;
                     }
                     if reset < writable {
@@ -309,8 +309,12 @@ pub fn render_cv_pulse_block(
     }
 }
 
-fn event_at_sample(events: &[ScheduledEvent], sample_index: u64) -> bool {
-    events.iter().any(|ev| ev.sample_index == sample_index)
+fn events_contain_sample(events: &[ScheduledEvent], sample_index: u64) -> bool {
+    // `transform` emits events in ascending sample order; renderer
+    // tests preserve that contract.
+    events
+        .binary_search_by_key(&sample_index, |ev| ev.sample_index)
+        .is_ok()
 }
 
 fn write_cv_positive(dst: &mut f32) {
