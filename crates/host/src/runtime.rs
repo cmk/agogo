@@ -5,7 +5,6 @@
 //! small host-facing API that a sibling adapter can wrap.
 
 use agogo::core::conn::sample::S048;
-use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::{PhaseSource, Playhead, TransportPolicy};
 use agogo::core::sink::audio::AudioIo;
 use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
@@ -86,7 +85,7 @@ impl Runtime {
             snapshot_slot,
             publisher,
         };
-        runtime.write_snapshot_frame(config.initial_tempo, 0);
+        runtime.write_snapshot_frame(0);
         runtime
     }
 
@@ -119,7 +118,7 @@ impl Runtime {
             RUNTIME_BUFFER_FRAMES,
         );
         self.playhead.on_buffer(&mut io, &NoopSink);
-        self.write_snapshot_frame(report.params.tempo, report.params.buffer_epoch);
+        self.write_snapshot_frame(report.params.buffer_epoch);
         report
     }
 
@@ -191,14 +190,14 @@ impl Runtime {
         }
     }
 
-    fn write_snapshot_frame(&self, tempo: Tempo, buffer_epoch: u64) -> u64 {
+    fn write_snapshot_frame(&self, buffer_epoch: u64) -> u64 {
         let state = if self.playhead.is_running() {
             TransportStateCode::Running
         } else {
             TransportStateCode::Stopped
         };
         self.snapshot_slot.writer().write(&RtSnapshotFrame {
-            bpm: tempo,
+            bpm: self.playhead.bpm,
             transport: RtTransportFrame {
                 state,
                 bar: 0,
@@ -325,6 +324,30 @@ mod tests {
                 ..
             }) if form_id == AGOGO_MAIN_ID && form_type == AGOGO_STATE_FORM_TYPE
         ));
+    }
+
+    #[test]
+    fn runtime_snapshot_uses_playhead_tempo_when_apply_rejects() {
+        let mut runtime = Runtime::new();
+        runtime.mount().expect("mount");
+
+        let report = runtime
+            .run_command_step(
+                Tool::TempoSet.name(),
+                json!({
+                    "bpm": 4000,
+                    "source_id": "test",
+                    "command_id": 10,
+                    "time_domain": "rt_buffer",
+                    "deadline_buffer": 1,
+                }),
+            )
+            .expect("tempo command");
+
+        assert_eq!(report.admission["status"], json!("accepted"));
+        assert_eq!(report.apply.params.tempo, Tempo::from_bpm_integer(4000));
+        assert!(!report.apply.tempo_updated);
+        assert_eq!(runtime.snapshot().bpm.0, Tempo::from_bpm_integer(120).0);
     }
 
     #[test]

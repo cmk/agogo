@@ -63,3 +63,18 @@ Review comment:
 
 - [P2] Seed the initial runtime snapshot from the playhead — crates/host/src/runtime.rs:74-79
   When an adapter reads or publishes the runtime surface immediately after `mount()` but before the first `advance_buffer()`, this slot still contains `SnapshotSlot`'s default stopped/zero-audio frame even though the `Playhead` constructed above is already running (`TransportState::new` starts with `running = true`). That makes the initial `agogo-state` observation falsely report `stopped` until some later buffer write happens; initialize the slot from the runtime/playhead state or make the playhead start stopped.
+
+## Local review (2026-05-03)
+
+**Branch:** plan-2026-05-03-05
+**Commits:** 7 (origin/main..plan-2026-05-03-05)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The new runtime helper can publish observations that diverge from the actual playhead state for accepted but unapplied tempo changes. This breaks the correctness of the adapter-facing snapshot surface introduced by the patch.
+
+Review comment:
+
+- [P2] Snapshot the actual playhead tempo after applying controls — crates/host/src/runtime.rs:122-122
+  When `agogo.tempo.set` admits an integer BPM that fits `Tempo` but is invalid for the runtime sample rate (for example 1000 BPM at 48 kHz exceeds `validate_schedule_params`' limit), `playhead.apply_tempo` returns `false` and keeps the old tempo, but this line still writes `report.params.tempo` into the published snapshot. The adapter-facing observation can therefore report a tempo that was never applied; write the snapshot from the playhead's current tempo or reject these tempos before admission.
