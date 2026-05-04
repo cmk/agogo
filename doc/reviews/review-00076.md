@@ -61,3 +61,22 @@ Review comment:
 Resolution: fixed by skipping a bipolar reset when it would land on another
 scheduled pulse sample, preserving the positive impulse. Added a spot test and
 extended `cv_impulse_sample_exact` to cover adjacent events.
+
+## Local review (2026-05-04)
+
+**Branch:** plan/2026-05-04-04
+**Commits:** 5 (origin/main..plan/2026-05-04-04)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The new CV pulse renderer handles adjacent events within one channel, but still allows cross-channel bipolar resets to cancel another channel's scheduled pulse on the shared mono output.
+
+Review comment:
+
+- [P2] Preserve pulses across CV channels — crates/chan/src/sink/audio.rs:297-301
+  When two accepted CV pulse channels share the current mono output and one channel has an event one sample before another, this reset check only sees events from the current channel, so the first channel writes `-1.0` into the second channel's positive pulse sample and the final mix clamps to `0.0`. That makes a scheduled pulse disappear for multi-channel CV specs using the same output; the overlap handling needs to account for all CV pulse events in the mixed buffer or otherwise reject these schedules.
+
+Resolution: fixed by making CV positive pulses full-scale writes and making
+CV negative resets skip samples that already contain a full-scale CV pulse.
+Added cross-channel spot tests for both render orders.
