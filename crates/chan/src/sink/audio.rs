@@ -262,6 +262,7 @@ pub fn render_cv_pulse_block(
     events: &[ScheduledEvent],
     role: &CvRole,
     state: &mut CvPulseState,
+    cv_positive_samples: &mut [bool],
     io: &mut AudioIo<'_>,
 ) {
     if io.output.is_empty() {
@@ -276,7 +277,9 @@ pub fn render_cv_pulse_block(
             }
 
             if state.pending_bipolar_reset {
-                if !events_contain_sample(events, io.buffer_start_sample) {
+                if !cv_positive_at(cv_positive_samples, 0)
+                    && !events_contain_sample(events, io.buffer_start_sample)
+                {
                     write_cv_negative(&mut io.output[0]);
                 }
                 state.pending_bipolar_reset = false;
@@ -291,10 +294,13 @@ pub fn render_cv_pulse_block(
                     continue;
                 }
                 write_cv_positive(&mut io.output[offset]);
+                mark_cv_positive(cv_positive_samples, offset);
                 if state.shape == CvPulseShape::Bipolar {
                     let reset = offset + 1;
                     let reset_sample = ev.sample_index.saturating_add(1);
-                    if events_contain_sample(events, reset_sample) {
+                    if cv_positive_at(cv_positive_samples, reset)
+                        || events_contain_sample(events, reset_sample)
+                    {
                         continue;
                     }
                     if reset < writable {
@@ -325,10 +331,17 @@ fn write_cv_positive(dst: &mut f32) {
 }
 
 fn write_cv_negative(dst: &mut f32) {
-    if *dst == CV_PULSE_POSITIVE {
-        return;
-    }
     *dst = CV_PULSE_NEGATIVE; // PCM ABI
+}
+
+fn mark_cv_positive(mask: &mut [bool], offset: usize) {
+    if let Some(slot) = mask.get_mut(offset) {
+        *slot = true;
+    }
+}
+
+fn cv_positive_at(mask: &[bool], offset: usize) -> bool {
+    mask.get(offset).copied().unwrap_or(false)
 }
 
 fn render_one_click(start: usize, accent: bool, sample_rate: u32, output: &mut [f32]) {
@@ -425,6 +438,10 @@ mod tests {
         }
     }
 
+    fn cv_mask(frames: usize) -> Vec<bool> {
+        vec![false; frames]
+    }
+
     #[test]
     fn audio_click_events_write_nonzero_samples() {
         let input: [f32; 0] = []; // PCM ABI
@@ -508,8 +525,9 @@ mod tests {
         let mut output = vec![0.0_f32; 8]; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
         let mut state = CvPulseState::new(CvPulseShape::Monopolar);
+        let mut mask = cv_mask(8);
 
-        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut io);
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut mask, &mut io);
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 1);
@@ -521,8 +539,9 @@ mod tests {
         let mut output = vec![0.0_f32; 8]; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
         let mut state = CvPulseState::bipolar();
+        let mut mask = cv_mask(8);
 
-        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut io);
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut mask, &mut io);
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], -1.0);
@@ -537,14 +556,16 @@ mod tests {
         let mut first = vec![0.0_f32; 4]; // PCM ABI
         {
             let mut io = AudioIo::new(&input, &mut first, 0, 48_000, 4);
-            render_cv_pulse_block(&[event(3)], &CvRole::Pulse, &mut state, &mut io);
+            let mut mask = cv_mask(4);
+            render_cv_pulse_block(&[event(3)], &CvRole::Pulse, &mut state, &mut mask, &mut io);
         }
         assert_eq!(first, vec![0.0, 0.0, 0.0, 1.0]);
 
         let mut second = vec![0.0_f32; 4]; // PCM ABI
         {
             let mut io = AudioIo::new(&input, &mut second, 4, 48_000, 4);
-            render_cv_pulse_block(&[], &CvRole::Pulse, &mut state, &mut io);
+            let mut mask = cv_mask(4);
+            render_cv_pulse_block(&[], &CvRole::Pulse, &mut state, &mut mask, &mut io);
         }
         assert_eq!(second, vec![-1.0, 0.0, 0.0, 0.0]);
     }
@@ -555,8 +576,15 @@ mod tests {
         let mut output = vec![0.0_f32; 8]; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
         let mut state = CvPulseState::bipolar();
+        let mut mask = cv_mask(8);
 
-        render_cv_pulse_block(&[event(13), event(14)], &CvRole::Pulse, &mut state, &mut io);
+        render_cv_pulse_block(
+            &[event(13), event(14)],
+            &CvRole::Pulse,
+            &mut state,
+            &mut mask,
+            &mut io,
+        );
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], 1.0);
@@ -570,9 +598,10 @@ mod tests {
         let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
         let mut left = CvPulseState::bipolar();
         let mut right = CvPulseState::bipolar();
+        let mut mask = cv_mask(8);
 
-        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut left, &mut io);
-        render_cv_pulse_block(&[event(14)], &CvRole::Pulse, &mut right, &mut io);
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut left, &mut mask, &mut io);
+        render_cv_pulse_block(&[event(14)], &CvRole::Pulse, &mut right, &mut mask, &mut io);
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], 1.0);
@@ -586,9 +615,10 @@ mod tests {
         let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
         let mut left = CvPulseState::bipolar();
         let mut right = CvPulseState::bipolar();
+        let mut mask = cv_mask(8);
 
-        render_cv_pulse_block(&[event(14)], &CvRole::Pulse, &mut right, &mut io);
-        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut left, &mut io);
+        render_cv_pulse_block(&[event(14)], &CvRole::Pulse, &mut right, &mut mask, &mut io);
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut left, &mut mask, &mut io);
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], 1.0);
@@ -601,8 +631,9 @@ mod tests {
         output[4] = 0.5_f32; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
         let mut state = CvPulseState::bipolar();
+        let mut mask = cv_mask(8);
 
-        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut io);
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut mask, &mut io);
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], -1.0);
@@ -615,8 +646,10 @@ mod tests {
         output[4] = 1.0_f32; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
         let mut state = CvPulseState::bipolar();
+        let mut mask = cv_mask(8);
+        mask[4] = true;
 
-        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut io);
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut mask, &mut io);
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], 1.0);
@@ -640,13 +673,14 @@ mod tests {
             let start = 1_000_u64;
             let mut io = AudioIo::new(&input, &mut output, start, sample_rate, frames);
             let mut state = CvPulseState::bipolar();
+            let mut mask = cv_mask(frames);
 
             let mut events = vec![event(start + offset as u64)];
             if adjacent && offset + 1 < frames {
                 events.push(event(start + offset as u64 + 1));
             }
 
-            render_cv_pulse_block(&events, &CvRole::Pulse, &mut state, &mut io);
+            render_cv_pulse_block(&events, &CvRole::Pulse, &mut state, &mut mask, &mut io);
 
             prop_assert_eq!(io.output[offset], 1.0);
             if adjacent && offset + 1 < frames {
@@ -668,11 +702,13 @@ mod tests {
             let start = 1_000_u64;
             let mut io = AudioIo::new(&input, &mut output, start, 48_000, frames);
             let mut state = CvPulseState::new(CvPulseShape::Monopolar);
+            let mut mask = cv_mask(frames);
 
             render_cv_pulse_block(
                 &[event(start + offset as u64)],
                 &CvRole::Pulse,
                 &mut state,
+                &mut mask,
                 &mut io,
             );
 
@@ -689,10 +725,12 @@ mod tests {
             let mut first = vec![0.0_f32; frames]; // PCM ABI
             {
                 let mut io = AudioIo::new(&input, &mut first, start, 48_000, frames);
+                let mut mask = cv_mask(frames);
                 render_cv_pulse_block(
                     &[event(start + frames as u64 - 1)],
                     &CvRole::Pulse,
                     &mut state,
+                    &mut mask,
                     &mut io,
                 );
             }
@@ -701,7 +739,8 @@ mod tests {
             let mut second = vec![0.0_f32; frames]; // PCM ABI
             {
                 let mut io = AudioIo::new(&input, &mut second, start + frames as u64, 48_000, frames);
-                render_cv_pulse_block(&[], &CvRole::Pulse, &mut state, &mut io);
+                let mut mask = cv_mask(frames);
+                render_cv_pulse_block(&[], &CvRole::Pulse, &mut state, &mut mask, &mut io);
             }
             prop_assert_eq!(second[0], -1.0);
             prop_assert_eq!(second.iter().filter(|&&s| s != 0.0).count(), 1);

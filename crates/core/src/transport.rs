@@ -89,6 +89,10 @@ pub struct Playhead<R> {
     /// `channels`; meaningful only for `Channel::Cv { role:
     /// CvRole::Pulse }` channels.
     cv_pulse_states: Vec<CvPulseState>,
+    /// Per-buffer CV positive occupancy. Cleared before the CV pass;
+    /// shared across CV channels so bipolar resets do not infer CV
+    /// ownership from ambiguous PCM sample values.
+    cv_positive_mask: Vec<bool>,
     /// Cross-thread stop signal. `PlayheadStopHandle::request_stop`
     /// flips this; the next [`Playhead::on_buffer`] reads it and
     /// emits [`MidiRtByte::Stop`].
@@ -381,6 +385,7 @@ impl<R> Playhead<R> {
             click_counters: vec![0; n],
             audio_click_counters: vec![0; n],
             cv_pulse_states: vec![CvPulseState::bipolar(); n],
+            cv_positive_mask: vec![false; buffer_frames],
             stop_flag: Arc::new(AtomicBool::new(false)),
             command_transport: CommandTransportQueue::new(),
         }
@@ -547,6 +552,10 @@ impl<R> Playhead<R> {
         //    channels. Render CV in a final pass so full-scale pulse
         //    priority is independent of the user's channel order.
         for cv_pass in [false, true] {
+            if cv_pass {
+                let writable = io.frames.min(self.cv_positive_mask.len());
+                self.cv_positive_mask[..writable].fill(false);
+            }
             for (idx, ch) in self.channels.iter().enumerate() {
                 if matches!(ch, Channel::Cv { .. }) != cv_pass {
                     continue;
@@ -608,10 +617,12 @@ impl<R> Playhead<R> {
                     }
                     Channel::Cv { role, .. } => {
                         self.events_pool.sort_unstable_by_key(|ev| ev.sample_index);
+                        let writable = io.frames.min(self.cv_positive_mask.len());
                         render_cv_pulse_block(
                             &self.events_pool,
                             role,
                             &mut self.cv_pulse_states[idx],
+                            &mut self.cv_positive_mask[..writable],
                             io,
                         );
                     }

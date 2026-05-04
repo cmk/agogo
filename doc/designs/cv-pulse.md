@@ -3,13 +3,12 @@
 **Source**: note lines 448–560 (single-sample impulse, bipolar reset)
 and 1883–1926 (the "pending reset" flag in the full audio callback).
 
-**Context**: v0.4 ships CV/gate output through the heterogeneous output
-layer and owns properties `cv_impulse_sample_exact` and
-`cv_impulse_one_sample_energy`.
+**Context**: Plan 2026-05-04-04 pulls the fixed mono pulse renderer and
+its renderer-level properties (`cv_impulse_sample_exact` and
+`cv_impulse_one_sample_energy`) forward as a public-demo MVP.
 
-Plan 2026-05-04-04 pulls the fixed mono pulse renderer forward as a public-demo
-MVP. The heterogeneous output layer still owns multi-channel routing, hardware
-calibration, and user-facing pulse-shape controls.
+v0.4 still owns the heterogeneous output layer: multi-channel routing,
+hardware calibration, and user-facing pulse-shape controls.
 
 ## Adopt
 
