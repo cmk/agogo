@@ -3,7 +3,7 @@
 //!
 //! Plan 2026-04-28-05 T5: extracted from `cli/main.rs`.
 
-use agogo::core::control::PhaseSourceImpl;
+use agogo::chan::control::PhaseSourceImpl;
 use agogo::host::link::{HostTimeAnchor, LinkClock};
 use std::num::NonZeroU32;
 use std::thread::sleep;
@@ -16,10 +16,10 @@ pub struct ProbeRow {
     /// monotonically-increasing timestamps end-to-end.
     pub t_ms: u64,
     pub peers: u64,
-    pub tempo: agogo::core::conn::tempo::Tempo,
+    pub tempo: agogo::chan::conn::tempo::Tempo,
     /// Beat-phase in `[0, 1)` at sample `t_ms × sr / 1000`,
     /// mapped through the anchor captured at probe start.
-    pub phase: agogo::core::conn::phase::Phase,
+    pub phase: agogo::chan::conn::phase::Phase,
 }
 
 /// Run a probe loop for `duration_ms`, sampling every `period_ms`.
@@ -33,7 +33,7 @@ pub struct ProbeRow {
 /// turn the `sleep(Duration::ZERO)` inside the loop into a no-op
 /// and starve the row consumer if it can't keep up.
 pub fn probe<F: FnMut(ProbeRow)>(
-    initial_tempo: agogo::core::conn::tempo::Tempo,
+    initial_tempo: agogo::chan::conn::tempo::Tempo,
     sr: u32,
     duration_ms: u32,
     period_ms: u32,
@@ -80,7 +80,7 @@ pub fn probe<F: FnMut(ProbeRow)>(
             t_ms,
             peers: clock.num_peers(),
             tempo: clock.tempo(),
-            phase: agogo::core::conn::phase::Phase(phase_u32),
+            phase: agogo::chan::conn::phase::Phase(phase_u32),
         });
         sleep(period);
     }
@@ -88,7 +88,7 @@ pub fn probe<F: FnMut(ProbeRow)>(
 }
 
 pub fn print_csv(
-    initial_bpm: agogo::core::conn::tempo::Tempo,
+    initial_bpm: agogo::chan::conn::tempo::Tempo,
     sr: u32,
     duration_ms: u32,
     period_ms: u32,
@@ -97,7 +97,7 @@ pub fn print_csv(
     probe(initial_bpm, sr, duration_ms, period_ms, |row| {
         // Display-only conversion: fxp -> f64 at println! time,
         // never stored in `ProbeRow`.
-        let tempo_bpm = agogo::core::conn::boundary::tempo_to_f64_bpm(row.tempo);
+        let tempo_bpm = agogo::chan::conn::float::tempo_to_f64_bpm(row.tempo);
         let phase = f64::from(row.phase.0) / (1u64 << 32) as f64;
         println!("{},{},{:.4},{:.6}", row.t_ms, row.peers, tempo_bpm, phase);
     });
@@ -120,7 +120,7 @@ mod tests {
     fn probe_emits_rows_and_keeps_initial_tempo() {
         let mut rows = Vec::new();
         probe(
-            agogo::core::conn::tempo::Tempo::from_bpm_integer(125),
+            agogo::chan::conn::tempo::Tempo::from_bpm_integer(125),
             48_000,
             100,
             50,
@@ -132,7 +132,7 @@ mod tests {
         // Tempo is integer µBPM: 125 BPM → 125_000_000.
         assert_eq!(
             first.tempo,
-            agogo::core::conn::tempo::Tempo(125_000_000),
+            agogo::chan::conn::tempo::Tempo(125_000_000),
             "tempo {:?} differs from initial Tempo(125_000_000)",
             first.tempo
         );

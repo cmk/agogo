@@ -2,7 +2,7 @@
 //! depends-on: session
 //!
 //! `LinkPhaseSource` — adapter wrapping [`LinkSession`] for use as
-//! [`agogo::core::control::PhaseSource::Custom`].
+//! [`agogo::chan::control::PhaseSource::Custom`].
 //!
 //! The audio callback needs `phase_at_sample(n)`; the control thread
 //! needs `is_playing()`, `poll_transport()`, `set_tempo()`, etc. Both
@@ -18,9 +18,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use agogo::core::conn::phase::Phase;
-use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::PhaseSourceImpl;
+use agogo::chan::conn::phase::Phase;
+use agogo::chan::conn::tempo::Tempo;
+use agogo::chan::control::PhaseSourceImpl;
 
 use crate::session::LinkSession;
 

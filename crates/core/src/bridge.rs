@@ -1083,7 +1083,7 @@ mod tests {
     use crate::TransportPolicy;
     use crate::channel::{Channel, ChannelCommon, MidiRole};
     use crate::conn::fixed::Micro;
-    use crate::conn::sample::S048;
+    use crate::conn::rate::R048;
     use crate::control::PhaseSource;
     use crate::sink::audio::AudioIo;
     use crate::sink::midi::{MIDI_START, MIDI_STOP, TestSink};
@@ -1141,8 +1141,8 @@ mod tests {
         }
     }
 
-    fn playhead(bpm: Tempo, transport: TransportPolicy) -> Playhead<S048> {
-        Playhead::<S048>::new(
+    fn playhead(bpm: Tempo, transport: TransportPolicy) -> Playhead<R048> {
+        Playhead::<R048>::new(
             vec![zero_channel(Grid::T4)],
             PhaseSource::Internal { bpm },
             48_000,

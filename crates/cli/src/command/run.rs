@@ -37,14 +37,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use agogo::core::channel::Channel;
-use agogo::core::channel::spec::ChannelSpecRole;
-use agogo::core::channel::time::validate_schedule_params;
-use agogo::core::conn::boundary::tempo_to_f64_bpm;
-use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate};
-use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-use agogo::core::sink::audio::{AudioHost, AudioIo, Config};
+use agogo::chan::channel::Channel;
+use agogo::chan::channel::spec::ChannelSpecRole;
+use agogo::chan::channel::time::validate_schedule_params;
+use agogo::chan::conn::float::tempo_to_f64_bpm;
+use agogo::chan::conn::rate::{R044, R048, R088, R096, R176, R192, SampleRate};
+use agogo::chan::conn::tempo::Tempo;
+use agogo::chan::control::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo::chan::sink::audio::{AudioHost, AudioIo, Config};
 use agogo::core::{Playhead, PlayheadStopHandle, TransportPolicy};
 use agogo::host::cpal::CpalHost;
 use agogo::host::cpal::callback::CallbackState;
@@ -58,7 +58,7 @@ use std::num::NonZeroU32;
 
 /// PLL pulse rate. `agogo run` external source feeds the detector +
 /// PLL at MIDI clock cadence (24 PPQ); the master tick stream
-/// scheduler uses `agogo::core::time::tick::PPQN` (960).
+/// scheduler uses `agogo::chan::time::tick::PPQN` (960).
 const PULSE_PPQ: u32 = 24;
 const SUPPORTED_SAMPLE_RATES: &str = "44100, 48000, 88200, 96000, 176400, 192000";
 
@@ -124,7 +124,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     // consumed the f64 at parse time.
     let bpm: Tempo = args.bpm;
     validate_schedule_params(args.sr, bpm).map_err(|e| match e {
-        agogo::core::channel::time::ScheduleError::UnsupportedSampleRate(sr) => {
+        agogo::chan::channel::time::ScheduleError::UnsupportedSampleRate(sr) => {
             format!("--sr {sr} not supported (allowed: {SUPPORTED_SAMPLE_RATES})")
         }
         other => format!("invalid scheduling parameters: {other}"),
@@ -132,11 +132,11 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     // Parse all --ch specs eagerly (in order, so variable refs
     // resolve) before any device opens.
-    let named = match agogo::core::channel::spec::parse_channels(&args.ch) {
+    let named = match agogo::chan::channel::spec::parse_channels(&args.ch) {
         Ok(named) => named,
         Err(e) => {
             let failing_entry = (0..args.ch.len()).find_map(|idx| {
-                agogo::core::channel::spec::parse_channels(&args.ch[..=idx])
+                agogo::chan::channel::spec::parse_channels(&args.ch[..=idx])
                     .err()
                     .map(|_| (idx, args.ch[idx].as_str()))
             });
@@ -177,7 +177,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 
     // Static rate dispatch.
     match args.sr {
-        rate if rate == S044::HZ => run_s044(
+        rate if rate == R044::HZ => run_s044(
             args,
             bpm,
             specs,
@@ -185,7 +185,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S048::HZ => run_s048(
+        rate if rate == R048::HZ => run_s048(
             args,
             bpm,
             specs,
@@ -193,7 +193,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S088::HZ => run_s088(
+        rate if rate == R088::HZ => run_s088(
             args,
             bpm,
             specs,
@@ -201,7 +201,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S096::HZ => run_s096(
+        rate if rate == R096::HZ => run_s096(
             args,
             bpm,
             specs,
@@ -209,7 +209,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S176::HZ => run_s176(
+        rate if rate == R176::HZ => run_s176(
             args,
             bpm,
             specs,
@@ -217,7 +217,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             midi_port_request,
             audio_output_request,
         ),
-        rate if rate == S192::HZ => run_s192(
+        rate if rate == R192::HZ => run_s192(
             args,
             bpm,
             specs,
@@ -248,7 +248,7 @@ fn channel_mix(channels: &[Channel]) -> ChannelMix {
 }
 
 fn single_target_output_request(
-    named: &[(String, agogo::core::channel::spec::ChannelSpec)],
+    named: &[(String, agogo::chan::channel::spec::ChannelSpec)],
     mut matches_target: impl FnMut(&ChannelSpecRole) -> bool,
     target_name: &str,
 ) -> Result<Option<String>, String> {
@@ -281,7 +281,7 @@ macro_rules! def_run_with_rate {
         fn $func(
             args: &RunArgs,
             bpm: Tempo,
-            specs: Vec<agogo::core::channel::spec::ChannelSpec>,
+            specs: Vec<agogo::chan::channel::spec::ChannelSpec>,
             mut channels: Vec<Channel>,
             midi_port_request: Option<String>,
             audio_output_request: Option<String>,
@@ -318,7 +318,7 @@ macro_rules! def_run_with_rate {
             MidirSink::open(&midi_port_name)
                 .map_err(|e| format!("midi open `{midi_port_name}`: {e}"))?,
         );
-        let drain_sink: Arc<dyn agogo::core::sink::midi::MidiSink + Send + Sync> = sink;
+        let drain_sink: Arc<dyn agogo::chan::sink::midi::MidiSink + Send + Sync> = sink;
         (
             Some(midi_port_name),
             Some(consumer.spawn_drain(drain_sink)),
@@ -524,12 +524,12 @@ macro_rules! def_run_with_rate {
     };
 }
 
-def_run_with_rate!(run_s044, S044);
-def_run_with_rate!(run_s048, S048);
-def_run_with_rate!(run_s088, S088);
-def_run_with_rate!(run_s096, S096);
-def_run_with_rate!(run_s176, S176);
-def_run_with_rate!(run_s192, S192);
+def_run_with_rate!(run_s044, R044);
+def_run_with_rate!(run_s048, R048);
+def_run_with_rate!(run_s088, R088);
+def_run_with_rate!(run_s096, R096);
+def_run_with_rate!(run_s176, R176);
+def_run_with_rate!(run_s192, R192);
 
 fn install_ctrlc_handler(
     stop_flag: Arc<AtomicBool>,
@@ -611,7 +611,7 @@ mod tests {
         fn parse_bpm_to_tempo_ok_iff_in_range(f in prop::num::f64::ANY) {
             let s = format!("{f}");
             let parsed: f64 = s.parse().unwrap_or(f64::NAN);
-            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= agogo::core::conn::boundary::MAX_BPM_F64;
+            let in_range = parsed.is_finite() && parsed > 0.0 && parsed <= agogo::chan::conn::float::MAX_BPM_F64;
             prop_assert_eq!(parse_bpm_to_tempo(s).is_ok(), in_range);
         }
 
@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn run_audio_only_does_not_require_midi_port() {
         let named =
-            agogo::core::channel::spec::parse_channels(&["dev=audio,mode=click,grid=t4".into()])
+            agogo::chan::channel::spec::parse_channels(&["dev=audio,mode=click,grid=t4".into()])
                 .unwrap();
         let channels: Vec<Channel> = named
             .into_iter()

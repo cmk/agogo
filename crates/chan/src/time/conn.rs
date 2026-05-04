@@ -34,8 +34,8 @@
 use connections::conn::{ViewL, ViewR};
 use connections::fixed::u64::{I064U064, U128U064};
 
-use crate::conn::sample::{
-    S044, S044I064, S048, S048I064, S088, S088I064, S096, S096I064, S176, S176I064, S192, S192I064,
+use crate::conn::rate::{
+    R044, R044I064, R048, R048I064, R088, R088I064, R096, R096I064, R176, R176I064, R192, R192I064,
     SampleRate,
 };
 use crate::conn::tempo::Tempo;
@@ -322,12 +322,12 @@ macro_rules! tick_sample_fns {
 }
 
 tick_sample_fns!(
-    (tick_to_s044, S044, S044I064, 44_100),
-    (tick_to_s048, S048, S048I064, 48_000),
-    (tick_to_s088, S088, S088I064, 88_200),
-    (tick_to_s096, S096, S096I064, 96_000),
-    (tick_to_s176, S176, S176I064, 176_400),
-    (tick_to_s192, S192, S192I064, 192_000),
+    (tick_to_s044, R044, R044I064, 44_100),
+    (tick_to_s048, R048, R048I064, 48_000),
+    (tick_to_s088, R088, R088I064, 88_200),
+    (tick_to_s096, R096, R096I064, 96_000),
+    (tick_to_s176, R176, R176I064, 176_400),
+    (tick_to_s192, R192, R192I064, 192_000),
 );
 
 #[cfg(test)]
@@ -895,26 +895,26 @@ mod tick_sample_tests {
         };
     }
 
-    props_for_rate!(s044, tick_to_s044, S044, S044I064, 44_100);
-    props_for_rate!(s048, tick_to_s048, S048, S048I064, 48_000);
-    props_for_rate!(s088, tick_to_s088, S088, S088I064, 88_200);
-    props_for_rate!(s096, tick_to_s096, S096, S096I064, 96_000);
-    props_for_rate!(s176, tick_to_s176, S176, S176I064, 176_400);
-    props_for_rate!(s192, tick_to_s192, S192, S192I064, 192_000);
+    props_for_rate!(s044, tick_to_s044, R044, R044I064, 44_100);
+    props_for_rate!(s048, tick_to_s048, R048, R048I064, 48_000);
+    props_for_rate!(s088, tick_to_s088, R088, R088I064, 88_200);
+    props_for_rate!(s096, tick_to_s096, R096, R096I064, 96_000);
+    props_for_rate!(s176, tick_to_s176, R176, R176I064, 176_400);
+    props_for_rate!(s192, tick_to_s192, R192, R192I064, 192_000);
 
     #[test]
     fn one_beat_known_values() {
         let bpm = Tempo::from_bpm_integer(120);
         assert_eq!(
-            tick_to_s048(Tick(PPQN.into()), bpm).map(|s| S048I064.ceil(s)),
+            tick_to_s048(Tick(PPQN.into()), bpm).map(|s| R048I064.ceil(s)),
             Some(24_000)
         );
         assert_eq!(
-            tick_to_s096(Tick(PPQN.into()), bpm).map(|s| S096I064.ceil(s)),
+            tick_to_s096(Tick(PPQN.into()), bpm).map(|s| R096I064.ceil(s)),
             Some(48_000)
         );
         assert_eq!(
-            tick_to_s192(Tick(PPQN.into()), bpm).map(|s| S192I064.ceil(s)),
+            tick_to_s192(Tick(PPQN.into()), bpm).map(|s| R192I064.ceil(s)),
             Some(96_000)
         );
     }
@@ -934,27 +934,27 @@ mod tick_sample_tests {
         let bpm = Tempo::from_bpm_integer(137);
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 44_100),
-            tick_to_s044(tick, bpm).map(|s| I064U064.ceil(S044I064.ceil(s)))
+            tick_to_s044(tick, bpm).map(|s| I064U064.ceil(R044I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 48_000),
-            tick_to_s048(tick, bpm).map(|s| I064U064.ceil(S048I064.ceil(s)))
+            tick_to_s048(tick, bpm).map(|s| I064U064.ceil(R048I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 88_200),
-            tick_to_s088(tick, bpm).map(|s| I064U064.ceil(S088I064.ceil(s)))
+            tick_to_s088(tick, bpm).map(|s| I064U064.ceil(R088I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 96_000),
-            tick_to_s096(tick, bpm).map(|s| I064U064.ceil(S096I064.ceil(s)))
+            tick_to_s096(tick, bpm).map(|s| I064U064.ceil(R096I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 176_400),
-            tick_to_s176(tick, bpm).map(|s| I064U064.ceil(S176I064.ceil(s)))
+            tick_to_s176(tick, bpm).map(|s| I064U064.ceil(R176I064.ceil(s)))
         );
         assert_eq!(
             tick_to_whole_samples(tick, bpm, 192_000),
-            tick_to_s192(tick, bpm).map(|s| I064U064.ceil(S192I064.ceil(s)))
+            tick_to_s192(tick, bpm).map(|s| I064U064.ceil(R192I064.ceil(s)))
         );
     }
 

@@ -17,10 +17,10 @@ pub(crate) fn parse_positive_u32(v: u32) -> Result<u32, String> {
 /// `F064FD06` interprets f64 as canonical seconds, and there is no
 /// `Conn<f64-as-ms, FD06>` rung.
 #[cfg(feature = "core")]
-pub(crate) fn parse_ms_to_micro(s: String) -> Result<agogo::core::conn::fixed::Micro, String> {
-    use agogo::core::conn::float::Extended;
-    use agogo::core::conn::float::ExtendedFloat;
-    use agogo::core::conn::float::F064FD06;
+pub(crate) fn parse_ms_to_micro(s: String) -> Result<agogo::chan::conn::fixed::Micro, String> {
+    use agogo::chan::conn::float::Extended;
+    use agogo::chan::conn::float::ExtendedFloat;
+    use agogo::chan::conn::float::F064FD06;
     let ms: f64 = s
         .parse()
         .map_err(|e| format!("--delay {s}: not a number ({e})"))?;
@@ -40,10 +40,10 @@ pub(crate) fn parse_ms_to_micro(s: String) -> Result<agogo::core::conn::fixed::M
 /// `F064FD12` interprets f64 as seconds, so the us->s shift is
 /// open-coded inside the parser body.
 #[cfg(feature = "core")]
-pub(crate) fn parse_jitter_us_to_pico(s: String) -> Result<agogo::core::conn::fixed::Pico, String> {
-    use agogo::core::conn::float::Extended;
-    use agogo::core::conn::float::ExtendedFloat;
-    use agogo::core::conn::float::F064FD12;
+pub(crate) fn parse_jitter_us_to_pico(s: String) -> Result<agogo::chan::conn::fixed::Pico, String> {
+    use agogo::chan::conn::float::Extended;
+    use agogo::chan::conn::float::ExtendedFloat;
+    use agogo::chan::conn::float::F064FD12;
     let us: f64 = s
         .parse()
         .map_err(|e| format!("--jitter-us {s}: not a number ({e})"))?;
@@ -61,15 +61,15 @@ pub(crate) fn parse_jitter_us_to_pico(s: String) -> Result<agogo::core::conn::fi
 /// bpaf parser: BPM `<f64>` -> `Tempo` at the argv-handler boundary.
 /// Used by every `--bpm` / `--initial-bpm` flag across the CLI.
 #[cfg(feature = "core")]
-pub(crate) fn parse_bpm_to_tempo(s: String) -> Result<agogo::core::conn::tempo::Tempo, String> {
-    use agogo::core::conn::boundary::f64_bpm_to_tempo;
+pub(crate) fn parse_bpm_to_tempo(s: String) -> Result<agogo::chan::conn::tempo::Tempo, String> {
+    use agogo::chan::conn::float::f64_bpm_to_tempo;
     let f: f64 = s
         .parse()
         .map_err(|e| format!("BPM value {s}: not a number ({e})"))?;
-    if !f.is_finite() || f <= 0.0 || f > agogo::core::conn::boundary::MAX_BPM_F64 {
+    if !f.is_finite() || f <= 0.0 || f > agogo::chan::conn::float::MAX_BPM_F64 {
         return Err(format!(
             "BPM value {f} out of range (expected (0, {}] BPM)",
-            agogo::core::conn::boundary::MAX_BPM_F64
+            agogo::chan::conn::float::MAX_BPM_F64
         ));
     }
     Ok(f64_bpm_to_tempo(f))

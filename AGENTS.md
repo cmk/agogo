@@ -287,7 +287,7 @@ code based on it.
   lives outside the file-level allowlist. Plan 2026-04-28-03 T5
   reshuffled the entries when the old pure crate's `fxp.rs` was
   deleted: its argv + PI-exempt content moved to
-  `crates/chan/src/conn/boundary.rs`
+  `crates/chan/src/conn/float_boundary.rs`
   (replaces the `fxp.rs` entry); `time/decimal.rs` came off the list
   because the `float_conn!` macro split into `time/float.rs` (which
   is now allowlisted in its place — vendored-from-connections, same
@@ -302,7 +302,11 @@ code based on it.
   2026-04-29-01 T2 collapsed the conn-shaped value types into one
   parent: `boundary.rs` → `conn/boundary.rs`,
   `time/float.rs` → `conn/float.rs`, `time/sample.rs` →
-  `conn/sample.rs` — same allowlist eligibility, new path. The
+  `conn/sample.rs` — same allowlist eligibility, new path. Plan
+  2026-05-04-03 re-exported the boundary helpers through
+  `conn::float` via private `conn/float_boundary.rs`, and renamed
+  `conn/sample.rs` to `conn/rate.rs` with Sxxx sample-rate markers
+  renamed to Rxxx. The
   Plan 2026-04-30-03 moved the CLI argv parsers from
   `cli/src/main.rs` to `cli/src/parsers.rs` and grouped trace/time/link
   handlers under subdirectories. Plan 2026-05-04-01 reshaped the CLI
@@ -314,7 +318,7 @@ code based on it.
   pure crate to `crates/chan`. Plan 2026-05-02-06 kept
   `crates/chan/src/sink/audio.rs` on the allowlist for `AudioIo`
   PCM slices and the generated audio-click renderer's output-boundary
-  PCM writes. The current allowlist is the 20 entries in
+  PCM writes. The current allowlist is the 21 entries in
   `scripts/check-floats.sh::ALLOWED` (Plan 2026-04-28-06 T3 swapped
   `machine/spec.rs` for `machine/spec/parser.rs` when the kitchen
   sink split — same `delay=ms` argv boundary, just lives in the
@@ -331,7 +335,7 @@ code based on it.
 - **Every numerical conversion comes from a named `Conn` (or a
   Conn-lookalike with proptested adjoint laws).** Bespoke `fn
   f64_some_thing_to_other(x: f64) -> Other` helpers (now living in
-  `crate::conn::boundary` after Plan 2026-04-28-03 T5 deleted `fxp.rs`
+  `crate::conn::float` after Plan 2026-04-28-03 T5 deleted `fxp.rs`
   and Plan 2026-04-29-01 T2 moved boundary under `conn/`) are only
   allowed for types that can't be expressed as a lawful `Conn` (e.g.
   `Phase` is a wrapping quotient onto a torus, not a monotone map —
@@ -343,7 +347,7 @@ code based on it.
     ABC1, ABCD}` independently. Sides shorter or longer than 4 chars
     are not permitted.
   - Digits are zero-padded to fill the digit count for the side's
-    shape (e.g. `S048`, not `S48`).
+    shape (e.g. `R048`, not `S48`).
   - Letters and digits only — no underscores, hyphens, or other
     separators inside the name.
   - The `AGENTS.md` in the upstream repository spells this out in detail.

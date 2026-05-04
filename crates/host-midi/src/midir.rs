@@ -3,7 +3,7 @@
 //!
 //! `MidirSink` — midir-backed [`MidiSink`] implementation.
 
-use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
+use agogo::chan::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
 use thiserror::Error;
 
 /// midir-backed [`MidiSink`]. Opens a single output port at
@@ -120,7 +120,7 @@ pub enum MidirSinkError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo::core::sink::midi::{AtSampleSupport, MidiLatencyCompensation, MidiSchedulingClass};
+    use agogo::chan::sink::midi::{AtSampleSupport, MidiLatencyCompensation, MidiSchedulingClass};
 
     /// `list_output_ports` should not panic. It may return an empty
     /// `Vec` on a host with no MIDI ports (typical for CI runners

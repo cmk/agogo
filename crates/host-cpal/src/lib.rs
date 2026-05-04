@@ -1,11 +1,11 @@
 #![forbid(unsafe_code)]
 
-//! cpal back-end for `agogo::core::sink::audio::AudioHost`.
+//! cpal back-end for `agogo::chan::sink::audio::AudioHost`.
 //!
 //! `CpalHost` opens cpal input-only or output-only streams (f32
 //! samples), surfaces cpal's device enumeration through a stable
 //! API, and adapts cpal's per-buffer callback to
-//! [`agogo::core::sink::audio::AudioIo`]. Output support starts with
+//! [`agogo::chan::sink::audio::AudioIo`]. Output support starts with
 //! the generated audio-click test feature: the core callback stays
 //! mono, while this backend fans that signal out to the physical
 //! output channel count cpal reports. CV output remains part of the

@@ -15,8 +15,8 @@ pub enum LinkSub {
     #[bpaf(command("probe"))]
     Probe {
         /// Tempo to initialise Link with (BPM).
-        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo::core::conn::tempo::Tempo::from_bpm_integer(120)))]
-        initial_bpm: agogo::core::conn::tempo::Tempo,
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo::chan::conn::tempo::Tempo::from_bpm_integer(120)))]
+        initial_bpm: agogo::chan::conn::tempo::Tempo,
         /// Sample rate for the sample-index <-> host-time mapping.
         #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
         sr: u32,
@@ -39,7 +39,7 @@ pub enum LinkSub {
     PushTempo {
         /// New tempo in BPM.
         #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
-        bpm: agogo::core::conn::tempo::Tempo,
+        bpm: agogo::chan::conn::tempo::Tempo,
         /// How long to keep the network session alive after
         /// committing, so peers see the change.
         #[bpaf(long, argument("SETTLE_MS"), parse(parse_positive_u32), fallback(200))]
@@ -51,8 +51,8 @@ pub enum LinkSub {
     #[bpaf(command("transport"))]
     Transport {
         /// Initial BPM.
-        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo::core::conn::tempo::Tempo::from_bpm_integer(120)))]
-        bpm: agogo::core::conn::tempo::Tempo,
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo::chan::conn::tempo::Tempo::from_bpm_integer(120)))]
+        bpm: agogo::chan::conn::tempo::Tempo,
         /// Quantum in bars.
         #[bpaf(long, argument::<String>("QUANTUM"), parse(parse_quantum_from_beats), fallback(agogo::host::link::Quantum::from_bars(4)))]
         quantum: agogo::host::link::Quantum,
@@ -78,8 +78,8 @@ pub enum LinkSub {
     /// state: `peers,tempo_bpm,is_playing`. Useful from scripts.
     #[bpaf(command("diag"))]
     Diag {
-        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo::core::conn::tempo::Tempo::from_bpm_integer(120)))]
-        bpm: agogo::core::conn::tempo::Tempo,
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo), fallback(agogo::chan::conn::tempo::Tempo::from_bpm_integer(120)))]
+        bpm: agogo::chan::conn::tempo::Tempo,
         #[bpaf(long, argument("SR"), parse(parse_positive_u32), fallback(48_000))]
         sr: u32,
         /// How long to join the network before reading state. Too

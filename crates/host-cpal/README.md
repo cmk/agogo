@@ -1,6 +1,6 @@
 # agogo-host-cpal
 
-cpal back-end for `agogo::core::sink::audio::AudioHost`. This is the
+cpal back-end for `agogo::chan::sink::audio::AudioHost`. This is the
 first platform-audio integration; v0.1 wires the audio-in path, and
 Plan 2026-05-02-06 adds output-only support for the generated audio
 metronome test feature. CV/gate output remains part of the

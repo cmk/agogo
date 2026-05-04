@@ -8,16 +8,16 @@
 //!
 //! Plan 2026-04-28-05 T7: extracted from `cli/main.rs`.
 
-use agogo::core::channel::time::validate_schedule_params;
-use agogo::core::channel::{Channel, ChannelCommon, MidiRole};
-use agogo::core::conn::fixed::Micro;
-use agogo::core::conn::sample::{S048, SampleRate};
-use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
-use agogo::core::sink::audio::{AudioHost, Config};
-use agogo::core::time::grid::Grid;
-use agogo::core::time::swing::SwingConfig;
-use agogo::core::time::tbase::TBase;
+use agogo::chan::channel::time::validate_schedule_params;
+use agogo::chan::channel::{Channel, ChannelCommon, MidiRole};
+use agogo::chan::conn::fixed::Micro;
+use agogo::chan::conn::rate::{R048, SampleRate};
+use agogo::chan::conn::tempo::Tempo;
+use agogo::chan::control::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
+use agogo::chan::sink::audio::{AudioHost, Config};
+use agogo::chan::time::grid::Grid;
+use agogo::chan::time::swing::SwingConfig;
+use agogo::chan::time::tbase::TBase;
 use agogo::core::{Playhead, TransportPolicy};
 use agogo::host::cpal::CpalHost;
 use agogo::host::cpal::callback::CallbackState;
@@ -150,10 +150,10 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     }
     validate_schedule_params(args.sr, bpm)
         .map_err(|e| format!("invalid scheduling parameters: {e}"))?;
-    // The demo instantiates `CallbackState<S048>` only. Multi-rate
+    // The demo instantiates `CallbackState<R048>` only. Multi-rate
     // dispatch via a static `match args.sr { ... }` lives in
     // `agogo run`.
-    if args.sr != S048::HZ {
+    if args.sr != R048::HZ {
         return Err(format!(
             "--sr {} not yet supported by `agogo demo` (only 48000; \
              wider rate dispatch lives with `agogo run`)",
@@ -162,7 +162,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     }
 
     // PhaseSource: Internal | External(Pll).
-    let phase_source: PhaseSource<S048> = match args.source.as_str() {
+    let phase_source: PhaseSource<R048> = match args.source.as_str() {
         "internal" => PhaseSource::Internal { bpm },
         "external" => {
             // Detector + PLL defaults — calibrated for click-track
@@ -170,11 +170,11 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
             // knob; `agogo sync trace` is the debugging surface
             // for tuning. `hold_samples = sr / 4` allows up to
             // ~240 BPM clicks without spurious double-detections.
-            let detector = PeakDetector::<S048>::new(DetectorConfig {
+            let detector = PeakDetector::<R048>::new(DetectorConfig {
                 threshold_q15: 16_384, // 0.5 in Q0.15
                 hold_samples: args.sr / 4,
             });
-            let pll = Pll::<S048>::new(PllSettings::DEFAULT, bpm, DEMO_PPQ);
+            let pll = Pll::<R048>::new(PllSettings::DEFAULT, bpm, DEMO_PPQ);
             PhaseSource::External { detector, pll }
         }
         other => {
@@ -206,7 +206,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     // SPSC + drain.
     let (producer, consumer) = spsc(1024);
     let dropped_handle = producer.dropped_handle();
-    let drain_sink: Arc<dyn agogo::core::sink::midi::MidiSink + Send + Sync> = sink;
+    let drain_sink: Arc<dyn agogo::chan::sink::midi::MidiSink + Send + Sync> = sink;
     let drain = consumer.spawn_drain(drain_sink);
 
     // Playhead + CallbackState. `agogo run` generalises this
@@ -228,7 +228,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         },
         role: MidiRole::Clock,
     };
-    let playhead = Playhead::<S048>::new(
+    let playhead = Playhead::<R048>::new(
         vec![channel],
         phase_source,
         args.sr,
@@ -238,7 +238,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         },
         args.buffer_frames as usize,
     );
-    let mut state = CallbackState::<S048> { playhead, producer };
+    let mut state = CallbackState::<R048> { playhead, producer };
 
     // Open audio host.
     let host = if args.audio_in == "default" {
@@ -257,7 +257,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
     };
 
     // Move state into the data callback.
-    let cb = Box::new(move |io: &mut agogo::core::sink::audio::AudioIo| {
+    let cb = Box::new(move |io: &mut agogo::chan::sink::audio::AudioIo| {
         state.on_buffer(io);
     });
 
@@ -267,7 +267,7 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         "agogo demo: running for {} ms, --bpm {:.2} --sr {} --grid {} \
          --source {} --audio-in {} --midi-out {}",
         args.duration_ms,
-        agogo::core::conn::boundary::tempo_to_f64_bpm(args.bpm),
+        agogo::chan::conn::float::tempo_to_f64_bpm(args.bpm),
         args.sr,
         args.grid,
         args.source,
