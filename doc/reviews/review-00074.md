@@ -37,3 +37,13 @@ Verification run locally:
 - `cargo fmt --all -- --check`
 - `cargo test --workspace`
 - `cargo clippy --all-targets -- -D warnings`
+
+## Local review (2026-05-04)
+
+**Branch:** plan/2026-05-04-02
+**Commits:** 3 (origin/main..plan/2026-05-04-02)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The README/documentation updates and the new check-pii tree mode appear consistent with the intended open-source readiness changes. I did not identify any discrete correctness issue introduced by the diff.
