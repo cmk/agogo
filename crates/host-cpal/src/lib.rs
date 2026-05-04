@@ -27,6 +27,10 @@ pub(crate) mod core {
     pub(crate) use core_impl::*;
 }
 
+pub mod chan {
+    pub use core_impl::{channel, conn, control, sink, test, time};
+}
+
 pub mod cpal;
 
 pub use cpal::CpalHost;
