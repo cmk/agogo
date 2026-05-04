@@ -8,7 +8,7 @@
 
 use std::fmt::{self, Display};
 
-use crate::channel::role::MidiRole;
+use crate::channel::role::{CvRole, MidiRole};
 use crate::conn::fixed::Micro;
 use crate::time::tbase::TBase;
 
@@ -19,6 +19,7 @@ impl Display for ChannelSpec {
         match &self.role {
             ChannelSpecRole::Midi(_) => write!(f, "dev=midi,grid={}", self.grid)?,
             ChannelSpecRole::Audio(_) => write!(f, "dev=audio,grid={}", self.grid)?,
+            ChannelSpecRole::Cv(_) => write!(f, "dev=cv,grid={}", self.grid)?,
         }
         if let Some(id) = &self.id {
             write!(f, ",id={}", quote_if_needed(id))?;
@@ -53,6 +54,10 @@ impl Display for ChannelSpec {
             ChannelSpecRole::Midi(MidiRole::Cc(_)) => {}
             ChannelSpecRole::Audio(_) => {
                 write!(f, ",mode=click")?;
+            }
+            ChannelSpecRole::Cv(CvRole::Pulse) => {}
+            ChannelSpecRole::Cv(CvRole::Lfo) => {
+                write!(f, ",mode=lfo")?;
             }
         }
         if self.swing.amount != 0 || self.swing.resolution != TBase::T8 {
@@ -111,7 +116,7 @@ fn quote_if_needed(v: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::channel::role::{MidiClickAccent, MidiClickConfig};
+    use crate::channel::role::{CvRole, MidiClickAccent, MidiClickConfig};
     use crate::conn::midi::{U4, U7};
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
@@ -214,8 +219,8 @@ mod tests {
     }
 
     /// Generate a target role reachable from the spec parser:
-    /// MIDI `Clock`, MIDI `Click(MidiClickConfig)`, or audio
-    /// `Click`.
+    /// MIDI `Clock`, MIDI `Click(MidiClickConfig)`, audio `Click`,
+    /// or CV `Pulse`.
     ///
     /// `accent.every` spans the full `NonZeroU32` domain — the
     /// round-trip property is u32-shape-preserving (parse-as-u32,
@@ -250,6 +255,7 @@ mod tests {
             Just(ChannelSpecRole::Midi(MidiRole::Clock)),
             click,
             Just(ChannelSpecRole::Audio(crate::channel::AudioRole::Click)),
+            Just(ChannelSpecRole::Cv(CvRole::Pulse)),
         ]
     }
 

@@ -6,7 +6,7 @@
 
 use core::num::NonZeroU16;
 
-use crate::channel::role::{AudioRole, MidiRole};
+use crate::channel::role::{AudioRole, CvRole, MidiRole};
 use crate::conn::fixed::Micro;
 use crate::time::grid::Grid;
 use crate::time::swing::SwingConfig;
@@ -16,6 +16,7 @@ use crate::time::swing::SwingConfig;
 pub enum ChannelSpecRole {
     Midi(MidiRole),
     Audio(AudioRole),
+    Cv(CvRole),
 }
 
 /// Parsed `--ch` spec.

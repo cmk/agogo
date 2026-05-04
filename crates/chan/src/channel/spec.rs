@@ -4,8 +4,9 @@
 //! separate; values may be quoted `"..."` to embed spaces or commas.
 //!
 //! Required keys: `dev`. Optional keys: `grid` (DSL expression,
-//! default `T4`), `id`, `out`, `mode` (`clock`|`click`; `dev=midi`
-//! defaults to `clock`, `dev=audio` requires `click`), `swing` (`[TBase:]i8`,
+//! default `T4`), `id`, `out`, `mode` (`clock`|`click`|`pulse`;
+//! `dev=midi` defaults to `clock`, `dev=audio` requires `click`,
+//! `dev=cv` defaults to `pulse`), `swing` (`[TBase:]i8`,
 //! default `T8:0`), `offset` (signed `i32` ticks — **note:**
 //! non-zero values are currently rejected until the
 //! tempo-dependent Tick→Micro conversion is wired), `delay` (ms),
@@ -15,7 +16,8 @@
 //! `note`, `vel` (required), `mch` (default 10), `accent-every`
 //! (optional; if set, requires `accent-vel` and optionally
 //! `accent-note`). Audio `mode=click` uses fixed internal click
-//! constants and accepts no sound-shaping keys. Unknown keys are
+//! constants and accepts no sound-shaping keys. CV `mode=pulse`
+//! uses fixed bipolar single-sample pulse settings. Unknown keys are
 //! hard errors so typos are
 //! caught early.
 //!

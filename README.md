@@ -33,7 +33,8 @@ Known gaps:
 
 - native timestamped MIDI backends are not implemented yet, so the current
   `midir` output path is best effort at the host boundary;
-- CV pulse/LFO roles are spec stubs, with no CV renderer yet;
+- CV pulse rendering has a mono audio-output MVP; CV LFO roles are still spec
+  stubs;
 - audio output is mono click-focused;
 - multi-device output routing is deliberately constrained to one MIDI target
   and one audio target per run;
@@ -95,6 +96,17 @@ cargo run -p agogo-cli --bin agogo -- render \
   --ch 'id=two,dev=midi,mode=clock,grid=t2,out=diag'
 ```
 
+Render a hardware-free CV pulse diagnostic:
+
+```bash
+cargo run -p agogo-cli --bin agogo -- render \
+  --source internal \
+  --bpm 120 \
+  --sr 48000 \
+  --duration-bars 1 \
+  --ch 'id=cv,dev=cv,mode=pulse,grid=t4,out=diag'
+```
+
 Run the synthetic audio-clock PLL trace:
 
 ```bash
@@ -128,6 +140,19 @@ cargo run -p agogo-cli --features run --bin agogo -- run \
   --sr 48000 \
   --ch 'id=clock,dev=midi,mode=clock,grid=t32t,out=default'
 ```
+
+Internal CV pulse smoke example using the default audio output:
+
+```bash
+cargo run -p agogo-cli --features run --bin agogo -- run \
+  --source internal \
+  --bpm 120 \
+  --sr 48000 \
+  --ch 'id=cv,dev=cv,mode=pulse,grid=t4,out=default'
+```
+
+CV pulse output is a raw sync signal. Route it only to an interface output
+intended for clock/CV, not to speakers or a processed monitor bus.
 
 List visible MIDI outputs:
 
