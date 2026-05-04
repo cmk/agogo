@@ -243,3 +243,35 @@ Fixed by sorting the per-channel CV events in-place with sort_unstable_by_key be
 #### ↳ cmk ([2026-05-04 09:01 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180424067))
 
 Fixed by making CV negative resets full-scale writes unless the destination already contains the CV positive sentinel. Added tests that resets overwrite existing click content to -1.0 while preserving an existing CV positive pulse.
+
+<!-- gh-id: 3180472387 -->
+### Copilot on [`crates/chan/src/sink/audio.rs:330`](https://github.com/cmk/agogo/pull/76#discussion_r3180472387) (2026-05-04 09:10 UTC)
+
+`write_cv_negative` treats `*dst == 1.0` as “this sample already contains a CV positive pulse” and skips the reset. This sentinel is ambiguous because non-CV renderers can legitimately clamp/mix to exactly `1.0` (e.g., two audio click channels summing past full-scale and clamping), which would incorrectly suppress a CV reset that should overwrite non-CV content. Consider tracking CV-positive occupancy separately (e.g., a per-buffer pulse mask / scratch bitset reused across buffers) or otherwise making the “CV positive present” test unambiguous and independent of the current PCM value.
+
+
+<!-- gh-id: 4218727555 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-04 09:10 UTC](https://github.com/cmk/agogo/pull/76#pullrequestreview-4218727555))
+
+## Pull request overview
+
+Copilot reviewed 19 out of 19 changed files in this pull request and generated 2 comments.
+
+
+
+
+
+<!-- gh-id: 3180472433 -->
+### Copilot on [`doc/designs/cv-pulse.md:12`](https://github.com/cmk/agogo/pull/76#discussion_r3180472433) (2026-05-04 09:10 UTC)
+
+The new MVP paragraph says Plan 2026-05-04-04 pulls the mono CV pulse renderer forward, but the surrounding **Context** section still states that “v0.4 ships CV/gate output … and owns properties `cv_impulse_sample_exact` / `cv_impulse_one_sample_energy`”. Now that CV pulse rendering + those properties exist earlier, this reads contradictory/misleading; please update the Context text to reflect the MVP slice vs. the remaining v0.4 heterogeneous-output work.
+
+<!-- gh-id: 3180511390 -->
+#### ↳ cmk ([2026-05-04 09:17 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180511390))
+
+Fixed by updating the cv-pulse design context: Plan 2026-05-04-04 now owns the fixed mono renderer and renderer-level properties, while v0.4 remains scoped to heterogeneous routing, calibration, and user-facing pulse-shape controls.
+
+<!-- gh-id: 3180511882 -->
+#### ↳ cmk ([2026-05-04 09:18 UTC](https://github.com/cmk/agogo/pull/76#discussion_r3180511882))
+
+Fixed by replacing the PCM-value sentinel with an explicit per-buffer CV-positive mask owned by Playhead and shared across the final CV pass. The mask is cleared once per buffer and passed to render_cv_pulse_block, so resets no longer infer CV occupancy from a potentially-clamped PCM value.
