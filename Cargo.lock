@@ -36,6 +36,7 @@ dependencies = [
  "bpaf",
  "ctrlc",
  "proptest",
+ "serde_json",
 ]
 
 [[package]]
