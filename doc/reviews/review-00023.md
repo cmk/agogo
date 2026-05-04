@@ -30,9 +30,8 @@ The parser collapses six inline range-check blocks (`if n > 127`,
 through the `From<U7> for u8` / `From<U4> for u8` impls — no `as`
 casts.
 
-This is **P1 of the structural-type audit** documented at
-`/Users/cmk/.claude/plans/harmonic-snacking-conway.md` (audit
-finding D). It's the smallest actionable unit and unblocks several
+This is **P1 of the structural-type audit** documented in a local
+planning artifact (audit finding D). It's the smallest actionable unit and unblocks several
 later phases (P3's per-target role enums can re-use the migrated
 `MidiClickConfig` / `MidiCc` shapes verbatim).
 
@@ -94,7 +93,7 @@ later phases (P3's per-target role enums can re-use the migrated
 ### Phasing context
 
 This is **PR #23**, the first of seven phased PRs from the
-structural-type audit (`/Users/cmk/.claude/plans/harmonic-snacking-conway.md`):
+structural-type audit:
 
 | Phase | Status |
 |-------|--------|
