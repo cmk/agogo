@@ -10,8 +10,68 @@
 use agogo::core::conn::fixed::Micro;
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::tick_stream;
+use bpaf::Bpaf;
 
 use super::{checked_trace_frames, parse_grid_arg, straight_common, validate_audio_rate};
+use crate::parse::{parse_bpm_to_tempo, parse_ms_to_micro, parse_positive_u32};
+
+#[derive(Debug, Clone, Bpaf)]
+pub enum ChannelSub {
+    /// Run the per-channel scheduler over a sequence of audio buffers
+    /// and print the resulting events as CSV:
+    /// `buffer_index,sample_index,tick`.
+    #[bpaf(command("trace"))]
+    Trace {
+        /// Tempo in beats per minute.
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
+        bpm: agogo::core::conn::tempo::Tempo,
+        /// Sample rate in Hz.
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
+        sr: u32,
+        /// Grid name (e.g. `t4`, `t16`, `t8t`, `t8q`, `t2p`).
+        #[bpaf(long, argument("EXPR"))]
+        grid: String,
+        /// Positive delay compensation in ms; clamped to `[0, 300]`
+        /// inside the transform. Non-finite or negative values
+        /// rejected at the CLI boundary.
+        #[bpaf(long, argument::<String>("MS"), parse(parse_ms_to_micro), fallback(agogo::core::conn::fixed::Micro::ZERO))]
+        delay: agogo::core::conn::fixed::Micro,
+        /// Audio buffer length in samples.
+        #[bpaf(long, argument("FRAMES"))]
+        frames: usize,
+        /// Number of consecutive buffers to schedule.
+        #[bpaf(long, argument("BUFFERS"), parse(parse_positive_u32))]
+        buffers: u32,
+    },
+}
+
+pub fn dispatch(sub: ChannelSub) -> Result<(), String> {
+    match sub {
+        ChannelSub::Trace {
+            bpm,
+            sr,
+            grid,
+            delay,
+            frames,
+            buffers,
+        } => {
+            let args = TraceArgs {
+                bpm,
+                sr,
+                grid,
+                delay,
+                frames,
+                buffers,
+            };
+            let rows = trace(&args)?;
+            println!("buffer_index,sample_index,tick");
+            for row in rows {
+                println!("{},{},{}", row.buffer_index, row.sample_index, row.tick);
+            }
+            Ok(())
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TraceArgs {

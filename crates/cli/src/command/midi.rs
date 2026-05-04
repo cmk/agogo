@@ -12,8 +12,78 @@ use agogo::core::conn::fixed::Micro;
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::sink::midi::{MidiRtByte, TestSink, render_midi_channel};
 use agogo::core::tick_stream;
+use bpaf::Bpaf;
 
 use super::{checked_trace_frames, parse_grid_arg, straight_common, validate_audio_rate};
+use crate::parse::{parse_bpm_to_tempo, parse_positive_u32};
+
+#[derive(Debug, Clone, Bpaf)]
+pub enum MidiSub {
+    /// Run the MIDI-clock renderer over a sequence of audio buffers
+    /// against a synthetic sink and print the emitted bytes as CSV:
+    /// `at_sample,byte`.
+    ///
+    /// MIDI 1.0 pins clock at 24 PPQN — one `0xF8` every `PPQN/24`
+    /// master ticks. At agogo's 960 PPQN master that's every 40
+    /// master ticks, which is `Grid::T64T` (64th-note triplet).
+    /// Pick `--grid t4` for one byte per beat (human-readable);
+    /// pick `--grid t64t` for a spec-compliant 24 PPQN stream.
+    #[bpaf(command("trace"))]
+    Trace {
+        /// Tempo in beats per minute.
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
+        bpm: agogo::core::conn::tempo::Tempo,
+        /// Sample rate in Hz.
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
+        sr: u32,
+        /// Per-channel grid (e.g. `t4`, `t16`, `t32t`, `t8q`, `t2p`).
+        #[bpaf(long, argument("GRID"))]
+        grid: String,
+        /// Audio buffer length in samples.
+        #[bpaf(long, argument("FRAMES"))]
+        frames: usize,
+        /// Number of consecutive buffers to render.
+        #[bpaf(long, argument("BUFFERS"), parse(parse_positive_u32))]
+        buffers: u32,
+        /// Inject `MidiRtByte::Start` (0xFA) at sample 0 of buffer 0.
+        #[bpaf(long)]
+        start: bool,
+        /// Inject `MidiRtByte::Stop` (0xFC) at the first sample of
+        /// the final buffer.
+        #[bpaf(long)]
+        stop_on_exit: bool,
+    },
+}
+
+pub fn dispatch(sub: MidiSub) -> Result<(), String> {
+    match sub {
+        MidiSub::Trace {
+            bpm,
+            sr,
+            grid,
+            frames,
+            buffers,
+            start,
+            stop_on_exit,
+        } => {
+            let args = TraceArgs {
+                bpm,
+                sr,
+                grid,
+                frames,
+                buffers,
+                start,
+                stop_on_exit,
+            };
+            let rows = trace(&args)?;
+            println!("at_sample,byte");
+            for row in rows {
+                println!("{},0x{:02X}", row.at_sample, row.byte);
+            }
+            Ok(())
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TraceArgs {

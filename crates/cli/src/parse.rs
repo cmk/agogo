@@ -1,3 +1,6 @@
+//! layer: parse
+//! depends-on:
+//!
 //! Shared bpaf parser adapters.
 
 #[cfg(feature = "core")]

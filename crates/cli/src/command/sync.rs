@@ -13,6 +13,58 @@ use agogo::core::conn::sample::{S048, SampleRate};
 use agogo::core::conn::tempo::Tempo;
 use agogo::core::control::pulse::pulse_train_s048;
 use agogo::core::control::{DetectorConfig, PeakDetector, Pll, PllSettings};
+use bpaf::Bpaf;
+
+use crate::parse::{parse_bpm_to_tempo, parse_jitter_us_to_pico, parse_positive_u32};
+
+#[derive(Debug, Clone, Bpaf)]
+pub enum SyncSub {
+    /// Synthesise a pulse train and trace the detector + PLL output as CSV.
+    ///
+    /// One row per detected peak: `sample_index,bpm_estimate,phase_estimate`.
+    #[bpaf(command("trace"))]
+    Trace {
+        #[bpaf(long, argument::<String>("BPM"), parse(parse_bpm_to_tempo))]
+        bpm: agogo::core::conn::tempo::Tempo,
+        #[bpaf(long, argument("SR"), parse(parse_positive_u32))]
+        sr: u32,
+        #[bpaf(long, argument("PPQ"), parse(parse_positive_u32))]
+        ppq: u32,
+        #[bpaf(long, argument::<String>("JITTER_US"), parse(parse_jitter_us_to_pico), fallback(agogo::core::conn::fixed::Pico::ZERO))]
+        jitter_us: agogo::core::conn::fixed::Pico,
+        #[bpaf(long, argument("PULSES"), parse(parse_positive_u32))]
+        pulses: u32,
+        #[bpaf(long, argument("SEED"), fallback(1))]
+        seed: u64,
+    },
+}
+
+pub fn dispatch(sub: SyncSub) -> Result<(), String> {
+    match sub {
+        SyncSub::Trace {
+            bpm,
+            sr,
+            ppq,
+            jitter_us,
+            pulses,
+            seed,
+        } => {
+            if sr != <agogo::core::conn::sample::S048 as agogo::core::conn::sample::SampleRate>::HZ
+            {
+                return Err(format!(
+                    "sync trace is pinned to 48 kHz this sprint (got --sr {sr}); \
+                     multi-rate support deferred"
+                ));
+            }
+            let rows = trace(bpm, ppq, jitter_us, pulses, seed);
+            println!("bits_q48_16,tempo_ubpm,phase_q32");
+            for r in rows {
+                println!("{},{},{}", r.bits_q48_16, r.tempo_ubpm, r.phase_q32);
+            }
+            Ok(())
+        }
+    }
+}
 
 /// CSV row — integer fields throughout. Peak position is emitted
 /// as a single Q48.16 `bits_q48_16` value rather than split

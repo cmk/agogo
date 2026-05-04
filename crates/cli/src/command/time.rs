@@ -15,6 +15,34 @@ use agogo::core::time::tbase::TBase;
 use agogo::core::time::tick::Tick;
 use bpaf::Bpaf;
 
+#[derive(Debug, Clone, Bpaf)]
+pub enum TimeOp {
+    /// Print absolute tick positions for a schedule at a given TBase.
+    /// On off-beat 16th-note steps the swing shift (if any) is
+    /// applied before printing, so positive swing delays odd steps
+    /// relative to their nominal grid position.
+    #[bpaf(command("schedule"))]
+    Schedule(#[bpaf(external(schedule_args))] ScheduleArgs),
+}
+
+pub fn dispatch(op: TimeOp) -> Result<(), String> {
+    match op {
+        TimeOp::Schedule(args) => {
+            // Header to stderr (stdout reserved for the schedule
+            // itself). Emits the parsed inputs so the reader can
+            // correlate against the tick stream.
+            eprintln!(
+                "# schedule: {} bars, grid={}, swing={:.3}",
+                args.bars, args.grid, args.swing
+            );
+            for t in schedule_ticks(&args) {
+                println!("{}", t.0);
+            }
+            Ok(())
+        }
+    }
+}
+
 #[derive(Bpaf, Debug, Clone)]
 pub struct ScheduleArgs {
     /// Grid resolution (e.g. `t16`, `t8t`, `t8q`, `t512p`).
@@ -25,7 +53,7 @@ pub struct ScheduleArgs {
     /// Swing ratio in `[0.5, 0.75]`: 0.5 = straight, 0.667 =
     /// triplet feel (off-beat at 2/3 of the next on-beat), 0.75
     /// = max useful swing (off-beat at 3/4). f64 per the CLI
-    /// argv-boundary rule (CLAUDE.md §Repository conventions).
+    /// argv-boundary rule (AGENTS.md §Repository conventions).
     #[bpaf(long, argument("SWING"), fallback(0.5))]
     pub swing: f64,
 
