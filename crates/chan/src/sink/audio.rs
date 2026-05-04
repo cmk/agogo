@@ -276,7 +276,9 @@ pub fn render_cv_pulse_block(
             }
 
             if state.pending_bipolar_reset {
-                mix_pcm(&mut io.output[0], CV_PULSE_NEGATIVE);
+                if !event_at_sample(events, io.buffer_start_sample) {
+                    mix_pcm(&mut io.output[0], CV_PULSE_NEGATIVE);
+                }
                 state.pending_bipolar_reset = false;
             }
 
@@ -291,6 +293,10 @@ pub fn render_cv_pulse_block(
                 mix_pcm(&mut io.output[offset], CV_PULSE_POSITIVE);
                 if state.shape == CvPulseShape::Bipolar {
                     let reset = offset + 1;
+                    let reset_sample = ev.sample_index.saturating_add(1);
+                    if event_at_sample(events, reset_sample) {
+                        continue;
+                    }
                     if reset < writable {
                         mix_pcm(&mut io.output[reset], CV_PULSE_NEGATIVE);
                     } else {
@@ -301,6 +307,10 @@ pub fn render_cv_pulse_block(
         }
         CvRole::Lfo => {}
     }
+}
+
+fn event_at_sample(events: &[ScheduledEvent], sample_index: u64) -> bool {
+    events.iter().any(|ev| ev.sample_index == sample_index)
 }
 
 fn render_one_click(start: usize, accent: bool, sample_rate: u32, output: &mut [f32]) {
@@ -521,6 +531,20 @@ mod tests {
         assert_eq!(second, vec![-1.0, 0.0, 0.0, 0.0]);
     }
 
+    #[test]
+    fn cv_bipolar_reset_does_not_cancel_adjacent_pulse() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 8]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
+        let mut state = CvPulseState::bipolar();
+
+        render_cv_pulse_block(&[event(13), event(14)], &CvRole::Pulse, &mut state, &mut io);
+
+        assert_eq!(io.output[3], 1.0);
+        assert_eq!(io.output[4], 1.0);
+        assert_eq!(io.output[5], -1.0);
+    }
+
     proptest! {
         // Renderer-level property over bounded buffers: the input type
         // is a per-buffer PCM slice, so the meaningful domain is the
@@ -530,6 +554,7 @@ mod tests {
         fn cv_impulse_sample_exact(
             frames in 1usize..=512,
             offset in 0usize..512,
+            adjacent in any::<bool>(),
             sample_rate in prop::sample::select(&[44_100_u32, 48_000, 88_200, 96_000, 176_400, 192_000]),
         ) {
             let offset = offset % frames;
@@ -539,14 +564,17 @@ mod tests {
             let mut io = AudioIo::new(&input, &mut output, start, sample_rate, frames);
             let mut state = CvPulseState::bipolar();
 
-            render_cv_pulse_block(
-                &[event(start + offset as u64)],
-                &CvRole::Pulse,
-                &mut state,
-                &mut io,
-            );
+            let mut events = vec![event(start + offset as u64)];
+            if adjacent && offset + 1 < frames {
+                events.push(event(start + offset as u64 + 1));
+            }
+
+            render_cv_pulse_block(&events, &CvRole::Pulse, &mut state, &mut io);
 
             prop_assert_eq!(io.output[offset], 1.0);
+            if adjacent && offset + 1 < frames {
+                prop_assert_eq!(io.output[offset + 1], 1.0);
+            }
         }
 
         // Same bounded per-buffer domain as `cv_impulse_sample_exact`.

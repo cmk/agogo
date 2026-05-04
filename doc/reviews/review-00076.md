@@ -42,3 +42,22 @@ Review comment:
 Resolution: fixed by routing `ChannelSpecRole::Cv` and `Channel::Cv` through
 the existing audio-output sink selection in `agogo run`, plus a feature-gated
 CLI regression test for `dev=cv,mode=pulse`.
+
+## Local review (2026-05-04)
+
+**Branch:** plan/2026-05-04-04
+**Commits:** 4 (origin/main..plan/2026-05-04-04)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The new CV pulse renderer can drop pulses for accepted schedules where events are adjacent because the bipolar reset cancels the next event's impulse. This is a functional correctness issue in the newly added rendering path.
+
+Review comment:
+
+- [P2] Preserve pulse when reset overlaps next event — crates/chan/src/sink/audio.rs:291-295
+  For CV channels with adjacent scheduled events (possible at very fine grids/high but validator-accepted tempos, e.g. one event per sample), the bipolar reset for event N is mixed into the same sample as the positive impulse for event N+1, so `-1.0 + 1.0` clamps to `0.0` and the second pulse disappears. This violates the advertised “every scheduled pulse writes the positive impulse at the intended sample” behavior; handle overlaps explicitly or reject configurations where bipolar pulses cannot fit.
+
+Resolution: fixed by skipping a bipolar reset when it would land on another
+scheduled pulse sample, preserving the positive impulse. Added a spot test and
+extended `cv_impulse_sample_exact` to cover adjacent events.
