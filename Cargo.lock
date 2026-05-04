@@ -7,10 +7,24 @@ name = "agogo"
 version = "0.1.0"
 dependencies = [
  "agogo-core",
- "agogo-host",
  "agogo-host-cpal",
  "agogo-host-link",
  "agogo-host-midi",
+]
+
+[[package]]
+name = "agogo-chan"
+version = "0.1.0"
+dependencies = [
+ "connections",
+ "fixed",
+ "proptest",
+ "rand",
+ "rand_distr",
+ "rand_pcg",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -27,22 +41,8 @@ dependencies = [
 name = "agogo-core"
 version = "0.1.0"
 dependencies = [
+ "agogo-chan",
  "connections",
- "fixed",
- "proptest",
- "rand",
- "rand_distr",
- "rand_pcg",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "agogo-host"
-version = "0.1.0"
-dependencies = [
- "agogo-core",
  "proptest",
  "rtrb",
  "rust-fsm",

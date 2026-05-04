@@ -3,8 +3,8 @@
 use crate::conn::phase::Phase;
 use crate::conn::sample::{S044, S048, S088, S096, S176, S192, SampleRate};
 use crate::conn::tempo::Tempo;
-use crate::control::sync::detect::{Peak, PeakDetector};
-use crate::control::sync::pll::Pll;
+use crate::control::detect::{Peak, PeakDetector};
+use crate::control::pll::Pll;
 
 type DetectorProcess<R> = fn(&mut PeakDetector<R>, &[f32], u64) -> Vec<Peak<R>>;
 
@@ -92,7 +92,7 @@ impl<R> PhaseSource<R> {
         samples: &[f32],
         start: u64,
         detector_process: DetectorProcess<R>,
-        pll_step: fn(&mut Pll<R>, Option<R>) -> crate::control::sync::pll::PllOutput,
+        pll_step: fn(&mut Pll<R>, Option<R>) -> crate::control::pll::PllOutput,
     ) {
         match self {
             PhaseSource::Internal { .. } => {}
@@ -158,8 +158,8 @@ mod tests {
     use crate::conn::fixed::Pico;
     use crate::conn::sample::{S048, SampleRate};
     use crate::conn::tempo::Tempo;
-    use crate::control::sync::detect::DetectorConfig;
-    use crate::control::sync::pll::PllSettings;
+    use crate::control::detect::DetectorConfig;
+    use crate::control::pll::PllSettings;
     use proptest::prelude::*;
 
     #[test]
@@ -184,7 +184,7 @@ mod tests {
         });
         let pll = Pll::<S048>::new(PllSettings::DEFAULT, Tempo::from_bpm_integer(120), 24);
         let mut src = PhaseSource::<S048>::External { detector, pll };
-        let (samples, _): (Vec<f32>, Vec<S048>) = crate::control::sync::pulse::pulse_train_s048(
+        let (samples, _): (Vec<f32>, Vec<S048>) = crate::control::pulse::pulse_train_s048(
             Tempo::from_bpm_integer(120),
             24,
             Pico(0),
@@ -206,7 +206,7 @@ mod tests {
         let mut src = PhaseSource::<S048>::External { detector, pll };
         let bpm = Tempo::from_bpm_integer(120);
         let (samples, peaks): (Vec<f32>, Vec<S048>) =
-            crate::control::sync::pulse::pulse_train_s048(bpm, 24, Pico(0), 4, 1);
+            crate::control::pulse::pulse_train_s048(bpm, 24, Pico(0), 4, 1);
         src.feed_samples(&samples, 0);
 
         let last_samples = peaks.last().unwrap().to_bits() as f64 / 65_536.0;

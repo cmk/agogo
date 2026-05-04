@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "crates/agogo",
-    "crates/core",
+    "crates/chan",
     "crates/cli",
-    "crates/host",
+    "crates/core",
 ]
 # `crates/host-link` is intentionally NOT a workspace member — it
 # lives as an optional path dep from `crates/cli` (activated by
@@ -27,6 +27,7 @@ license = "MIT"
 
 [workspace.dependencies]
 # Internal crates
+agogo-chan = { path = "crates/chan" }
 agogo-core = { path = "crates/core" }
 
 # `agogo-host-link` + `rusty_link` are intentionally NOT workspace

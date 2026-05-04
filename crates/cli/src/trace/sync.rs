@@ -11,8 +11,8 @@
 use agogo::core::conn::fixed::Pico;
 use agogo::core::conn::sample::{S048, SampleRate};
 use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::sync::pulse::pulse_train_s048;
-use agogo::core::control::sync::{DetectorConfig, PeakDetector, Pll, PllSettings};
+use agogo::core::control::pulse::pulse_train_s048;
+use agogo::core::control::{DetectorConfig, PeakDetector, Pll, PllSettings};
 
 /// CSV row — integer fields throughout. Peak position is emitted
 /// as a single Q48.16 `bits_q48_16` value rather than split

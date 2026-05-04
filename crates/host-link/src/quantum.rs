@@ -1,3 +1,6 @@
+//! layer: quantum
+//! depends-on:
+//!
 //! `Quantum` — Link's quantum as microbeats.
 //!
 //! Ableton Link represents quantum internally as `std::int64_t`

@@ -1,13 +1,17 @@
+//! layer: runtime
+//! depends-on: bridge, driver, snapshot, transport, event
+//!
 //! agogo-owned runtime helper for stdio-core adapter tests.
 //!
 //! This module deliberately stays free of stdio-core types. It packages
 //! the driver, control bridge, playhead, and snapshot publisher behind a
 //! small host-facing API that a sibling adapter can wrap.
 
-use agogo::core::conn::sample::S048;
-use agogo::core::control::{PhaseSource, Playhead, TransportPolicy};
-use agogo::core::sink::audio::AudioIo;
-use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
+use crate::conn::sample::S048;
+use crate::control::PhaseSource;
+use crate::sink::audio::AudioIo;
+use crate::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
+use crate::{Playhead, TransportPolicy};
 use serde_json::Value;
 
 use crate::bridge::{CommandApplyReport, ControlConsumer, apply_control_to_playhead};
@@ -250,8 +254,8 @@ mod tests {
 
     use super::*;
     use crate::bridge::CommandTimeDomain;
+    use crate::conn::tempo::Tempo;
     use crate::snapshot::push::{FormType, ObservationOp, StreamId};
-    use agogo::core::conn::tempo::Tempo;
 
     #[test]
     fn runtime_initial_snapshot_matches_playhead_state() {

@@ -23,7 +23,7 @@ pub mod core {
 pub mod host {
     //! Host-side drivers and optional host backends.
 
-    pub use host_impl::*;
+    pub use core_impl::*;
 
     #[cfg(feature = "cpal")]
     #[cfg_attr(docsrs, doc(cfg(feature = "cpal")))]

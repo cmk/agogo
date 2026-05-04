@@ -1,3 +1,6 @@
+//! layer: cpal
+//! depends-on:
+//!
 //! `CpalHost` — cpal-backed [`AudioHost`] implementation.
 
 pub mod callback;

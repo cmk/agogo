@@ -1,3 +1,6 @@
+//! layer: event
+//! depends-on:
+//!
 //! Per-audio-buffer scheduler.
 //!
 //! Given a channel, sample rate, and tempo, [`tick_stream`] returns the
@@ -30,7 +33,7 @@ use connections::fixed::u64::{I064U064, I128U064};
 /// `+16` slack absorbs swing-boundary overrun where the scheduler
 /// expands its tick window by `swing_d` ticks.
 ///
-/// Used by [`Playhead`](crate::control::Playhead) and `host-cpal`'s
+/// Used by [`Playhead`](crate::Playhead) and `host-cpal`'s
 /// callback to size their pre-allocated
 /// `Vec<ScheduledEvent>` so [`tick_stream_into`] never reallocates
 /// inside the audio callback.
@@ -441,6 +444,34 @@ mod tests {
                 pieces.extend(valid(tick_stream(&common, SR_48K, BPM_120, start, buf_size)));
             }
             prop_assert_eq!(one_big, pieces);
+        }
+
+        /// `render_midi_channel(..., transport: None, ...)` preserves
+        /// the scheduler's sample positions bit-for-bit. This lives in
+        /// the runtime crate because `tick_stream` moved out of
+        /// `agogo-chan`, while the MIDI renderer remains pure.
+        #[test]
+        fn block_render_matches_scheduler(
+            buffer_start in 0u64..=1_000_000,
+            frames in 1usize..=8_192,
+        ) {
+            use crate::channel::MidiRole;
+            use crate::sink::midi::{TestSink, render_midi_channel};
+
+            let common = zero_common(Grid::T16);
+            let role = MidiRole::Clock;
+            let evs = valid(tick_stream(
+                &common,
+                SR_48K,
+                BPM_120,
+                buffer_start,
+                frames,
+            ));
+            let sink = TestSink::new();
+            render_midi_channel(&common, &role, &evs, None, buffer_start, None, &sink);
+            let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();
+            let expected: Vec<u64> = evs.iter().map(|e| e.sample_index).collect();
+            prop_assert_eq!(emitted, expected);
         }
     }
 }

@@ -193,7 +193,7 @@ mod tests {
     use crate::conn::fixed::Pico;
     use crate::conn::sample::{S048, SampleRate};
     use crate::conn::tempo::Tempo;
-    use crate::control::sync::pulse::pulse_train_s048;
+    use crate::control::pulse::pulse_train_s048;
     use proptest::prelude::*;
 
     /// Stamp a Hann-bell pulse into `buf`. Mirrors `pulse_train`'s

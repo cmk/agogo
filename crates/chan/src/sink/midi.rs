@@ -711,8 +711,6 @@ mod tests {
 
     use crate::channel::Channel;
     use crate::conn::fixed::Micro;
-    use crate::conn::tempo::Tempo;
-    use crate::control::event::tick_stream;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
@@ -779,46 +777,6 @@ mod tests {
             &sink,
         );
         assert!(sink.is_empty());
-    }
-
-    proptest! {
-        /// Plan 12 property `block_render_matches_scheduler`: for an
-        /// arbitrary MidiClock channel and buffer window, the
-        /// `TestSink.at_sample` list emitted by
-        /// `render_midi_channel(..., transport: None, ...)` equals
-        /// `tick_stream(...)`'s `ScheduledEvent.sample_index` list
-        /// bit-for-bit. Pins the composition contract the RT callback
-        /// relies on.
-        // Bounds stay within `tick_stream`'s own tested domain
-        // (`scheduler_block_equivalence` covers the same window).
-        // The render path has no arithmetic on these values — this
-        // test verifies the scheduler → render composition, not
-        // `tick_stream`'s internal invariants, so the bounds are
-        // about shrinkage speed rather than coverage-faking.
-        #[test]
-        fn block_render_matches_scheduler(
-            buffer_start in 0u64..=1_000_000,
-            frames in 1usize..=8_192,
-        ) {
-            let common = midi_common(Grid::T16);
-            let role = MidiRole::Clock;
-            let evs = tick_stream(
-                &common,
-                48_000,
-                Tempo::from_bpm_integer(120),
-                buffer_start,
-                frames,
-            );
-            let Ok(evs) = evs else {
-                prop_assert!(false, "valid schedule fixture failed: {evs:?}");
-                return Ok(());
-            };
-            let sink = TestSink::new();
-            render_midi_channel(&common, &role, &evs, None, buffer_start, None, &sink);
-            let emitted: Vec<u64> = sink.records().iter().map(|r| r.at_sample).collect();
-            let expected: Vec<u64> = evs.iter().map(|e| e.sample_index).collect();
-            prop_assert_eq!(emitted, expected);
-        }
     }
 
     // Suppress unused-import warning when the only consumer of
