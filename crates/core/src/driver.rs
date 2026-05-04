@@ -1,5 +1,5 @@
 //! layer: driver
-//! depends-on: bridge, snapshot, transport, event, runtime
+//! depends-on: bridge, snapshot, transport, event
 //!
 //! Driver-shaped tool routing for the host adapter.
 
