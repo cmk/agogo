@@ -1,9 +1,12 @@
+//! layer: driver
+//! depends-on: bridge, snapshot, transport, event, runtime
+//!
 //! Driver-shaped tool routing for the host adapter.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use agogo::core::conn::tempo::Tempo;
+use crate::conn::tempo::Tempo;
 use serde_json::{Value, json};
 
 use crate::bridge::{

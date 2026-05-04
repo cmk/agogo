@@ -1,3 +1,6 @@
+//! layer: transport
+//! depends-on:
+//!
 //! Transport FSM — minimal `{Stopped, Playing}` shim around Link's
 //! `is_playing` flag with a one-shot user-publish gate.
 //!

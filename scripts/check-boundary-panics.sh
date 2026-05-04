@@ -14,11 +14,11 @@ import re
 import sys
 
 PATHS = [
-    Path("crates/core/src/channel/time.rs"),
-    Path("crates/core/src/control/event.rs"),
-    Path("crates/core/src/control/transport.rs"),
-    Path("crates/host/src/bridge.rs"),
-    Path("crates/host/src/driver.rs"),
+    Path("crates/chan/src/channel/time.rs"),
+    Path("crates/core/src/event.rs"),
+    Path("crates/core/src/transport.rs"),
+    Path("crates/core/src/bridge.rs"),
+    Path("crates/core/src/driver.rs"),
     Path("crates/host-cpal/src/cpal/callback.rs"),
 ]
 

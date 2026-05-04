@@ -1,3 +1,6 @@
+//! layer: snapshot
+//! depends-on:
+//!
 //! Decimated agogo observation snapshots.
 //!
 //! The audio callback writes compact fixed-point state through
@@ -8,7 +11,7 @@ use std::array;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering, fence};
 
-use agogo::core::conn::tempo::Tempo;
+use crate::conn::tempo::Tempo;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 

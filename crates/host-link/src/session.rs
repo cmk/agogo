@@ -1,3 +1,6 @@
+//! layer: session
+//! depends-on: link, quantum, transport
+//!
 //! `LinkSession` — thin orchestrator composing `LinkClock`, the
 //! transport FSM, and the per-session quantum.
 //!
@@ -13,7 +16,7 @@ use agogo::core::conn::tempo::Tempo;
 // called by the `phase_at_sample` shim below). Copilot flagged this
 // as unused on PR #16 round 1 — false positive: removing it breaks
 // `cargo build --features rusty-link`.
-use agogo::core::control::sync::PhaseSourceImpl;
+use agogo::core::control::PhaseSourceImpl;
 
 use crate::link::{HostTimeAnchor, LinkClock};
 use crate::quantum::Quantum;

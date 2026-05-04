@@ -1,3 +1,6 @@
+//! layer: midir
+//! depends-on:
+//!
 //! `MidirSink` — midir-backed [`MidiSink`] implementation.
 
 use agogo::core::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};

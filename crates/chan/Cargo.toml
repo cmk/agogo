@@ -1,0 +1,31 @@
+[package]
+name = "agogo-chan"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+# Enable shared proptest strategies (`arb::arb_*`) for downstream
+# crates' tests. Pulls in proptest as a non-dev dependency.
+testkit = ["dep:proptest"]
+
+[dependencies]
+connections = { workspace = true }
+fixed = { workspace = true }
+proptest = { workspace = true, optional = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+rand_pcg = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# Pull in connections's `property::{arb, laws}` modules — gated
+# behind the `testing` feature upstream — for the time::decimal
+# and time::sample Galois-law batteries.
+connections = { workspace = true, features = ["testing"] }
+proptest = { workspace = true }

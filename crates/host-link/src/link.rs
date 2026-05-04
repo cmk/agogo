@@ -1,6 +1,9 @@
+//! layer: link
+//! depends-on: quantum
+//!
 //! `LinkClock` — the agogo-side handle on an Ableton Link session.
 //!
-//! Implements `agogo::core::control::sync::PhaseSourceImpl` over rusty_link: the
+//! Implements `agogo::core::control::PhaseSourceImpl` over rusty_link: the
 //! lifecycle surface (construct / enable / tempo / num_peers) from
 //! Plan 07, plus the host-time bridge (Plan 08) that maps a
 //! stream-global sample index to Link's host-time domain and returns
@@ -23,7 +26,7 @@ use agogo::core::conn::float::F064FD06;
 use agogo::core::conn::float::{Extended, ExtendedFloat};
 use agogo::core::conn::phase::Phase;
 use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::sync::PhaseSourceImpl;
+use agogo::core::control::PhaseSourceImpl;
 
 use crate::quantum::Quantum;
 use rusty_link::{AblLink, SessionState};

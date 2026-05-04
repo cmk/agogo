@@ -1,3 +1,6 @@
+//! layer: bridge
+//! depends-on: transport, event, snapshot
+//!
 //! RT-safe async-to-audio control bridge.
 //!
 //! The async side writes through [`ControlProducer`]. The audio side
@@ -10,8 +13,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError};
 
-use agogo::core::conn::tempo::Tempo;
-use agogo::core::control::{Playhead, TransportCommandApply};
+use crate::conn::tempo::Tempo;
+use crate::{Playhead, TransportCommandApply};
 use rust_fsm::state_machine;
 
 pub const MAX_SOURCE_ID_LEN: usize = 64;
@@ -1077,16 +1080,16 @@ fn tempo_slot_state(state: u64) -> TempoSlotState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agogo::core::channel::{Channel, ChannelCommon, MidiRole};
-    use agogo::core::conn::fixed::Micro;
-    use agogo::core::conn::sample::S048;
-    use agogo::core::control::TransportPolicy;
-    use agogo::core::control::sync::PhaseSource;
-    use agogo::core::sink::audio::AudioIo;
-    use agogo::core::sink::midi::{MIDI_START, MIDI_STOP, TestSink};
-    use agogo::core::time::grid::Grid;
-    use agogo::core::time::swing::SwingConfig;
-    use agogo::core::time::tbase::TBase;
+    use crate::TransportPolicy;
+    use crate::channel::{Channel, ChannelCommon, MidiRole};
+    use crate::conn::fixed::Micro;
+    use crate::conn::sample::S048;
+    use crate::control::PhaseSource;
+    use crate::sink::audio::AudioIo;
+    use crate::sink::midi::{MIDI_START, MIDI_STOP, TestSink};
+    use crate::time::grid::Grid;
+    use crate::time::swing::SwingConfig;
+    use crate::time::tbase::TBase;
     use proptest::prelude::*;
     use std::collections::VecDeque;
 

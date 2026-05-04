@@ -159,7 +159,7 @@ pub struct ScheduledEvent {
 /// the adjoint-law composition `FD12FD06 ∘ pico_to_samples`. Shared
 /// by `transform` and `scheduler`.
 ///
-pub(crate) fn micro_to_samples(m: Micro, sr: u32) -> Option<i64> {
+pub fn micro_to_samples(m: Micro, sr: u32) -> Option<i64> {
     let pico = FD12FD06.inner(m);
     pico_to_samples(pico, sr)
 }

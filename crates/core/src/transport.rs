@@ -1,5 +1,5 @@
-//! layer: control
-//! depends-on: sink, channel, time, conn
+//! layer: transport
+//! depends-on: event
 //!
 //! N-channel orchestrator. Owned by host-side runners (host-cpal's
 //! callback, the integration tests). Stateless w.r.t. the host —
@@ -28,8 +28,8 @@ use crate::channel::time::validate_schedule_params;
 use crate::channel::{Channel, ScheduledEvent};
 use crate::conn::sample::{S044, S048, S088, S096, S176, S192};
 use crate::conn::tempo::Tempo;
-use crate::control::event::tick_stream_into;
-use crate::control::sync::PhaseSource;
+use crate::control::PhaseSource;
+use crate::event::tick_stream_into;
 use crate::sink::audio::{AudioIo, render_audio_click_block};
 use crate::sink::midi::{MidiRtByte, MidiSink, render_midi_channel};
 
@@ -311,7 +311,7 @@ impl<R> Playhead<R> {
         transport: TransportPolicy,
         buffer_frames: usize,
     ) -> Self {
-        let cap = crate::control::event::max_events_for_buffer(buffer_frames);
+        let cap = crate::event::max_events_for_buffer(buffer_frames);
         let n = channels.len();
         Self {
             channels,

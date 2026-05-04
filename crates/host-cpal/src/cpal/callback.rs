@@ -1,7 +1,7 @@
 //! Audio callback hot loop — `CallbackState::on_buffer`.
 //!
 //! This is a thin wrapper around an N-channel
-//! [`agogo::core::control::Playhead`] plus the [`RtProducer`] that
+//! [`agogo::core::Playhead`] plus the [`RtProducer`] that
 //! pushes onto the SPSC ring. All scheduling +
 //! rendering logic now lives inside `Playhead::on_buffer`; the
 //! callback is left with `feed → schedule → render → enqueue`
@@ -11,8 +11,8 @@
 //! integer arithmetic and one ring-buffer push per emitted event.
 
 use crate::cpal::control::RtProducer;
+use agogo::core::Playhead;
 use agogo::core::conn::sample::{S044, S048, S088, S096, S176, S192};
-use agogo::core::control::Playhead;
 use agogo::core::sink::audio::AudioIo;
 
 /// State the audio thread owns by-value across the stream's
@@ -57,22 +57,22 @@ impl_callback_state_rate!(S176);
 impl_callback_state_rate!(S192);
 
 /// Re-export of the canonical helper. The implementation moved to
-/// [`agogo::core::control::event::max_events_for_buffer`] in
-/// [`agogo::core::control::Playhead`] can size its pool without
+/// [`agogo::core::max_events_for_buffer`] in
+/// [`agogo::core::Playhead`] can size its pool without
 /// depending on `host-cpal`. Kept here so existing call
 /// sites (the demo CLI handler) compile unchanged.
-pub use agogo::core::control::event::max_events_for_buffer;
+pub use core_impl::max_events_for_buffer;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cpal::control::spsc;
+    use agogo::core::TransportPolicy;
     use agogo::core::channel::{Channel, ChannelCommon, MidiRole};
     use agogo::core::conn::fixed::Micro;
     use agogo::core::conn::sample::S048;
     use agogo::core::conn::tempo::Tempo;
-    use agogo::core::control::TransportPolicy;
-    use agogo::core::control::sync::PhaseSource;
+    use agogo::core::control::PhaseSource;
     use agogo::core::time::grid::Grid;
     use agogo::core::time::swing::SwingConfig;
     use agogo::core::time::tbase::TBase;

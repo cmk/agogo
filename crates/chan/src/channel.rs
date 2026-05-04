@@ -17,10 +17,9 @@
 //!   `agogo run --ch <spec>` (was `machine/spec/` before T5).
 //!
 //! The block-level event scheduler (`tick_stream`,
-//! `tick_stream_into`) lives at `crate::control::event` after Plan
-//! 2026-04-29-01 T6 — it consumes `Channel` configs but its job is
-//! the runtime control-plane traversal, not channel
-//! configuration.
+//! `tick_stream_into`) moved to `agogo-core::event` in Plan
+//! 2026-05-03-06 — it consumes `Channel` configs but its job is
+//! runtime traversal, not channel configuration.
 
 pub mod dsl;
 pub mod role;

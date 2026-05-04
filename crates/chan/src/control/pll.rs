@@ -243,7 +243,7 @@ mod tests {
     use super::*;
     use crate::conn::fixed::{FD06, FD12FD06, Pico};
     use crate::conn::sample::{S048, SampleRate};
-    use crate::control::sync::pulse::pulse_train_s048;
+    use crate::control::pulse::pulse_train_s048;
     use proptest::prelude::*;
 
     /// PLL initialised at the true BPM under jitter — tracks the rate

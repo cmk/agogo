@@ -169,8 +169,12 @@ code based on it.
   so the audit trail survives.
 - **No unsafe code**: every crate root must declare `#![forbid(unsafe_code)]`.
 - **Inter-module imports respect a partial order.** Plan
-  2026-04-29-01 T7 introduced a layering rule for
-  `crates/core/src/`:
+  2026-04-29-01 T7 introduced the original pure-crate layering
+  rule; Plan 2026-05-03-06 extended it workspace-wide after the
+  crate boundary was redrawn:
+
+  `agogo-chan` (`crates/chan/src`) is the pure music/channel/control
+  library:
 
       control  → sink, channel, time, conn
       sink     → channel, time, conn
@@ -179,6 +183,26 @@ code based on it.
       conn     → (leaf)
       test     → (leaf)
 
+  `agogo-core` (`crates/core/src`) is the runtime orchestration
+  crate:
+
+      driver    → bridge, snapshot, transport, event, runtime
+      runtime   → bridge, driver, snapshot, transport, event
+      bridge    → transport, event, snapshot
+      transport → event
+      snapshot  → (leaf)
+      event     → (leaf)
+
+  Host adapter crates declare only the modules they actually have.
+  `host-cpal` currently has `cpal` as a leaf layer; `host-midi`
+  has `midir` as a leaf layer; `host-link` has:
+
+      session   → link, quantum, transport
+      source    → session
+      link      → quantum
+      transport → (leaf)
+      quantum   → (leaf)
+
   Each top-level module-root file declares its allowed deps in a
   sentinel header comment:
 
@@ -186,9 +210,10 @@ code based on it.
       //! depends-on: conn
 
   `scripts/check-layers.sh` parses these headers and fails on any
-  `use crate::<top>` or `use agogo_core::<top>` in production code
-  (column-0 imports — including `pub use` re-exports and
-  `use crate::{a, b}` grouped forms) that names a module the
+  `use crate::<top>`, `use agogo_chan::<top>`, or
+  `use agogo_core::<top>` in production code (column-0 imports —
+  including `pub use` re-exports and `use crate::{a, b}` grouped
+  forms) that names a module in that crate's layer set which the
   current layer's `depends-on:` list does not authorise. The gate
   also checks that each `//! layer:` sentinel matches its filename
   so a stale rename can't go unnoticed. Test-block imports
@@ -202,7 +227,7 @@ code based on it.
 
   **Glossary.**
   > **PI controller** — the proportional-integral control loop in
-  > `crates/core/src/control/sync/pll.rs`. It reads the phase error (observed
+  > `crates/chan/src/control/pll.rs`. It reads the phase error (observed
   > vs. expected pulse spacing), scales it by a proportional gain
   > `kp` and an accumulated integrator term `ki × ∑error`, and steers
   > the NCO's frequency toward the true tempo. "PI-exempt" means a
@@ -220,7 +245,7 @@ code based on it.
   > via bpaf because the user typed a decimal at the command line.
   > It dies on the first line of the handler via `f64_bpm_to_tempo`,
   > `F64F06.ceil(...)`, `F64F12.ceil(...)`, or one of the other
-  > named `agogo_core::fxp` Conns.
+  > named `agogo_core::conn` / `agogo_chan::conn` Conns.
   >
   > **Link FFI** — a float that flows through rusty_link / AblLink's
   > C++ ABI. Contained to `crates/host-link`; every site converts
@@ -232,12 +257,12 @@ code based on it.
 
   The five allowed uses:
 
-  1. PI controller state and gains in `control::sync::pll`
+  1. PI controller state and gains in `control::pll`
      (`PllSettings`, `PllState`, and the control-law body). Mark
      intermediate locals `// PI-exempt`.
   2. PCM audio sample slices (`&[f32]`) at the cpal ABI boundary.
      Mark `// PCM ABI`.
-  3. Parabolic-fit f64 locals inside `control::sync::detect`
+  3. Parabolic-fit f64 locals inside `control::detect`
      (contained to a handful of lines, converted to Q48.16 before
      escape). Mark `// ABI-local`.
   4. CLI argv parsers — `f64` accepts a human-typed decimal, then
@@ -249,8 +274,9 @@ code based on it.
 
   `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
   lives outside the file-level allowlist. Plan 2026-04-28-03 T5
-  reshuffled the entries when `crates/core/src/fxp.rs` was deleted:
-  its argv + PI-exempt content moved to `crates/core/src/conn/boundary.rs`
+  reshuffled the entries when the old pure crate's `fxp.rs` was
+  deleted: its argv + PI-exempt content moved to
+  `crates/chan/src/conn/boundary.rs`
   (replaces the `fxp.rs` entry); `time/decimal.rs` came off the list
   because the `float_conn!` macro split into `time/float.rs` (which
   is now allowlisted in its place — vendored-from-connections, same
@@ -270,8 +296,10 @@ code based on it.
   `cli/src/main.rs` to `cli/src/parsers.rs` and grouped trace/time/link
   handlers under subdirectories. Plan 2026-05-02-05 moved the
   `control.rs` PCM ABI test locals into `control/transport.rs`
-  alongside `Playhead`. Plan 2026-05-02-06 kept
-  `crates/core/src/sink/audio.rs` on the allowlist for `AudioIo`
+  alongside `Playhead`. Plan 2026-05-03-06 moved that runtime
+  transport module to `crates/core/src/transport.rs` and renamed the
+  pure crate to `crates/chan`. Plan 2026-05-02-06 kept
+  `crates/chan/src/sink/audio.rs` on the allowlist for `AudioIo`
   PCM slices and the generated audio-click renderer's output-boundary
   PCM writes. The current allowlist is the 20 entries in
   `scripts/check-floats.sh::ALLOWED` (Plan 2026-04-28-06 T3 swapped
@@ -705,8 +733,8 @@ commit was invoked — chained Bash, terminal, IDE, anything. This
 is the unbypassable safety net at commit time. Runs the cheap
 chain:
 
-1. `cargo fmt -p agogo-core -p agogo-cli -- --check` — fmt drift
-   aborts the commit. Run `cargo fmt -p agogo-core -p agogo-cli`
+1. `cargo fmt -p agogo-chan -p agogo-core -p agogo-cli -- --check` — fmt drift
+   aborts the commit. Run `cargo fmt -p agogo-chan -p agogo-core -p agogo-cli`
    to fix. Scope is explicit (not `--all`) because the sibling
    `connections` path-dep is reachable from this workspace and
    we don't want to fail on its formatting state. (The fmt step
@@ -722,9 +750,9 @@ chain:
 3. `scripts/check-floats.sh` — fail if naked `f32`/`f64` appears
    in a non-allowlisted file. See "no stored f32/f64" rule above.
 4. `scripts/check-layers.sh` — fail if any `use crate::<top>` /
-   `use agogo_core::<top>` (column-0 imports) violates the partial
-   order in each module-root's `//! depends-on:` sentinel. See
-   the layering rule above.
+   `use agogo_chan::<top>` / `use agogo_core::<top>` (column-0
+   imports) violates the partial order in each module-root's
+   `//! depends-on:` sentinel. See the layering rule above.
 5. `scripts/check-connections.sh` — fail if production code constructs
    `Conn` values directly with `Conn::new_l`, `Conn::new_r`,
    `RuntimeConn::new`, or local marker wrappers instead of the upstream
