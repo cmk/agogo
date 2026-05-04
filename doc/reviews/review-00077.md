@@ -40,3 +40,14 @@ Resolution: fixed. Restored exact fixed-ladder `inner` conversion and moved
 extreme-value handling to `micro_to_samples`, where `Micro` values are clamped
 to the largest range that can be embedded into `Pico(i64)` before calling
 `FD12FD06.inner`. Added `micro_to_samples_clamps_to_pico_safe_range`.
+
+## Local review (2026-05-04)
+
+**Branch:** plan/2026-05-04-05
+**Commits:** 6 (origin/main..plan/2026-05-04-05)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+No discrete correctness issues were found in the diff. The production change makes the microsecond-to-sample conversion total at fixed-point extremes, and the added tests pass for the targeted transport suite.
+
