@@ -58,13 +58,35 @@ filter_allowed() {
     return
   fi
 
-  allow_patterns=$(grep -vE '^\s*(#|$)' .pii-allow || true)
+  allow_patterns=$(grep -vE '^[[:space:]]*(#|$)' .pii-allow || true)
   if [ -z "$allow_patterns" ]; then
     cat
     return
   fi
 
   grep -vE -f <(printf '%s\n' "$allow_patterns") || true
+}
+
+filter_allowed_numbered() {
+  if [ ! -f .pii-allow ]; then
+    cat
+    return
+  fi
+
+  allow_patterns=$(grep -vE '^[[:space:]]*(#|$)' .pii-allow || true)
+  if [ -z "$allow_patterns" ]; then
+    cat
+    return
+  fi
+
+  while IFS= read -r numbered_line; do
+    line_content=$(printf '%s\n' "$numbered_line" | sed 's/^[0-9][0-9]*://')
+    if printf '%s\n' "$line_content" \
+      | grep -qE -f <(printf '%s\n' "$allow_patterns"); then
+      continue
+    fi
+    printf '%s\n' "$numbered_line"
+  done
 }
 
 report=''
@@ -78,7 +100,7 @@ if [ "$mode" = "tree" ]; then
     matches=$(grep -nE "$alt" -- "$f" || true)
     [ -z "$matches" ] && continue
 
-    matches=$(printf '%s\n' "$matches" | filter_allowed)
+    matches=$(printf '%s\n' "$matches" | filter_allowed_numbered)
     [ -z "$matches" ] && continue
 
     report+="  $f:"$'\n'
