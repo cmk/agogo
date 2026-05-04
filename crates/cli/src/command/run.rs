@@ -156,7 +156,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     )?;
     let audio_output_request = single_target_output_request(
         &named,
-        |role| matches!(role, ChannelSpecRole::Audio(_)),
+        |role| matches!(role, ChannelSpecRole::Audio(_) | ChannelSpecRole::Cv(_)),
         "audio",
     )?;
 
@@ -235,15 +235,15 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct ChannelMix {
     has_midi: bool,
-    has_audio: bool,
+    has_audio_output: bool,
 }
 
 fn channel_mix(channels: &[Channel]) -> ChannelMix {
     ChannelMix {
         has_midi: channels.iter().any(|ch| matches!(ch, Channel::Midi { .. })),
-        has_audio: channels
+        has_audio_output: channels
             .iter()
-            .any(|ch| matches!(ch, Channel::Audio { .. })),
+            .any(|ch| matches!(ch, Channel::Audio { .. } | Channel::Cv { .. })),
     }
 }
 
@@ -288,11 +288,11 @@ macro_rules! def_run_with_rate {
         ) -> Result<(), String> {
     let mix = channel_mix(&channels);
     debug_assert_eq!(mix.has_midi, midi_port_request.is_some());
-    debug_assert_eq!(mix.has_audio, audio_output_request.is_some());
-    if args.source == "external" && mix.has_audio {
+    debug_assert_eq!(mix.has_audio_output, audio_output_request.is_some());
+    if args.source == "external" && mix.has_audio_output {
         return Err(
-            "--source external with dev=audio output is not wired yet; use --source internal for \
-             the audio metronome test feature"
+            "--source external with audio/CV output is not wired yet; use --source internal for \
+             generated output channels"
                 .to_string(),
         );
     }
@@ -408,9 +408,10 @@ macro_rules! def_run_with_rate {
     let mut state = CallbackState::<$Rate> { playhead, producer };
 
     // Open audio host. MIDI-only runs preserve the existing input
-    // stream timing source; audio-click runs use output-only cpal so
-    // `--source internal` works without an audio input device.
-    let (host, cfg, audio_device_label) = if mix.has_audio {
+    // stream timing source; generated audio/CV output runs use
+    // output-only cpal so `--source internal` works without an
+    // audio input device.
+    let (host, cfg, audio_device_label) = if mix.has_audio_output {
         let request = audio_output_request.unwrap_or_else(|| "default".to_string());
         let host = if request == "default" {
             CpalHost::default_output()
@@ -718,8 +719,36 @@ mod tests {
             channel_mix(&channels),
             ChannelMix {
                 has_midi: false,
-                has_audio: true,
+                has_audio_output: true,
             }
+        );
+    }
+
+    #[test]
+    fn run_cv_pulse_requires_audio_output() {
+        let named =
+            agogo::chan::channel::spec::parse_channels(&["dev=cv,mode=pulse,grid=t4".into()])
+                .unwrap();
+        let channels: Vec<Channel> = named
+            .iter()
+            .map(|(_, spec)| spec.clone().into_channel().unwrap())
+            .collect();
+
+        assert_eq!(
+            channel_mix(&channels),
+            ChannelMix {
+                has_midi: false,
+                has_audio_output: true,
+            }
+        );
+        assert_eq!(
+            single_target_output_request(
+                &named,
+                |role| matches!(role, ChannelSpecRole::Audio(_) | ChannelSpecRole::Cv(_)),
+                "audio",
+            )
+            .unwrap(),
+            Some("default".to_string()),
         );
     }
 
@@ -741,7 +770,7 @@ mod tests {
         let args = args_with(
             vec![
                 "dev=audio,mode=click,grid=t4,out=speakers-a",
-                "dev=audio,mode=click,grid=t8,out=speakers-b",
+                "dev=cv,mode=pulse,grid=t8,out=speakers-b",
             ],
             48_000,
         );

@@ -26,15 +26,13 @@ pub mod role;
 pub mod spec;
 pub mod time;
 
-// `CvRole` and `DinRole` are forward-compat scaffolding for v0.4
-// heterogeneous output backends —
-// neither has a renderer in v0.1. Marked `#[doc(hidden)]` so they
-// don't surface in `cargo doc` as user-facing API; the attribute
-// comes off in the plan that ships the corresponding renderer.
-// Plan 09 T6.
-pub use role::{
-    AudioRole, ChannelCommon, MidiCcConfig, MidiClickAccent, MidiClickConfig, MidiRole,
-};
+// `DinRole` is still forward-compat scaffolding for future
+// heterogeneous output backends. `CvRole::Pulse` is user-facing as
+// of Plan 2026-05-04-04; `CvRole::Lfo` remains a stub variant under
+// the same public enum until the LFO renderer lands.
 #[doc(hidden)]
-pub use role::{CvRole, DinRole};
+pub use role::DinRole;
+pub use role::{
+    AudioRole, ChannelCommon, CvRole, MidiCcConfig, MidiClickAccent, MidiClickConfig, MidiRole,
+};
 pub use time::{Channel, MAX_DELAY, ScheduledEvent, transform};
