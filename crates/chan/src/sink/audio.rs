@@ -277,7 +277,7 @@ pub fn render_cv_pulse_block(
 
             if state.pending_bipolar_reset {
                 if !event_at_sample(events, io.buffer_start_sample) {
-                    mix_pcm(&mut io.output[0], CV_PULSE_NEGATIVE);
+                    write_cv_negative(&mut io.output[0]);
                 }
                 state.pending_bipolar_reset = false;
             }
@@ -290,7 +290,7 @@ pub fn render_cv_pulse_block(
                 if offset >= writable {
                     continue;
                 }
-                mix_pcm(&mut io.output[offset], CV_PULSE_POSITIVE);
+                write_cv_positive(&mut io.output[offset]);
                 if state.shape == CvPulseShape::Bipolar {
                     let reset = offset + 1;
                     let reset_sample = ev.sample_index.saturating_add(1);
@@ -298,7 +298,7 @@ pub fn render_cv_pulse_block(
                         continue;
                     }
                     if reset < writable {
-                        mix_pcm(&mut io.output[reset], CV_PULSE_NEGATIVE);
+                        write_cv_negative(&mut io.output[reset]);
                     } else {
                         state.pending_bipolar_reset = true;
                     }
@@ -311,6 +311,17 @@ pub fn render_cv_pulse_block(
 
 fn event_at_sample(events: &[ScheduledEvent], sample_index: u64) -> bool {
     events.iter().any(|ev| ev.sample_index == sample_index)
+}
+
+fn write_cv_positive(dst: &mut f32) {
+    *dst = CV_PULSE_POSITIVE; // PCM ABI
+}
+
+fn write_cv_negative(dst: &mut f32) {
+    if *dst == CV_PULSE_POSITIVE {
+        return;
+    }
+    mix_pcm(dst, CV_PULSE_NEGATIVE);
 }
 
 fn render_one_click(start: usize, accent: bool, sample_rate: u32, output: &mut [f32]) {
@@ -543,6 +554,37 @@ mod tests {
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], 1.0);
         assert_eq!(io.output[5], -1.0);
+    }
+
+    #[test]
+    fn cv_bipolar_reset_does_not_cancel_adjacent_channel_pulse() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 8]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
+        let mut left = CvPulseState::bipolar();
+        let mut right = CvPulseState::bipolar();
+
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut left, &mut io);
+        render_cv_pulse_block(&[event(14)], &CvRole::Pulse, &mut right, &mut io);
+
+        assert_eq!(io.output[3], 1.0);
+        assert_eq!(io.output[4], 1.0);
+        assert_eq!(io.output[5], -1.0);
+    }
+
+    #[test]
+    fn cv_later_reset_does_not_cancel_earlier_channel_pulse() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 8]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 10, 48_000, 8);
+        let mut left = CvPulseState::bipolar();
+        let mut right = CvPulseState::bipolar();
+
+        render_cv_pulse_block(&[event(14)], &CvRole::Pulse, &mut right, &mut io);
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut left, &mut io);
+
+        assert_eq!(io.output[3], 1.0);
+        assert_eq!(io.output[4], 1.0);
     }
 
     proptest! {
