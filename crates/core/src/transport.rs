@@ -774,13 +774,16 @@ fn render_offline_with_rate<R: OfflineRate>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::channel::spec::{ChannelSpec, ChannelSpecRole};
     use crate::channel::{AudioRole, ChannelCommon, CvRole, MidiRole};
     use crate::conn::fixed::Micro;
     use crate::conn::rate::R048;
     use crate::sink::midi::{MIDI_CLOCK, MIDI_START, MIDI_STOP, TestSink};
+    use crate::time::arb::{arb_grid, arb_swing};
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
+    use core::num::NonZeroU16;
     use proptest::prelude::*;
 
     fn zero_channel(divider: Grid) -> Channel {
@@ -797,6 +800,135 @@ mod tests {
             },
             role: MidiRole::Clock,
         }
+    }
+
+    fn audio_cv_channel(common: ChannelCommon, role: ChannelSpecRole) -> Channel {
+        match role {
+            ChannelSpecRole::Audio(role) => Channel::Audio { common, role },
+            ChannelSpecRole::Cv(role) => Channel::Cv { common, role },
+            ChannelSpecRole::Midi(role) => Channel::Midi { common, role },
+        }
+    }
+
+    fn render_audio_trace_48k(
+        channel: Channel,
+        bpm: Tempo,
+        buffer_frames: usize,
+        n_buffers: u64,
+    ) -> Vec<f32> {
+        let mut playhead = Playhead::<R048>::new(
+            vec![channel],
+            PhaseSource::Internal { bpm },
+            48_000,
+            bpm,
+            TransportPolicy::Scripted {
+                schedule: VecDeque::new(),
+            },
+            buffer_frames,
+        );
+        let sink = TestSink::new();
+        let input = vec![0.0_f32; buffer_frames]; // PCM ABI
+        let mut trace = Vec::with_capacity(buffer_frames * n_buffers as usize);
+
+        for b in 0..n_buffers {
+            let mut output = vec![0.0_f32; buffer_frames]; // PCM ABI
+            let mut io = AudioIo::new(
+                &input,
+                &mut output,
+                b * buffer_frames as u64,
+                48_000,
+                buffer_frames,
+            );
+            playhead.on_buffer(&mut io, &sink);
+            trace.extend_from_slice(&output);
+        }
+
+        trace
+    }
+
+    fn arb_audio_cv_role() -> impl Strategy<Value = ChannelSpecRole> {
+        prop_oneof![
+            Just(ChannelSpecRole::Audio(AudioRole::Click)),
+            Just(ChannelSpecRole::Cv(CvRole::Pulse)),
+        ]
+    }
+
+    fn arb_bars() -> impl Strategy<Value = Option<NonZeroU16>> {
+        prop_oneof![
+            4 => Just(None),
+            1 => Just(Some(NonZeroU16::MIN)),
+            1 => Just(Some(NonZeroU16::MAX)),
+            8 => any::<u16>()
+                .prop_filter_map("non-zero bar multiplier", NonZeroU16::new)
+                .prop_map(Some),
+        ]
+    }
+
+    fn arb_delay() -> impl Strategy<Value = Micro> {
+        prop_oneof![
+            1 => Just(Micro::ZERO),
+            1 => Just(crate::channel::MAX_DELAY),
+            1 => Just(Micro(crate::channel::MAX_DELAY.0 + 1)),
+            1 => Just(Micro(i64::MAX)),
+            8 => (0_i64..=1_000_000).prop_map(Micro),
+        ]
+    }
+
+    fn arb_offset() -> impl Strategy<Value = Micro> {
+        // Runtime identity coverage uses the documented calibration scale.
+        // Full-domain `Micro` values can overflow the current FD06→FD12
+        // integer Conn before the scheduler handles them; the sprint plan's
+        // Review section tracks that wider totality issue separately.
+        prop_oneof![
+            1 => Just(Micro::ZERO),
+            1 => Just(Micro(-5_000)),
+            1 => Just(Micro(5_000)),
+            8 => (-1_000_000_i64..=1_000_000).prop_map(Micro),
+        ]
+    }
+
+    fn arb_audio_cv_spec() -> impl Strategy<Value = ChannelSpec> {
+        (
+            arb_grid(),
+            arb_audio_cv_role(),
+            arb_swing(),
+            arb_delay(),
+            arb_bars(),
+        )
+            .prop_map(|(grid, role, swing, delay, bars)| ChannelSpec {
+                id: None,
+                out: None,
+                grid,
+                role,
+                swing,
+                offset_ticks: 0,
+                delay,
+                snap_to_quantum_micro: None,
+                bars,
+            })
+    }
+
+    fn arb_audio_cv_common() -> impl Strategy<Value = (ChannelCommon, ChannelSpecRole)> {
+        (
+            arb_grid(),
+            arb_audio_cv_role(),
+            arb_swing(),
+            arb_delay(),
+            arb_offset(),
+            arb_bars(),
+        )
+            .prop_map(|(divider, role, shuffle, delay, offset, bar_multiplier)| {
+                (
+                    ChannelCommon {
+                        divider,
+                        shuffle,
+                        delay,
+                        offset,
+                        bar_multiplier,
+                    },
+                    role,
+                )
+            })
     }
 
     fn drive_buffers(
@@ -1047,6 +1179,79 @@ mod tests {
             }
         }
 
+        // Offline render identity over generated audio/CV specs. The channel
+        // config strategy is wide; buffer counts stay small because this drives
+        // real render buffers and the property only needs consecutive epochs,
+        // not long wall-clock durations.
+        #[test]
+        fn offline_render_generated_audio_cv_channel_identity(
+            spec in arb_audio_cv_spec(),
+            bpm in prop::sample::select(vec![
+                Tempo::from_bpm_integer(60),
+                Tempo::from_bpm_integer(120),
+                Tempo::from_bpm_integer(240),
+            ]),
+            sample_rate in prop::sample::select(&[44_100_u32, 48_000, 88_200, 96_000, 176_400, 192_000]),
+            buffer_frames in prop::sample::select(&[1_u32, 2, 3, 31, 64, 127, 128, 511, 512, 1024]),
+            n_buffers in 1_u64..=8,
+        ) {
+            let left_channel = spec.clone()
+                .into_channel()
+                .map_err(|err| TestCaseError::fail(format!("generated spec did not lower: {err}")))?;
+            let right_channel = spec
+                .into_channel()
+                .map_err(|err| TestCaseError::fail(format!("generated spec did not lower: {err}")))?;
+            let total_frames = u64::from(buffer_frames) * n_buffers;
+
+            let left = render_offline(OfflineRenderConfig {
+                channels: vec![left_channel],
+                bpm,
+                sample_rate,
+                buffer_frames,
+                total_frames,
+            }).map_err(|err| TestCaseError::fail(format!("left render failed: {err}")))?;
+            let right = render_offline(OfflineRenderConfig {
+                channels: vec![right_channel],
+                bpm,
+                sample_rate,
+                buffer_frames,
+                total_frames,
+            }).map_err(|err| TestCaseError::fail(format!("right render failed: {err}")))?;
+
+            prop_assert_eq!(left, right);
+        }
+
+        // Sample-wise identity for the same runtime path, with direct
+        // `ChannelCommon` generation so signed calibration offsets are covered
+        // even though `ChannelSpec::into_channel` still rejects non-zero
+        // offset ticks at the boundary.
+        #[test]
+        fn playhead_generated_audio_cv_outputs_match_samplewise(
+            (common, role) in arb_audio_cv_common(),
+            bpm in prop::sample::select(vec![
+                Tempo::from_bpm_integer(60),
+                Tempo::from_bpm_integer(120),
+                Tempo::from_bpm_integer(240),
+            ]),
+            buffer_frames in prop::sample::select(&[1_usize, 2, 3, 31, 64, 127, 128, 511, 512, 1024]),
+            n_buffers in 1_u64..=8,
+        ) {
+            let left = render_audio_trace_48k(
+                audio_cv_channel(common, role),
+                bpm,
+                buffer_frames,
+                n_buffers,
+            );
+            let right = render_audio_trace_48k(
+                audio_cv_channel(common, role),
+                bpm,
+                buffer_frames,
+                n_buffers,
+            );
+
+            prop_assert_eq!(left, right);
+        }
+
         /// For an arbitrary `is_playing[0..N]` sequence, `LinkDriven`
         /// emits `0xFA` at false→true and `0xFC` at true→false
         /// transitions, no transport byte otherwise.
@@ -1226,7 +1431,7 @@ mod tests {
     use crate::channel::role::{MidiClickAccent, MidiClickConfig};
     use crate::conn::midi::{U4, U7};
     use crate::sink::midi::{MIDI_NOTE_OFF, MIDI_NOTE_ON};
-    use core::num::{NonZeroU16, NonZeroU32};
+    use core::num::NonZeroU32;
 
     fn click_channel(
         divider: Grid,
