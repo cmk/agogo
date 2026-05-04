@@ -46,6 +46,12 @@ macro_rules! def_fixed {
         impl $name {
             pub const ZERO: Self = Self(0);
         }
+
+        impl From<u8> for $name {
+            fn from(value: u8) -> Self {
+                Self(i64::from(value))
+            }
+        }
     };
 }
 
