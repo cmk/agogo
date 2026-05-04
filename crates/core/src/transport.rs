@@ -875,14 +875,14 @@ mod tests {
     }
 
     fn arb_offset() -> impl Strategy<Value = Micro> {
-        // Runtime identity coverage uses the documented calibration scale.
-        // Full-domain `Micro` values can overflow the current FD06→FD12
-        // integer Conn before the scheduler handles them; the sprint plan's
-        // Review section tracks that wider totality issue separately.
+        // Runtime identity coverage includes the documented calibration scale
+        // plus numeric extremes now that FD06→FD12 inner conversion saturates.
         prop_oneof![
             1 => Just(Micro::ZERO),
             1 => Just(Micro(-5_000)),
             1 => Just(Micro(5_000)),
+            1 => Just(Micro(i64::MIN)),
+            1 => Just(Micro(i64::MAX)),
             8 => (-1_000_000_i64..=1_000_000).prop_map(Micro),
         ]
     }
