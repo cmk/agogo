@@ -60,6 +60,7 @@ use std::num::NonZeroU32;
 /// PLL at MIDI clock cadence (24 PPQ); the master tick stream
 /// scheduler uses `agogo::core::time::tick::PPQN` (960).
 const PULSE_PPQ: u32 = 24;
+const SUPPORTED_SAMPLE_RATES: &str = "44100, 48000, 88200, 96000, 176400, 192000";
 
 use crate::parsers::{parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats};
 
@@ -122,8 +123,12 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
     // `args.bpm` is already `Tempo` — bpaf's `parse_bpm_to_tempo`
     // consumed the f64 at parse time.
     let bpm: Tempo = args.bpm;
-    validate_schedule_params(args.sr, bpm)
-        .map_err(|e| format!("invalid scheduling parameters: {e}"))?;
+    validate_schedule_params(args.sr, bpm).map_err(|e| match e {
+        agogo::core::channel::time::ScheduleError::UnsupportedSampleRate(sr) => {
+            format!("--sr {sr} not supported (allowed: {SUPPORTED_SAMPLE_RATES})")
+        }
+        other => format!("invalid scheduling parameters: {other}"),
+    })?;
 
     // Parse all --ch specs eagerly (in order, so variable refs
     // resolve) before any device opens.
@@ -221,8 +226,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             audio_output_request,
         ),
         other => Err(format!(
-            "--sr {other} not supported (allowed: 44100, 48000, 88200, 96000, \
-             176400, 192000)"
+            "--sr {other} not supported (allowed: {SUPPORTED_SAMPLE_RATES})"
         )),
     }
 }

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, PoisonError};
 
 use crate::conn::tempo::Tempo;
-use crate::{Playhead, TransportCommandApply};
+use crate::transport::{Playhead, TransportCommandApply};
 use rust_fsm::state_machine;
 
 pub const MAX_SOURCE_ID_LEN: usize = 64;

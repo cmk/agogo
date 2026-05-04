@@ -29,3 +29,18 @@ Verification run locally:
 - `cargo test --manifest-path crates/host-midi/Cargo.toml --quiet`
 - `cargo test --manifest-path crates/host-cpal/Cargo.toml --quiet`
 - pre-commit gates: fmt, PII, floats, layers, connections, boundary panics
+
+## Local review (2026-05-03)
+
+**Branch:** plan/2026-05-03-06
+**Commits:** 3 (origin/main..plan/2026-05-03-06)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The runtime code and default workspace tests appear to pass, but the module move leaves an existing proptest regression seed on the old path, weakening regression coverage. This should be corrected with the rename.
+
+Review comment:
+
+- [P3] Move the PLL proptest regression seed — `crates/chan/src/control.rs:14`
+  Because the PLL module is flattened from `control::sync::pll` to `control::pll` here, proptest's default persistence path changes to `proptest-regressions/control/pll.txt`. The checked-in seed is still under `crates/chan/proptest-regressions/control/sync/pll.txt`, so that historical `bpm = 185.18518` regression will no longer be replayed; move the regression file with the module path.
