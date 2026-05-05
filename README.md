@@ -23,7 +23,7 @@ Implemented today:
 - per-channel scheduling from `ChannelCommon` / channel specs;
 - internal sample-clock driven playback through `Playhead::on_buffer`;
 - MIDI clock and MIDI click rendering through a best-effort `midir` sink;
-- mono audio-click rendering through `cpal`;
+- stereo ch1-2 audio-click rendering through `cpal`;
 - synthetic PLL/sync tracing and scheduler/MIDI trace CLI commands;
 - Ableton Link session utilities and a Link-backed `agogo run --source link`
   mode behind feature flags;
@@ -33,9 +33,10 @@ Known gaps:
 
 - native timestamped MIDI backends are not implemented yet, so the current
   `midir` output path is best effort at the host boundary;
-- CV pulse rendering has a mono audio-output MVP; CV LFO roles are still spec
+- CV pulse rendering has a dual-mono stereo-output MVP; CV LFO roles are still spec
   stubs;
-- audio output is mono click-focused;
+- generated audio metronome output is limited to one or two click channels,
+  panned left then right;
 - multi-device output routing is deliberately constrained to one MIDI target
   and one audio target per run;
 - there is no crates.io release contract yet.
@@ -130,6 +131,9 @@ cargo run -p agogo-cli --features run --bin agogo -- run \
   --ch 'id=three,dev=audio,mode=click,grid=t2t,out=default' \
   --ch 'id=two,dev=audio,mode=click,grid=t2,out=default'
 ```
+
+Generated audio output requires a stereo f32 device config. One audio-click
+channel writes left only; two audio-click channels write left and right.
 
 Internal MIDI clock example using the first MIDI output:
 

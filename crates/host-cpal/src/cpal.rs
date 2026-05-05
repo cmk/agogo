@@ -155,7 +155,14 @@ fn run_input_stream(
         let mut output_stub: [f32; 0] = []; // PCM ABI
         let data_cb = move |samples: &[f32], _info: &InputCallbackInfo| {
             let frames = samples.len();
-            let mut io = AudioIo::new(samples, &mut output_stub, next_start, sample_rate, frames);
+            let mut io = AudioIo::with_output_channels(
+                samples,
+                &mut output_stub,
+                next_start,
+                sample_rate,
+                frames,
+                0,
+            );
             cb(&mut io);
             next_start = next_start.saturating_add(frames as u64);
         };
@@ -178,9 +185,9 @@ fn run_output_stream(
     cfg: Config,
     mut cb: Box<dyn FnMut(&mut AudioIo) + Send>,
 ) -> Result<Handle, AudioHostError> {
-    if cfg.input_channels != 0 || cfg.output_channels != 1 {
+    if cfg.input_channels != 0 || cfg.output_channels != 2 {
         return Err(AudioHostError::UnsupportedConfig(format!(
-            "cpal output stream supports input_channels=0, output_channels=1; got \
+            "cpal output stream supports input_channels=0, output_channels=2; got \
              input_channels={}, output_channels={}",
             cfg.input_channels, cfg.output_channels
         )));
@@ -190,7 +197,8 @@ fn run_output_stream(
         .supported_output_configs()
         .map_err(|e| AudioHostError::Backend(Box::new(e)))?
         .collect();
-    let output_channels = select_output_channels(&supported, cfg.sample_rate, cfg.output_channels)?;
+    let output_channels =
+        validate_output_channels(&supported, cfg.sample_rate, cfg.output_channels)?;
 
     let stream_config = StreamConfig {
         channels: output_channels,
@@ -202,13 +210,12 @@ fn run_output_stream(
     spawn_stream(move |stop_rx, ready_tx| {
         let mut next_start: u64 = 0;
         let input_stub: [f32; 0] = []; // PCM ABI
-        let mut mono_output = vec![0.0_f32; scratch_frames]; // PCM ABI
         let data_cb = move |samples: &mut [f32], _info: &OutputCallbackInfo| {
-            next_start = render_mono_output_chunks(
+            next_start = render_interleaved_output_chunks(
                 &input_stub,
                 samples,
                 usize::from(output_channels),
-                &mut mono_output,
+                scratch_frames,
                 next_start,
                 sample_rate,
                 cb.as_mut(),
@@ -228,64 +235,51 @@ fn run_output_stream(
     })
 }
 
-fn render_mono_output_chunks(
+fn render_interleaved_output_chunks(
     input: &[f32],
     interleaved: &mut [f32],
     channels: usize,
-    mono_output: &mut [f32],
+    scratch_frames: usize,
     buffer_start_sample: u64,
     sample_rate: u32,
     cb: &mut dyn FnMut(&mut AudioIo),
 ) -> u64 {
     interleaved.fill(0.0_f32); // PCM ABI
-    if channels == 0 || mono_output.is_empty() {
+    if channels == 0 || scratch_frames == 0 {
         return buffer_start_sample;
     }
 
     let frames = interleaved.len() / channels;
     let mut rendered_frames = 0;
     while rendered_frames < frames {
-        let chunk_frames = (frames - rendered_frames).min(mono_output.len());
-        mono_output[..chunk_frames].fill(0.0_f32); // PCM ABI
+        let chunk_frames = (frames - rendered_frames).min(scratch_frames);
         let chunk_start = buffer_start_sample.saturating_add(rendered_frames as u64);
-        let mut io = AudioIo::new(
+        let sample_start = rendered_frames * channels;
+        let sample_end = sample_start + chunk_frames * channels;
+        let output = &mut interleaved[sample_start..sample_end];
+        output.fill(0.0_f32); // PCM ABI
+        let mut io = AudioIo::with_output_channels(
             input,
-            &mut mono_output[..chunk_frames],
+            output,
             chunk_start,
             sample_rate,
             chunk_frames,
+            channels as u16,
         );
         cb(&mut io);
-
-        let sample_start = rendered_frames * channels;
-        let sample_end = sample_start + chunk_frames * channels;
-        fan_out_mono(
-            &mono_output[..chunk_frames],
-            &mut interleaved[sample_start..sample_end],
-            channels,
-        );
         rendered_frames += chunk_frames;
     }
 
     buffer_start_sample.saturating_add(frames as u64)
 }
 
-fn select_output_channels(
+fn validate_output_channels(
     supported: &[::cpal::SupportedStreamConfigRange],
     sample_rate: u32,
     preferred_channels: u16,
 ) -> Result<u16, AudioHostError> {
     let caps = supported.iter().map(StreamCaps::from);
-    select_f32_channels_at_rate(caps, sample_rate, preferred_channels, "output", true)
-}
-
-fn fan_out_mono(mono: &[f32], interleaved: &mut [f32], channels: usize) {
-    if channels == 0 {
-        return;
-    }
-    for (frame, &sample) in interleaved.chunks_exact_mut(channels).zip(mono) {
-        frame.fill(sample);
-    }
+    select_f32_channels_at_rate(caps, sample_rate, preferred_channels, "output")
 }
 
 fn validate_supported_config(
@@ -295,7 +289,7 @@ fn validate_supported_config(
     direction: &str,
 ) -> Result<(), AudioHostError> {
     let caps = supported.iter().map(StreamCaps::from);
-    select_f32_channels_at_rate(caps, sample_rate, channels, direction, false).map(|_| ())
+    select_f32_channels_at_rate(caps, sample_rate, channels, direction).map(|_| ())
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -322,12 +316,10 @@ fn select_f32_channels_at_rate(
     sample_rate: u32,
     preferred_channels: u16,
     direction: &str,
-    allow_channel_fallback: bool,
 ) -> Result<u16, AudioHostError> {
     let mut any_rate = false;
     let mut any_f32_at_rate = false;
     let mut any_preferred_channels_at_rate = false;
-    let mut fallback_channels: Option<u16> = None;
 
     for cap in caps {
         let rate_ok = cap.min_sample_rate <= sample_rate && cap.max_sample_rate >= sample_rate;
@@ -348,15 +340,8 @@ fn select_f32_channels_at_rate(
         if cap.channels == preferred_channels {
             return Ok(preferred_channels);
         }
-        fallback_channels = Some(match fallback_channels {
-            Some(existing) => existing.min(cap.channels),
-            None => cap.channels,
-        });
     }
 
-    if allow_channel_fallback && let Some(channels) = fallback_channels {
-        return Ok(channels);
-    }
     if !any_rate {
         return Err(AudioHostError::UnsupportedSampleRate(sample_rate));
     }
@@ -487,87 +472,68 @@ mod tests {
     }
 
     #[test]
-    fn output_channel_selection_prefers_requested_mono() {
+    fn output_channel_selection_accepts_requested_stereo() {
         let caps = [
-            caps(48_000, 48_000, SampleFormat::F32, 2),
             caps(48_000, 48_000, SampleFormat::F32, 1),
+            caps(48_000, 48_000, SampleFormat::F32, 2),
         ];
 
-        let got = select_f32_channels_at_rate(caps, 48_000, 1, "output", true).unwrap();
-
-        assert_eq!(got, 1);
-    }
-
-    #[test]
-    fn output_channel_selection_falls_back_to_stereo() {
-        let caps = [caps(44_100, 96_000, SampleFormat::F32, 2)];
-
-        let got = select_f32_channels_at_rate(caps, 48_000, 1, "output", true).unwrap();
+        let got = select_f32_channels_at_rate(caps, 48_000, 2, "output").unwrap();
 
         assert_eq!(got, 2);
     }
 
     #[test]
-    fn output_channel_selection_uses_smallest_f32_fallback() {
+    fn output_channel_selection_rejects_mono_only() {
+        let caps = [caps(44_100, 96_000, SampleFormat::F32, 1)];
+
+        let err = select_f32_channels_at_rate(caps, 48_000, 2, "output").unwrap_err();
+
+        assert!(matches!(err, AudioHostError::UnsupportedConfig(_)));
+    }
+
+    #[test]
+    fn output_channel_selection_rejects_multichannel_only() {
         let caps = [
             caps(44_100, 96_000, SampleFormat::F32, 8),
-            caps(44_100, 96_000, SampleFormat::F32, 6),
-            caps(44_100, 96_000, SampleFormat::F32, 2),
-            caps(44_100, 96_000, SampleFormat::I16, 1),
+            caps(44_100, 96_000, SampleFormat::F32, 16),
         ];
 
-        let got = select_f32_channels_at_rate(caps, 48_000, 1, "output", true).unwrap();
+        let err = select_f32_channels_at_rate(caps, 48_000, 2, "output").unwrap_err();
 
-        assert_eq!(got, 2);
+        assert!(matches!(err, AudioHostError::UnsupportedConfig(_)));
     }
 
     #[test]
     fn input_validation_rejects_channel_fallback() {
         let caps = [caps(44_100, 96_000, SampleFormat::F32, 2)];
 
-        let err = select_f32_channels_at_rate(caps, 48_000, 1, "input", false).unwrap_err();
+        let err = select_f32_channels_at_rate(caps, 48_000, 1, "input").unwrap_err();
 
         assert!(matches!(err, AudioHostError::UnsupportedConfig(_)));
-    }
-
-    #[test]
-    fn fan_out_mono_copies_each_frame_to_all_channels() {
-        let mut interleaved = [0.0_f32; 6]; // PCM ABI
-
-        fan_out_mono(&[0.25, -0.5], &mut interleaved, 3);
-
-        assert_eq!(interleaved, [0.25, 0.25, 0.25, -0.5, -0.5, -0.5]);
     }
 
     #[test]
     fn oversized_output_callback_is_rendered_in_scratch_chunks() {
         let input: [f32; 0] = []; // PCM ABI
         let mut interleaved = [0.0_f32; 10]; // PCM ABI
-        let mut mono_output = [0.0_f32; 2]; // PCM ABI
         let mut calls = Vec::new();
         let mut cb = |io: &mut AudioIo<'_>| {
-            calls.push((io.buffer_start_sample, io.frames));
+            calls.push((io.buffer_start_sample, io.frames, io.output_channels));
             for (idx, sample) in io.output.iter_mut().enumerate() {
                 *sample = (io.buffer_start_sample + idx as u64) as f32; // PCM ABI
             }
         };
 
-        let next_start = render_mono_output_chunks(
-            &input,
-            &mut interleaved,
-            2,
-            &mut mono_output,
-            100,
-            48_000,
-            &mut cb,
-        );
+        let next_start =
+            render_interleaved_output_chunks(&input, &mut interleaved, 2, 2, 100, 48_000, &mut cb);
 
-        assert_eq!(calls, vec![(100, 2), (102, 2), (104, 1)]);
+        assert_eq!(calls, vec![(100, 2, 2), (102, 2, 2), (104, 1, 2)]);
         assert_eq!(next_start, 105);
         assert_eq!(
             interleaved,
             [
-                100.0, 100.0, 101.0, 101.0, 102.0, 102.0, 103.0, 103.0, 104.0, 104.0
+                100.0, 101.0, 102.0, 103.0, 102.0, 103.0, 104.0, 105.0, 104.0, 105.0
             ]
         );
     }
