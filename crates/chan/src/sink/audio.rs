@@ -168,12 +168,30 @@ pub struct CvPulseState {
 }
 
 /// Per-channel generated metronome-click state.
+///
+/// `pending_samples` and `pending_accent` track the tail of an
+/// in-progress click that was truncated by a buffer boundary; the
+/// next [`render_audio_click_block`] call resumes that click at
+/// output offset 0 before processing new events. This makes the
+/// rendered audio bit-identical regardless of buffer-frame size,
+/// per plan 2026-05-05-02 T5's `prop_buffer_boundary_invariance`.
+/// Only the most-recently-truncated click is preserved; rapid
+/// overlapping clicks that all straddle a single boundary lose
+/// the earlier tails (this matches the additive-mix design where
+/// each new event uses the shared filter / RNG state at its
+/// scheduled moment).
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct AudioClickState {
     click_counter: u32,
     rng_state: u32,
     filter_q15: i32,
     cutoff_hz: u32,
+    /// Samples of the last truncated click that still need to be
+    /// rendered at the start of the next buffer. 0 means no
+    /// continuation pending.
+    pending_samples: u16,
+    /// Accent flag for the pending click (controls amplitude).
+    pending_accent: bool,
 }
 
 impl AudioClickState {
@@ -184,6 +202,8 @@ impl AudioClickState {
             rng_state: seed,
             filter_q15: 0,
             cutoff_hz: cutoff_for_seed(seed),
+            pending_samples: 0,
+            pending_accent: false,
         }
     }
 
@@ -198,6 +218,8 @@ impl AudioClickState {
     pub fn reset(&mut self) {
         self.click_counter = 0;
         self.filter_q15 = 0;
+        self.pending_samples = 0;
+        self.pending_accent = false;
     }
 }
 
@@ -294,6 +316,35 @@ pub fn render_audio_click_block(
                 return;
             }
             let writable = io.frames.min(io.output.len() / channels);
+            // Resume any click that was truncated by the previous
+            // buffer boundary. Resume happens at output offset 0
+            // (the first frame of this buffer) and consumes the
+            // first `pending_samples` writable frames.
+            if state.pending_samples > 0 {
+                let len = click_len(io.sample_rate);
+                let pending = state.pending_samples as usize;
+                let env_start = len.saturating_sub(pending);
+                let written = render_click_samples(
+                    0,
+                    output_channel,
+                    channels,
+                    state.pending_accent,
+                    io.sample_rate,
+                    env_start,
+                    pending,
+                    state,
+                    io.output,
+                );
+                state.pending_samples = (pending - written) as u16;
+                if state.pending_samples > 0 {
+                    // Buffer was too short to finish the pending
+                    // click; new events for this buffer fall after
+                    // the pending region's end and would have
+                    // overlapped it anyway — we still process
+                    // them, but with reduced writable space.
+                }
+            }
+
             for ev in events {
                 let Some(offset) = ev.sample_index.checked_sub(io.buffer_start_sample) else {
                     continue;
@@ -304,15 +355,28 @@ pub fn render_audio_click_block(
                 }
                 let accent = state.click_counter.is_multiple_of(AUDIO_CLICK_ACCENT_EVERY);
                 state.click_counter = state.click_counter.wrapping_add(1);
-                render_one_click(
+                let len = click_len(io.sample_rate);
+                let written = render_click_samples(
                     offset,
                     output_channel,
                     channels,
                     accent,
                     io.sample_rate,
+                    /* env_start = */ 0,
+                    /* requested = */ len,
                     state,
                     io.output,
                 );
+                if written < len {
+                    // The click was truncated by the buffer end.
+                    // Save the tail so the next call resumes it.
+                    // Only the most-recently-truncated click is
+                    // preserved; earlier overlapping truncations
+                    // lose their tails (see `AudioClickState`
+                    // doc).
+                    state.pending_samples = (len - written) as u16;
+                    state.pending_accent = accent;
+                }
             }
         }
     }
@@ -414,15 +478,27 @@ fn cv_positive_at(mask: &[bool], offset: usize) -> bool {
     mask.get(offset).copied().unwrap_or(false)
 }
 
-fn render_one_click(
+/// Render up to `requested` consecutive samples of a click
+/// envelope, starting at envelope index `env_start`. Returns the
+/// number of samples actually written (may be less than
+/// `requested` when the buffer ends first).
+///
+/// The envelope is `(len - env_index)` for `env_index in
+/// 0..len`, where `len = click_len(sample_rate)`. Resuming a
+/// truncated click means calling this with `env_start = len -
+/// pending_samples` and `requested = pending_samples`.
+#[allow(clippy::too_many_arguments)]
+fn render_click_samples(
     start: usize,
     output_channel: usize,
     channels: usize,
     accent: bool,
     sample_rate: u32,
+    env_start: usize,
+    requested: usize,
     state: &mut AudioClickState,
     output: &mut [f32],
-) {
+) -> usize {
     let len = click_len(sample_rate);
     let amp = if accent {
         AUDIO_CLICK_ACCENT_AMP_Q15
@@ -431,7 +507,12 @@ fn render_one_click(
     };
     let alpha_q15 = lowpass_alpha_q15(state.cutoff_hz, sample_rate);
 
-    for i in 0..len {
+    let mut written = 0;
+    for i in 0..requested {
+        let env_index = env_start + i;
+        if env_index >= len {
+            break;
+        }
         let frame = start + i;
         let sample_index = frame
             .saturating_mul(channels)
@@ -439,13 +520,15 @@ fn render_one_click(
         let Some(dst) = output.get_mut(sample_index) else {
             break;
         };
-        let envelope = (len - i) as i32;
+        let envelope = (len - env_index) as i32;
         let noise_q15 = next_noise_q15(state);
         let delta = noise_q15 - state.filter_q15;
         state.filter_q15 += (delta * alpha_q15) >> 15;
         let sample_q15 = state.filter_q15 * amp / 32_768 * envelope / len as i32;
         mix_q15(dst, sample_q15);
+        written = i + 1;
     }
+    written
 }
 
 fn click_len(sample_rate: u32) -> usize {
@@ -576,21 +659,41 @@ mod tests {
     #[test]
     fn audio_accent_lands_every_n_emitted_clicks_from_zero() {
         let input: [f32; 0] = []; // PCM ABI
-        let mut accent_output = vec![0.0_f32; 64]; // PCM ABI
-        let mut normal_output = vec![0.0_f32; 64]; // PCM ABI
         let mut state = AudioClickState::new(0);
 
-        {
-            let mut io = AudioIo::new(&input, &mut accent_output, 0, 48_000, 64);
-            render_audio_click_block(&[event(0)], &AudioRole::Click, &mut state, 0, &mut io);
-        }
-        {
-            let mut io = AudioIo::new(&input, &mut normal_output, 0, 48_000, 64);
-            render_audio_click_block(&[event(0)], &AudioRole::Click, &mut state, 0, &mut io);
-        }
+        // Render two clicks back-to-back in one buffer, spaced
+        // far enough apart that the accent click fully completes
+        // before the normal click begins (192-sample click at 48
+        // kHz, 256-sample spacing). The accent click is click 0
+        // (counter starts at 0, 0 % 4 == 0); the normal click is
+        // click 1.
+        let mut output = vec![0.0_f32; 512]; // PCM ABI
+        let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 512);
+        render_audio_click_block(
+            &[event(0), event(256)],
+            &AudioRole::Click,
+            &mut state,
+            0,
+            &mut io,
+        );
 
         assert_eq!(state.click_counter(), 2);
-        assert!(accent_output[0].abs() > normal_output[0].abs());
+        // Compare per-click peak magnitudes: filter state at the
+        // very first sample of each click is wherever the prior
+        // click left it, which makes per-sample comparison
+        // brittle. Peak-over-the-click-window is the stable
+        // signal the accent amplification is supposed to produce.
+        let click_len_48k = click_len(48_000);
+        let accent_peak = output[0..click_len_48k]
+            .iter()
+            .fold(0.0_f32, |a, &b| a.max(b.abs()));
+        let normal_peak = output[256..256 + click_len_48k]
+            .iter()
+            .fold(0.0_f32, |a, &b| a.max(b.abs()));
+        assert!(
+            accent_peak > normal_peak,
+            "accent peak {accent_peak} should exceed normal peak {normal_peak}"
+        );
     }
 
     #[test]
