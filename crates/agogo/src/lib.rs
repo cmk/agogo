@@ -28,11 +28,12 @@ pub mod core {
         AdmissionMetadata, AdmissionOutcome, AdmissionRejectReason, AdmissionStatus, AgogoDriver,
         AgogoDriverConfig, AgogoSnapshot, BridgeError, CoalesceKey, CommandApplyReport,
         CommandDeadline, CommandEnvelope, CommandId, CommandTimeDomain, ControlCommand,
-        ControlConsumer, ControlParams, ControlProducer, OfflineMidiRecord, OfflineRenderConfig,
-        OfflineRenderError, OfflineRenderReport, Playhead, PlayheadStopHandle, RtCommandDrain,
-        Runtime, RuntimeStepReport, RuntimeSurface, RuntimeToolMetadata, SnapshotSlot, SourceId,
-        Tool, TransportCommandApply, TransportPolicy, TransportState, apply_control_to_playhead,
-        max_events_for_buffer, render_offline, spsc, tick_stream, tick_stream_into,
+        ControlConsumer, ControlParams, ControlProducer, MAX_OUTPUT_CHANNELS, OfflineMidiRecord,
+        OfflinePcm, OfflineRenderConfig, OfflineRenderError, OfflineRenderReport, Playhead,
+        PlayheadStopHandle, RtCommandDrain, Runtime, RuntimeStepReport, RuntimeSurface,
+        RuntimeToolMetadata, SnapshotSlot, SourceId, Tool, TransportCommandApply, TransportPolicy,
+        TransportState, apply_control_to_playhead, max_events_for_buffer, render_offline,
+        render_offline_capture, spsc, tick_stream, tick_stream_into, validate_audio_lanes,
     };
 }
 

@@ -113,6 +113,12 @@ pub enum Channel {
     Audio {
         common: ChannelCommon,
         role: AudioRole,
+        /// Output channel index this audio channel writes to.
+        /// Validated `< output_channels` and unique across audio
+        /// channels at the offline-render boundary; the live `run`
+        /// path applies the same uniqueness check before opening
+        /// the device.
+        lane: u16,
     },
     Din {
         common: ChannelCommon,
@@ -289,6 +295,7 @@ mod tests {
         let _ = Channel::Audio {
             common: zero_common(Grid::T4),
             role: AudioRole::Click,
+            lane: 0,
         };
     }
 

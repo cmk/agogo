@@ -319,7 +319,16 @@ pub struct OfflineRenderConfig {
     pub sample_rate: u32,
     pub buffer_frames: u32,
     pub total_frames: u64,
+    /// Number of interleaved output channels in the rendered audio
+    /// buffer. Validated `1..=`[`MAX_OUTPUT_CHANNELS`]; each
+    /// `Channel::Audio` must declare a `lane < output_channels`,
+    /// and lanes must not collide. (Plan 2026-05-05-02 T1/T3.)
+    pub output_channels: u16,
 }
+
+/// Maximum supported `output_channels` in the offline render path.
+/// Aligns with the architectural cap of 16 audio output channels.
+pub const MAX_OUTPUT_CHANNELS: u16 = 16;
 
 /// MIDI event captured during [`render_offline`].
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -348,6 +357,24 @@ pub enum OfflineRenderError {
     EmptyBuffer,
     EmptyDuration,
     UnsupportedSampleRate(u32),
+    /// `output_channels` was outside `1..=`[`MAX_OUTPUT_CHANNELS`].
+    UnsupportedChannelCount(u16),
+    /// An audio channel's lane is `>= output_channels`. The `channel`
+    /// field is the channel's position in the input vector for
+    /// human-friendly error messages; `lane` is the user-typed
+    /// value (`out=N`).
+    LaneOutOfRange {
+        channel: usize,
+        lane: u16,
+        output_channels: u16,
+    },
+    /// Two audio channels claimed the same lane (no-mix-bus
+    /// imperative). The `channels` pair is `(first, second)` in
+    /// input order.
+    LaneCollision {
+        lane: u16,
+        channels: (usize, usize),
+    },
 }
 
 impl std::fmt::Display for OfflineRenderError {
@@ -358,11 +385,70 @@ impl std::fmt::Display for OfflineRenderError {
             Self::UnsupportedSampleRate(sr) => {
                 write!(f, "sample rate {sr} is not supported")
             }
+            Self::UnsupportedChannelCount(n) => write!(
+                f,
+                "output_channels={n} not supported (must be 1..={MAX_OUTPUT_CHANNELS})"
+            ),
+            Self::LaneOutOfRange {
+                channel,
+                lane,
+                output_channels,
+            } => write!(
+                f,
+                "channel #{channel}: out={lane} exceeds output_channels={output_channels}"
+            ),
+            Self::LaneCollision { lane, channels } => write!(
+                f,
+                "channels #{} and #{} both claim out={lane} (no-mix-bus)",
+                channels.0, channels.1
+            ),
         }
     }
 }
 
 impl std::error::Error for OfflineRenderError {}
+
+/// Validate per-channel audio lanes against `output_channels`.
+///
+/// Returns `Ok(())` when every audio channel's lane is in range and
+/// distinct from every other audio channel's lane. Otherwise returns
+/// the first offending `LaneOutOfRange` or `LaneCollision`.
+///
+/// Shared by `render_offline` / `render_offline_capture` and the
+/// live `run` path so both sides apply the same no-mix-bus rule
+/// against whatever `output_channels` they're configured for.
+pub fn validate_audio_lanes(
+    channels: &[Channel],
+    output_channels: u16,
+) -> Result<(), OfflineRenderError> {
+    // Walk in input order; record the first claimant of each lane
+    // and surface the second claimant on collision so the error
+    // message can name both channels.
+    let mut claimants: Vec<Option<usize>> = vec![None; usize::from(output_channels)];
+    for (idx, ch) in channels.iter().enumerate() {
+        if let Channel::Audio { lane, .. } = ch {
+            let lane = *lane;
+            if lane >= output_channels {
+                return Err(OfflineRenderError::LaneOutOfRange {
+                    channel: idx,
+                    lane,
+                    output_channels,
+                });
+            }
+            let slot = &mut claimants[usize::from(lane)];
+            match *slot {
+                None => *slot = Some(idx),
+                Some(prev) => {
+                    return Err(OfflineRenderError::LaneCollision {
+                        lane,
+                        channels: (prev, idx),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 impl<R> Playhead<R> {
     /// Construct a new [`Playhead`]. `sr` and `bpm` configure the
@@ -381,15 +467,24 @@ impl<R> Playhead<R> {
         let n = channels.len();
         let mut next_audio_index = 0usize;
         let mut audio_click_states = Vec::with_capacity(n);
-        let audio_click_lanes = channels
+        // Lane comes from each `Channel::Audio { lane, .. }` directly
+        // — explicit per-channel routing replaces the earlier
+        // `audio_index % 2` policy, which silently shared lanes once
+        // there were >2 audio channels (no-mix-bus violation, plan
+        // 2026-05-05-02 T2). Boundary callers (`OfflineRenderConfig`
+        // validation, the live `run` path) are responsible for
+        // rejecting collisions and out-of-range lanes before
+        // construction reaches here.
+        let audio_click_lanes: Vec<usize> = channels
             .iter()
-            .map(|ch| {
-                if matches!(ch, Channel::Audio { .. }) {
+            .map(|ch| match ch {
+                Channel::Audio { lane, .. } => {
                     let audio_index = next_audio_index;
                     next_audio_index += 1;
                     audio_click_states.push(AudioClickState::new(audio_index));
-                    audio_index % 2
-                } else {
+                    usize::from(*lane)
+                }
+                _ => {
                     audio_click_states.push(AudioClickState::new(0));
                     0
                 }
@@ -686,23 +781,84 @@ impl_playhead_rate!(R192);
 /// Run a deterministic offline render through the same buffer path as
 /// host callbacks. This opens no cpal/midir devices; it uses silent
 /// input, an in-memory MIDI sink, and a scratch audio output buffer.
+///
+/// The audio buffer is interleaved with `config.output_channels`
+/// channels per frame; the aggregate stats in the returned report
+/// span all channels. For per-lane PCM use
+/// [`render_offline_capture`].
 pub fn render_offline(
     config: OfflineRenderConfig,
 ) -> Result<OfflineRenderReport, OfflineRenderError> {
+    let (report, _pcm) = render_offline_dispatch(config, /*capture=*/ false)?;
+    Ok(report)
+}
+
+/// Render-and-capture variant of [`render_offline`].
+///
+/// Returns the same [`OfflineRenderReport`] alongside an
+/// [`OfflinePcm`] split into one `Vec<f32>` per output channel.
+/// Substrate for end-to-end inter-channel sample-accuracy tests
+/// and (planned) `agogo render --wav-out FILE`. Plan
+/// 2026-05-05-02 T4.
+pub fn render_offline_capture(
+    config: OfflineRenderConfig,
+) -> Result<(OfflineRenderReport, OfflinePcm), OfflineRenderError> {
+    let sample_rate = config.sample_rate;
+    let total_frames = config.total_frames;
+    let output_channels = config.output_channels;
+    let (report, pcm) = render_offline_dispatch(config, /*capture=*/ true)?;
+    Ok((
+        report,
+        OfflinePcm {
+            // `render_offline_dispatch` always returns Some(Vec) when
+            // capture=true; the .unwrap_or_default() keeps the type
+            // total without panicking on an internal contract slip.
+            lanes: pcm.unwrap_or_else(|| vec![Vec::new(); usize::from(output_channels)]),
+            sample_rate,
+            frames: total_frames,
+        },
+    ))
+}
+
+/// Per-lane PCM captured by [`render_offline_capture`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct OfflinePcm {
+    /// One Vec per output channel, in lane order. `lanes.len() ==
+    /// output_channels`. Each Vec has `frames` samples (truncated
+    /// for short renders).
+    pub lanes: Vec<Vec<f32>>, // PCM ABI
+    pub sample_rate: u32,
+    pub frames: u64,
+}
+
+/// Per-lane PCM (`Vec<f32>` per output channel), present only when
+/// the offline dispatcher was asked to capture the rendered audio.
+type CapturedLanes = Vec<Vec<f32>>; // PCM ABI
+
+fn render_offline_dispatch(
+    config: OfflineRenderConfig,
+    capture: bool,
+) -> Result<(OfflineRenderReport, Option<CapturedLanes>), OfflineRenderError> {
     if config.buffer_frames == 0 {
         return Err(OfflineRenderError::EmptyBuffer);
     }
     if config.total_frames == 0 {
         return Err(OfflineRenderError::EmptyDuration);
     }
+    if config.output_channels == 0 || config.output_channels > MAX_OUTPUT_CHANNELS {
+        return Err(OfflineRenderError::UnsupportedChannelCount(
+            config.output_channels,
+        ));
+    }
+    validate_audio_lanes(&config.channels, config.output_channels)?;
 
     match config.sample_rate {
-        rate if rate == R044::HZ => render_offline_with_rate::<R044>(config),
-        rate if rate == R048::HZ => render_offline_with_rate::<R048>(config),
-        rate if rate == R088::HZ => render_offline_with_rate::<R088>(config),
-        rate if rate == R096::HZ => render_offline_with_rate::<R096>(config),
-        rate if rate == R176::HZ => render_offline_with_rate::<R176>(config),
-        rate if rate == R192::HZ => render_offline_with_rate::<R192>(config),
+        rate if rate == R044::HZ => render_offline_with_rate::<R044>(config, capture),
+        rate if rate == R048::HZ => render_offline_with_rate::<R048>(config, capture),
+        rate if rate == R088::HZ => render_offline_with_rate::<R088>(config, capture),
+        rate if rate == R096::HZ => render_offline_with_rate::<R096>(config, capture),
+        rate if rate == R176::HZ => render_offline_with_rate::<R176>(config, capture),
+        rate if rate == R192::HZ => render_offline_with_rate::<R192>(config, capture),
         other => Err(OfflineRenderError::UnsupportedSampleRate(other)),
     }
 }
@@ -730,7 +886,10 @@ impl_offline_rate!(R192);
 
 fn render_offline_with_rate<R: OfflineRate>(
     config: OfflineRenderConfig,
-) -> Result<OfflineRenderReport, OfflineRenderError> {
+    capture: bool,
+) -> Result<(OfflineRenderReport, Option<CapturedLanes>), OfflineRenderError> {
+    let output_channels = config.output_channels;
+    let channels_usize = usize::from(output_channels);
     let mut playhead = Playhead::<R>::new(
         config.channels,
         PhaseSource::Internal { bpm: config.bpm },
@@ -749,19 +908,36 @@ fn render_offline_with_rate<R: OfflineRate>(
     let mut audio_positive_peak_q15 = 0_u16;
     let mut audio_negative_peak_q15 = 0_u16;
 
+    let mut lanes: Option<CapturedLanes> = if capture {
+        let mut v = Vec::with_capacity(channels_usize);
+        for _ in 0..channels_usize {
+            v.push(Vec::with_capacity(config.total_frames as usize)); // PCM ABI
+        }
+        Some(v)
+    } else {
+        None
+    };
+
     while sample < config.total_frames {
         let remaining = config.total_frames - sample;
         let frames = remaining.min(u64::from(config.buffer_frames)) as usize;
         let input = vec![0.0_f32; frames]; // PCM ABI
-        let mut output = vec![0.0_f32; frames]; // PCM ABI
-        let mut io = AudioIo::new(&input, &mut output, sample, config.sample_rate, frames);
+        let mut output = vec![0.0_f32; frames * channels_usize]; // PCM ABI
+        let mut io = AudioIo::with_output_channels(
+            &input,
+            &mut output,
+            sample,
+            config.sample_rate,
+            frames,
+            output_channels,
+        );
         R::drive_offline(&mut playhead, &mut io, &sink);
 
-        for sample_value in output {
+        for &sample_value in output.iter() {
             if sample_value != 0.0 {
                 audio_nonzero_samples += 1;
             }
-            let q15 = (sample_value.abs().min(1.0) * 32767.0_f32).round() as u16;
+            let q15 = (sample_value.abs().min(1.0) * 32767.0_f32).round() as u16; // PCM ABI
             audio_peak_q15 = audio_peak_q15.max(q15);
             if sample_value > 0.0 {
                 audio_positive_peak_q15 = audio_positive_peak_q15.max(q15);
@@ -771,29 +947,42 @@ fn render_offline_with_rate<R: OfflineRate>(
             }
         }
 
+        if let Some(lanes) = lanes.as_mut() {
+            // Split the interleaved buffer per lane for this batch.
+            for frame_idx in 0..frames {
+                let base = frame_idx * channels_usize;
+                for lane_idx in 0..channels_usize {
+                    lanes[lane_idx].push(output[base + lane_idx]); // PCM ABI
+                }
+            }
+        }
+
         sample = sample.saturating_add(frames as u64);
         buffers_rendered += 1;
     }
 
-    Ok(OfflineRenderReport {
-        sample_rate: config.sample_rate,
-        buffer_frames: config.buffer_frames,
-        total_frames: config.total_frames,
-        buffers_rendered,
-        midi: sink
-            .records()
-            .into_iter()
-            .map(|record| OfflineMidiRecord {
-                at_sample: record.at_sample,
-                bytes: record.bytes,
-            })
-            .collect(),
-        dropped: 0,
-        audio_nonzero_samples,
-        audio_peak_q15,
-        audio_positive_peak_q15,
-        audio_negative_peak_q15,
-    })
+    Ok((
+        OfflineRenderReport {
+            sample_rate: config.sample_rate,
+            buffer_frames: config.buffer_frames,
+            total_frames: config.total_frames,
+            buffers_rendered,
+            midi: sink
+                .records()
+                .into_iter()
+                .map(|record| OfflineMidiRecord {
+                    at_sample: record.at_sample,
+                    bytes: record.bytes,
+                })
+                .collect(),
+            dropped: 0,
+            audio_nonzero_samples,
+            audio_peak_q15,
+            audio_positive_peak_q15,
+            audio_negative_peak_q15,
+        },
+        lanes,
+    ))
 }
 
 #[cfg(test)]
@@ -828,10 +1017,15 @@ mod tests {
     }
 
     fn audio_cv_channel(common: ChannelCommon, role: AudioCvRole) -> Channel {
+        audio_cv_channel_lane(common, role, 0)
+    }
+
+    fn audio_cv_channel_lane(common: ChannelCommon, role: AudioCvRole, lane: u16) -> Channel {
         match role {
             AudioCvRole::AudioClick => Channel::Audio {
                 common,
                 role: AudioRole::Click,
+                lane,
             },
             AudioCvRole::CvPulse => Channel::Cv {
                 common,
@@ -962,16 +1156,23 @@ mod tests {
             arb_delay(),
             arb_bars(),
         )
-            .prop_map(|(grid, role, swing, delay, bars)| ChannelSpec {
-                id: None,
-                out: None,
-                grid,
-                role,
-                swing,
-                offset_ticks: 0,
-                delay,
-                snap_to_quantum_micro: None,
-                bars,
+            .prop_map(|(grid, role, swing, delay, bars)| {
+                let (out, audio_lane) = match role {
+                    ChannelSpecRole::Audio(_) => (Some("0".to_string()), Some(0_u16)),
+                    _ => (None, None),
+                };
+                ChannelSpec {
+                    id: None,
+                    out,
+                    audio_lane,
+                    grid,
+                    role,
+                    swing,
+                    offset_ticks: 0,
+                    delay,
+                    snap_to_quantum_micro: None,
+                    bars,
+                }
             })
     }
 
@@ -1055,6 +1256,7 @@ mod tests {
             sample_rate: 48_000,
             buffer_frames: 4_096,
             total_frames: 48_000,
+            output_channels: 2,
         })
         .unwrap();
 
@@ -1212,6 +1414,7 @@ mod tests {
                 sample_rate: 48_000,
                 buffer_frames,
                 total_frames,
+                output_channels: 2,
             }).unwrap();
             let right = render_offline(OfflineRenderConfig {
                 channels: vec![zero_channel(divider)],
@@ -1219,6 +1422,7 @@ mod tests {
                 sample_rate: 48_000,
                 buffer_frames,
                 total_frames,
+                output_channels: 2,
             }).unwrap();
 
             prop_assert_eq!(left, right);
@@ -1280,6 +1484,7 @@ mod tests {
                 sample_rate,
                 buffer_frames,
                 total_frames,
+                output_channels: 2,
             }).map_err(|err| TestCaseError::fail(format!("left render failed: {err}")))?;
             let right = render_offline(OfflineRenderConfig {
                 channels: vec![right_channel],
@@ -1287,6 +1492,7 @@ mod tests {
                 sample_rate,
                 buffer_frames,
                 total_frames,
+                output_channels: 2,
             }).map_err(|err| TestCaseError::fail(format!("right render failed: {err}")))?;
 
             prop_assert_eq!(left, right);
@@ -1525,6 +1731,14 @@ mod tests {
     }
 
     fn audio_click_channel(divider: Grid, bar_multiplier: Option<NonZeroU16>) -> Channel {
+        audio_click_channel_lane(divider, bar_multiplier, 0)
+    }
+
+    fn audio_click_channel_lane(
+        divider: Grid,
+        bar_multiplier: Option<NonZeroU16>,
+        lane: u16,
+    ) -> Channel {
         Channel::Audio {
             common: ChannelCommon {
                 divider,
@@ -1537,6 +1751,7 @@ mod tests {
                 bar_multiplier,
             },
             role: AudioRole::Click,
+            lane,
         }
     }
 
@@ -1547,8 +1762,8 @@ mod tests {
         let n_buffers = 188u64; // Two bars at 48 kHz / 120 BPM.
         let stereo = render_audio_trace_48k_stereo_channels(
             vec![
-                audio_click_channel(Grid::T2T, None),
-                audio_click_channel(Grid::T2, None),
+                audio_click_channel_lane(Grid::T2T, None, 0),
+                audio_click_channel_lane(Grid::T2, None, 1),
             ],
             bpm,
             frames,

@@ -418,9 +418,40 @@ impl ChannelSpec {
             _ => unreachable!("dev_kw and mode_kw are constrained at parse"),
         };
 
+        // Derive `audio_lane` from `out=` when `dev=audio`. The
+        // raw `out` field stays for back-compat / non-audio uses;
+        // the typed `audio_lane` is what the audio renderer reads.
+        // Audio without a destination is silence — `out=diag` is
+        // rejected explicitly so the user gets a clear message
+        // instead of "expected u16, got `diag`".
+        let audio_lane = if matches!(role, ChannelSpecRole::Audio(_)) {
+            let raw = out.as_deref().ok_or_else(|| {
+                ChannelSpecError::BadValue(
+                    "out",
+                    "dev=audio requires out=N (audio output channel index, 0..)".into(),
+                )
+            })?;
+            if matches!(raw, "diag" | "diagnostic") {
+                return Err(ChannelSpecError::BadValue(
+                    "out",
+                    "audio without a destination is silence — use out=N (audio output channel index)".into(),
+                ));
+            }
+            let lane = raw.parse::<u16>().map_err(|_| {
+                ChannelSpecError::BadValue(
+                    "out",
+                    format!("dev=audio expects out=N (non-negative integer), got `{raw}`"),
+                )
+            })?;
+            Some(lane)
+        } else {
+            None
+        };
+
         Ok(Self {
             id,
             out,
+            audio_lane,
             grid,
             role,
             swing,
@@ -831,8 +862,55 @@ mod tests {
 
     #[test]
     fn parse_accepts_audio_click() {
-        let spec = ChannelSpec::parse("dev=audio,mode=click,grid=t4", &[]).unwrap();
+        let spec = ChannelSpec::parse("dev=audio,mode=click,grid=t4,out=0", &[]).unwrap();
         assert_eq!(spec.role, ChannelSpecRole::Audio(AudioRole::Click));
+        assert_eq!(spec.audio_lane, Some(0));
+    }
+
+    #[test]
+    fn parse_audio_click_requires_out() {
+        let err = ChannelSpec::parse("dev=audio,mode=click,grid=t4", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, msg) => {
+                assert_eq!(key, "out");
+                assert!(msg.contains("requires out=N"), "got: {msg}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_audio_click_rejects_out_diag() {
+        let err = ChannelSpec::parse("dev=audio,mode=click,grid=t4,out=diag", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, msg) => {
+                assert_eq!(key, "out");
+                assert!(
+                    msg.contains("audio without a destination is silence"),
+                    "got: {msg}"
+                );
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_audio_click_rejects_non_integer_out() {
+        let err =
+            ChannelSpec::parse("dev=audio,mode=click,grid=t4,out=speakers-a", &[]).unwrap_err();
+        match err {
+            ChannelSpecError::BadValue(key, msg) => {
+                assert_eq!(key, "out");
+                assert!(msg.contains("non-negative integer"), "got: {msg}");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_audio_click_accepts_lane_15() {
+        let spec = ChannelSpec::parse("dev=audio,mode=click,grid=t4,out=15", &[]).unwrap();
+        assert_eq!(spec.audio_lane, Some(15));
     }
 
     #[test]
@@ -894,7 +972,8 @@ mod tests {
 
     #[test]
     fn parse_rejects_audio_click_with_midi_keys() {
-        let err = ChannelSpec::parse("dev=audio,mode=click,grid=t4,note=37", &[]).unwrap_err();
+        let err =
+            ChannelSpec::parse("dev=audio,mode=click,grid=t4,note=37,out=0", &[]).unwrap_err();
         match err {
             ChannelSpecError::BadValue(key, msg) => {
                 assert_eq!(key, "note");

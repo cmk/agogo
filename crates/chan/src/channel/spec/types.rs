@@ -29,7 +29,15 @@ pub struct ChannelSpec {
     /// Optional human-readable identifier. Free-form string.
     pub id: Option<String>,
     /// Device-specific routing target (port name, channel index).
+    /// For `dev=audio`, the parser also surfaces the integer-form
+    /// `out=N` value as [`Self::audio_lane`].
     pub out: Option<String>,
+    /// Audio output channel index parsed from `out=N` for
+    /// `dev=audio` specs. `None` for non-audio channels (where the
+    /// `out=` field keeps its device-specific string semantics —
+    /// MIDI port name, `diag`, etc.). Required for `dev=audio` —
+    /// `into_channel` rejects an audio spec with `audio_lane = None`.
+    pub audio_lane: Option<u16>,
     /// Grid — resolved from a DSL expression at parse time.
     pub grid: Grid,
     /// Per-channel output role, including the target selected by
