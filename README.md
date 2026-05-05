@@ -121,19 +121,23 @@ cargo run -p agogo-cli --bin agogo -- sync trace \
 `--source internal`, `--source external`, and `--source link` with the `run`
 feature enabled.
 
-Internal 3:2 audio-click example using the default audio output:
+Internal 3:2 audio-click example. Each `dev=audio` channel declares its
+output channel via `out=N` (the audio output lane index, 0-based); two
+audio-click channels here write to lanes 0 and 1 of the host's default
+stereo output.
 
 ```bash
 cargo run -p agogo-cli --features run --bin agogo -- run \
   --source internal \
   --bpm 120 \
   --sr 48000 \
-  --ch 'id=three,dev=audio,mode=click,grid=t2t,out=default' \
-  --ch 'id=two,dev=audio,mode=click,grid=t2,out=default'
+  --ch 'id=three,dev=audio,mode=click,grid=t2t,out=0' \
+  --ch 'id=two,dev=audio,mode=click,grid=t2,out=1'
 ```
 
-Generated audio output requires a stereo f32 device config. One audio-click
-channel writes left only; two audio-click channels write left and right.
+Generated audio output requires a stereo f32 device config. The live `run`
+path opens a 2-channel stream, so audio specs must use `out=0` or `out=1`;
+multi-channel host streams are tracked as a follow-up.
 
 Internal MIDI clock example using the first MIDI output:
 
