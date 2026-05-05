@@ -107,3 +107,21 @@ called directly with the equivalent config.
 - MIDI/CV `out=N` namespace cleanup. The `out=` field grows integer
   semantics for `dev=audio` only this sprint; MIDI port routing and
   CV channel routing keep their current semantics.
+
+## Local review (2026-05-05)
+
+**Branch:** plan/2026-05-05-02
+**Commits:** 5 (origin/main..plan/2026-05-05-02)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The implementation builds and the test suite passes, but the parser change leaves the repository's public audio-click example broken. Users following the README will now hit the new parse error.
+
+Review comment:
+
+- [P2] Update audio examples after rejecting `out=default` — `crates/chan/src/channel/spec/parser.rs:440-445`
+  When users follow the current README hardware-backed audio example, both `dev=audio` specs still use `out=default`; this new `u16` parse path rejects that before `run` can choose the default output device, so the documented command now fails. Please update the public examples/spec docs to use lane values such as `out=0`/`out=1`, or preserve a separate default-device spelling.
+
+  **Resolution:** README updated to use `out=0` / `out=1` and to explain the new lane-index semantics. Live `run` path's audio-only configs already default to the host's default audio device when no CV channel claims a name (see `validate_live_audio_lanes` and the `audio_output_request` match in `run.rs`), so users no longer need an `out=default` placeholder for audio.
+
