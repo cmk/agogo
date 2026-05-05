@@ -31,7 +31,7 @@
 //! intentional different convention. (Haskell `ratfix`'s `h` is a
 //! plain `div`, matching this port.)
 
-use connections::conn::{ViewL, ViewR};
+use connections::conn::{ConnL, ConnR};
 
 macro_rules! def_fixed {
     ($name:ident, $prec:expr) => {
@@ -103,7 +103,7 @@ pub use FD12 as Pico;
 
 macro_rules! fix_fix {
     ($const_name:ident, $Fine:ident, $Coarse:ident, $prec:expr) => {
-        connections::triple! {
+        connections::conn_k! {
             #[allow(non_camel_case_types)]
             #[derive(Copy, Clone, Debug, Default)]
             pub $const_name : $Fine => $Coarse {
@@ -135,15 +135,15 @@ macro_rules! fix_fix {
             }
 
             pub fn ceil(self, x: $Fine) -> $Coarse {
-                <Self as ViewL<$Fine, $Coarse>>::L.ceil(x)
+                <Self as ConnL<$Fine, $Coarse>>::ceil(&self, x)
             }
 
             pub fn inner(self, x: $Coarse) -> $Fine {
-                <Self as ViewL<$Fine, $Coarse>>::L.inner(x)
+                <Self as ConnL<$Fine, $Coarse>>::upper(&self, x)
             }
 
             pub fn floor(self, x: $Fine) -> $Coarse {
-                <Self as ViewR<$Fine, $Coarse>>::R.floor(x)
+                <Self as ConnR<$Fine, $Coarse>>::floor(&self, x)
             }
         }
     };
@@ -232,17 +232,17 @@ mod tests {
                 proptest! {
                     #[test]
                     fn roundtrip_ceil(c in fixed_coarse($prec)) {
-                        prop_assert!(laws::roundtrip_ceil(&<$conn as ViewL<$Fine, $Coarse>>::L, $Coarse(c)));
+                        prop_assert!(laws::roundtrip_ceil(&$conn.conn_l(), $Coarse(c)));
                     }
 
                     #[test]
                     fn roundtrip_floor(c in fixed_coarse($prec)) {
-                        prop_assert!(laws::roundtrip_floor(&<$conn as ViewR<$Fine, $Coarse>>::R, $Coarse(c)));
+                        prop_assert!(laws::roundtrip_floor(&$conn.conn_r(), $Coarse(c)));
                     }
 
                     #[test]
                     fn monotone_l(x in fixed_fine($prec), y in fixed_fine($prec)) {
-                        prop_assert!(laws::monotone_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x), $Fine(y)));
+                        prop_assert!(laws::monotone_l(&$conn.conn_l(), $Fine(x), $Fine(y)));
                     }
 
                     #[test]
@@ -258,7 +258,7 @@ mod tests {
                         x in fixed_fine($prec),
                         c in fixed_coarse($prec),
                     ) {
-                        prop_assert!(laws::galois_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x), $Coarse(c)));
+                        prop_assert!(laws::galois_l(&$conn.conn_l(), $Fine(x), $Coarse(c)));
                     }
 
                     #[test]
@@ -266,7 +266,7 @@ mod tests {
                         x in fixed_fine($prec),
                         c in fixed_coarse($prec),
                     ) {
-                        prop_assert!(laws::galois_r(&<$conn as ViewR<$Fine, $Coarse>>::R, $Fine(x), $Coarse(c)));
+                        prop_assert!(laws::galois_r(&$conn.conn_r(), $Fine(x), $Coarse(c)));
                     }
 
                     // Closure laws use fixed_safe_fine because the
@@ -275,17 +275,17 @@ mod tests {
                     // crate::conn::arb.
                     #[test]
                     fn closure_l(x in fixed_safe_fine($prec)) {
-                        prop_assert!(laws::closure_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x)));
+                        prop_assert!(laws::closure_l(&$conn.conn_l(), $Fine(x)));
                     }
 
                     #[test]
                     fn closure_r(x in fixed_safe_fine($prec)) {
-                        prop_assert!(laws::closure_r(&<$conn as ViewR<$Fine, $Coarse>>::R, $Fine(x)));
+                        prop_assert!(laws::closure_r(&$conn.conn_r(), $Fine(x)));
                     }
 
                     #[test]
                     fn idempotent(x in fixed_safe_fine($prec)) {
-                        prop_assert!(laws::idempotent_l(&<$conn as ViewL<$Fine, $Coarse>>::L, $Fine(x)));
+                        prop_assert!(laws::idempotent_l(&$conn.conn_l(), $Fine(x)));
                     }
                 }
             }
