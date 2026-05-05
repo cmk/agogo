@@ -114,7 +114,7 @@ pub fn f64_bpm_to_tempo(b: f64) -> Tempo {
 /// `Tempo` (u32 microBPM) → f64 BPM via the lawful `F064FD06`
 /// Conn-inverse. The `× 10⁻⁶` unit shift lives inside `F064FD06`'s
 /// definition (`crate::conn::float`); the `u32 → i64` widening
-/// is `I064U032.inner` (lossless).
+/// is `I064U032.upper` (lossless).
 pub fn tempo_to_f64_bpm(t: Tempo) -> f64 {
     // PI-exempt.
     let widened = I064U032.upper(t.0);
@@ -231,7 +231,7 @@ mod tests {
         /// `tempo_to_f64_bpm` round-trip across the full `u32` domain.
         /// The function is the canonical Tempo→f64 helper used in 7+
         /// sites (CLI display, host-link FFI, arb fixtures); without
-        /// this, a regression in `F064FD06.inner` or `I064U032.inner`
+        /// this, a regression in `F064FD06.inner` or `I064U032.upper`
         /// would only be caught indirectly via `tempo_to_hz_matches_formula`,
         /// which exercises only integer 30..=400 BPM. Independent
         /// reference: `raw / 1_000_000.0` — the same arithmetic the
