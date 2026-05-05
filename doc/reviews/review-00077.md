@@ -33,7 +33,7 @@ The patch makes the fixed-point Conn total by saturating, but that violates the 
 
 Review comment:
 
-- [P1] Restore fixed Conn round trips at saturated extremes — `crates/chan/src/conn/fixed.rs:124`
+- [P1] Restore fixed Conn round trips at saturated extremes — `FD12FD06`
   When a coarse value exceeds `i64::MAX / PREC` (for example `FD12FD06.inner(Micro(i64::MAX))`), this saturates many distinct coarse inputs to the same fine value, so `ceil(inner(c))` no longer returns `c` (`Micro(i64::MAX)` round-trips back to about `9_223_372_036_855`). That breaks the published fixed-ladder `Conn` embedding/round-trip contract and any code relying on these connections being lawful over their declared `i64` types; handle the extreme runtime offset case at the boundary instead of changing `inner` to a non-injective saturating map.
 
 Resolution: fixed. Restored exact fixed-ladder `inner` conversion and moved
@@ -108,3 +108,45 @@ Fixed — `render_audio_trace_48k` now allocates the output buffer once and reus
 #### ↳ cmk ([2026-05-04 23:36 UTC](https://github.com/cmk/agogo/pull/77#discussion_r3185153734))
 
 Fixed — expanded `micro_to_samples` docs to state that extreme `Micro` values are clamped to the Pico-embeddable range before the exact Conn call, preserving total runtime scheduling without weakening Conn laws.
+
+<!-- gh-id: 3185213392 -->
+### Copilot on [`doc/reviews/review-00077.md:36`](https://github.com/cmk/agogo/pull/77#discussion_r3185213392) (2026-05-04 23:55 UTC)
+
+nit: The review note cites `crates/chan/src/conn/fixed.rs:124`, but in the current `fixed.rs` that line number no longer corresponds to the `FD12FD06` overflow/round-trip discussion (line 124 is inside `ceil_fn`). Consider updating this reference to the current location (or referencing the `FD12FD06` symbol instead of a brittle line number) so readers can jump to the right code.
+
+
+<!-- gh-id: 3185213402 -->
+### Copilot on [`doc/plans/plan-2026-05-04-05.md:61`](https://github.com/cmk/agogo/pull/77#discussion_r3185213402) (2026-05-04 23:55 UTC)
+
+nit: This plan references `crates/chan/src/conn/fixed.rs:169` for the `FD06->FD12` Conn overflow, but in the current `fixed.rs` line ~169 is an unrelated `fix_fix!` definition (the `FD12FD06` conn is defined a few lines later). Consider updating the line reference (or referring to `FD12FD06` by name) to keep the breadcrumb accurate.
+
+
+<!-- gh-id: 3185213414 -->
+### Copilot on [`crates/chan/src/channel/time.rs:171`](https://github.com/cmk/agogo/pull/77#discussion_r3185213414) (2026-05-04 23:55 UTC)
+
+`micro_to_samples` now recomputes the Pico-embeddable clamp bounds (`truncate(&FD12FD06, Pico(i64::{MIN,MAX}))`) on every call. Since this function is used in the RT scheduling path (`tick_stream_into`), consider hoisting these bounds into cached/static values (or otherwise computing them once) to avoid repeated Conn work on every audio buffer.
+
+<!-- gh-id: 4224363352 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-04 23:55 UTC](https://github.com/cmk/agogo/pull/77#pullrequestreview-4224363352))
+
+## Pull request overview
+
+Copilot reviewed 5 out of 5 changed files in this pull request and generated 3 comments.
+
+
+
+
+<!-- gh-id: 3185240096 -->
+#### ↳ cmk ([2026-05-05 00:04 UTC](https://github.com/cmk/agogo/pull/77#discussion_r3185240096))
+
+Fixed — replaced the brittle line reference with the `FD12FD06` symbol so the review breadcrumb survives local line drift.
+
+<!-- gh-id: 3185240715 -->
+#### ↳ cmk ([2026-05-05 00:04 UTC](https://github.com/cmk/agogo/pull/77#discussion_r3185240715))
+
+Fixed — the plan now references `FD12FD06` by name instead of a stale `fixed.rs` line number.
+
+<!-- gh-id: 3185241375 -->
+#### ↳ cmk ([2026-05-05 00:04 UTC](https://github.com/cmk/agogo/pull/77#discussion_r3185241375))
+
+Fixed — the RT path is back to cached constant bounds, and the property now uses `truncate(&FD12FD06, Pico(...))` to prove those constants match the connections API endpoints.

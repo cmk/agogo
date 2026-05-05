@@ -17,19 +17,20 @@
 //!    offset.
 
 use crate::channel::role::{AudioRole, ChannelCommon, CvRole, DinRole, MidiRole};
-use crate::conn::fixed::{FD12FD06, Micro, Pico};
+use crate::conn::fixed::{FD12FD06, Micro};
 use crate::conn::float::pico_to_samples;
 use crate::conn::tempo::Tempo;
 use crate::time::conn::tick_to_whole_samples;
 use crate::time::grid::Grid;
 use crate::time::swing;
 use crate::time::tick::{PPQN, Tick};
-use connections::conn::truncate;
 use connections::fixed::u64::I064U064;
 use core::fmt;
 
 /// Maximum positive delay before saturation: 300 ms = 300 000 µs.
 pub const MAX_DELAY: Micro = Micro(300_000);
+const PICO_SAFE_MICRO_MIN: Micro = Micro(i64::MIN / 1_000_000);
+const PICO_SAFE_MICRO_MAX: Micro = Micro(i64::MAX / 1_000_000);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ScheduleError {
@@ -165,9 +166,7 @@ pub struct ScheduledEvent {
 /// runtime scheduling total for out-of-band offsets without weakening
 /// the exact fixed-ladder `Conn` laws.
 pub fn micro_to_samples(m: Micro, sr: u32) -> Option<i64> {
-    let lo = truncate(&FD12FD06, Pico(i64::MIN));
-    let hi = truncate(&FD12FD06, Pico(i64::MAX));
-    let clamped = Micro(m.0.clamp(lo.0, hi.0));
+    let clamped = Micro(m.0.clamp(PICO_SAFE_MICRO_MIN.0, PICO_SAFE_MICRO_MAX.0));
     let pico = FD12FD06.inner(clamped);
     pico_to_samples(pico, sr)
 }
@@ -218,10 +217,12 @@ pub fn transform(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conn::fixed::Pico;
     use crate::time::arb::arb_grid;
     use crate::time::grid::Grid;
     use crate::time::swing::SwingConfig;
     use crate::time::tbase::TBase;
+    use connections::conn::truncate;
     use proptest::prelude::*;
 
     const SR_48K: u32 = 48_000;
@@ -499,10 +500,11 @@ mod tests {
             offset_us in prop_oneof![Just(i64::MIN), Just(i64::MAX)],
         ) {
             let expected_micro = if offset_us < 0 {
-                truncate(&FD12FD06, Pico(i64::MIN))
+                PICO_SAFE_MICRO_MIN
             } else {
-                truncate(&FD12FD06, Pico(i64::MAX))
+                PICO_SAFE_MICRO_MAX
             };
+            prop_assert_eq!(expected_micro, truncate(&FD12FD06, Pico(offset_us)));
             prop_assert_eq!(
                 super::micro_to_samples(Micro(offset_us), SR_48K),
                 super::micro_to_samples(expected_micro, SR_48K),
