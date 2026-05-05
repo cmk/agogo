@@ -36,3 +36,72 @@ Verification:
 
 The changes compile and the workspace tests pass. I did not identify any actionable correctness issues introduced by this diff.
 
+
+<!-- gh-id: 3186464012 -->
+### Copilot on [`crates/host-cpal/src/cpal.rs:260`](https://github.com/cmk/agogo/pull/80#discussion_r3186464012) (2026-05-05 06:36 UTC)
+
+`render_interleaved_output_chunks` zeroes the output buffer twice per callback (`interleaved.fill(...)` and then `output.fill(...)` for every chunk). Since the chunk loop covers the full buffer, the first fill is redundant and adds extra work on the realtime thread. Consider removing the outer fill (or the per-chunk fill) and only zeroing once, keeping the early-return path zeroing if needed.
+
+<!-- gh-id: 3186464092 -->
+### Copilot on [`crates/chan/src/sink/audio.rs:201`](https://github.com/cmk/agogo/pull/80#discussion_r3186464092) (2026-05-05 06:36 UTC)
+
+`AudioClickState::reset` resets `click_counter` and `filter_q15` but leaves `rng_state` untouched. If the transport stops and later restarts in the same process, the click accent pattern will restart from 0 while the noise sequence continues mid-stream, which undermines the stated goal of deterministic click rendering across start/stop cycles. Consider storing the initial seed in `AudioClickState` (or re-deriving it) and resetting `rng_state` in `reset` as well.
+
+<!-- gh-id: 4225775095 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-05 06:36 UTC](https://github.com/cmk/agogo/pull/80#pullrequestreview-4225775095))
+
+## Pull request overview
+
+This PR updates the generated (metronome/CV) audio-output path to target standard interleaved stereo (ch1-2) and tightens cpal stream selection to require an exact stereo f32 configuration. It also revises the audio click renderer to a deterministic filtered-noise timbre with per-channel state, and avoids allocating the MIDI SPSC ring for audio-only runs.
+
+**Changes:**
+- Switch cpal output-only streams from mono+fanout to strict interleaved stereo (2ch f32), rejecting mono-only and multichannel-only device configs.
+- Replace square-wave clicks with deterministic low-pass filtered noise and introduce per-audio-channel click state + lane (L/R) routing.
+- Avoid allocating the MIDI SPSC ring for audio-only runs by introducing a no-op MIDI sink, while preserving the existing ring path for MIDI/mixed runs.
+
+### Reviewed changes
+
+Copilot reviewed 10 out of 10 changed files in this pull request and generated 3 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| README.md | Updates project status/docs to reflect stereo generated output and L/R click channel behavior. |
+| doc/reviews/review-00080.md | Adds local review record for this PR’s changes. |
+| doc/plans/plan-2026-05-05-01.md | Adds the implementation plan + verification checklist for the stereo metronome cleanup. |
+| crates/host-cpal/src/cpal/callback.rs | Replaces the fixed SPSC producer field with a boxed `MidiSink` and adds `NoopMidiSink`. |
+| crates/host-cpal/src/cpal.rs | Enforces stereo output config and renders directly into interleaved output (removes mono fanout). |
+| crates/host-cpal/README.md | Updates backend documentation for stereo-only generated output behavior. |
+| crates/core/src/transport.rs | Adds per-channel audio click state + stereo lane routing and updates tests for stereo behavior. |
+| crates/cli/src/command/run.rs | Enforces max 2 audio click channels; avoids SPSC allocation when MIDI output is absent; sets stereo output config. |
+| crates/cli/src/command/demo.rs | Updates `CallbackState` construction to use the new `midi_sink` field. |
+| crates/chan/src/sink/audio.rs | Adds `AudioIo.output_channels`, introduces `AudioClickState`, and updates click/CV rendering for interleaved output. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3186464108 -->
+### Copilot on [`crates/host-cpal/README.md:7`](https://github.com/cmk/agogo/pull/80#discussion_r3186464108) (2026-05-05 06:36 UTC)
+
+The plan reference here appears inconsistent/ambiguous: this PR’s plan is `doc/plans/plan-2026-05-05-01.md`, but the README says “Plan 2026-05-04 metronome cleanup”. Please update the referenced plan identifier/date so readers can find the correct plan document.
+
+
+<!-- gh-id: 3186477204 -->
+#### ↳ cmk ([2026-05-05 06:39 UTC](https://github.com/cmk/agogo/pull/80#discussion_r3186477204))
+
+Fixed by removing the outer buffer fill while keeping the early-return zeroing path. The per-chunk fill remains the single normal-path clear.
+
+<!-- gh-id: 3186477932 -->
+#### ↳ cmk ([2026-05-05 06:40 UTC](https://github.com/cmk/agogo/pull/80#discussion_r3186477932))
+
+Fixed the reference to the committed plan identifier: Plan 2026-05-05-01.
+
+<!-- gh-id: 3186478654 -->
+#### ↳ cmk ([2026-05-05 06:40 UTC](https://github.com/cmk/agogo/pull/80#discussion_r3186478654))
+
+Leaving this as-is for this round per author direction. The important behavior here is stable channel identity and cutoff; restart-identical noise sequence is not required for the metronome cleanup.

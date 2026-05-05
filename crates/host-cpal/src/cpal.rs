@@ -244,8 +244,8 @@ fn render_interleaved_output_chunks(
     sample_rate: u32,
     cb: &mut dyn FnMut(&mut AudioIo),
 ) -> u64 {
-    interleaved.fill(0.0_f32); // PCM ABI
     if channels == 0 || scratch_frames == 0 {
+        interleaved.fill(0.0_f32); // PCM ABI
         return buffer_start_sample;
     }
 
