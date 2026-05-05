@@ -117,7 +117,7 @@ pub fn f64_bpm_to_tempo(b: f64) -> Tempo {
 /// is `I064U032.inner` (lossless).
 pub fn tempo_to_f64_bpm(t: Tempo) -> f64 {
     // PI-exempt.
-    let widened = I064U032.inner(t.0);
+    let widened = I064U032.upper(t.0);
     finite_or_unreachable(F064FD06.inner(Extended::Finite(FD06(widened))))
 }
 

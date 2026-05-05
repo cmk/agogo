@@ -9,7 +9,7 @@
 //! qualitatively different (correction loops, NaN/saturation handling,
 //! float-domain proof obligations), so they live in separate files.
 
-use connections::conn::{ViewL, ViewR};
+use connections::conn::{ConnL, ConnR};
 
 // Re-export the float-boundary primitive types so downstream crates
 // that don't depend on `connections` directly (cli, host-link) can
@@ -57,7 +57,7 @@ pub use float_boundary::*;
 // source's ±∞.
 macro_rules! float_conn {
     ($const_name:ident, $float:ty, $Rung:ident, $prec:expr) => {
-        connections::triple! {
+        connections::conn_k! {
             #[allow(non_camel_case_types)]
             #[derive(Copy, Clone, Debug, Default)]
             pub $const_name : ExtendedFloat<$float> => Extended<$Rung> {
@@ -178,15 +178,15 @@ macro_rules! float_conn {
             }
 
             pub fn ceil(self, x: ExtendedFloat<$float>) -> Extended<$Rung> {
-                <Self as ViewL<ExtendedFloat<$float>, Extended<$Rung>>>::L.ceil(x)
+                <Self as ConnL<ExtendedFloat<$float>, Extended<$Rung>>>::ceil(&self, x)
             }
 
             pub fn inner(self, x: Extended<$Rung>) -> ExtendedFloat<$float> {
-                <Self as ViewL<ExtendedFloat<$float>, Extended<$Rung>>>::L.inner(x)
+                <Self as ConnL<ExtendedFloat<$float>, Extended<$Rung>>>::upper(&self, x)
             }
 
             pub fn floor(self, x: ExtendedFloat<$float>) -> Extended<$Rung> {
-                <Self as ViewR<ExtendedFloat<$float>, Extended<$Rung>>>::R.floor(x)
+                <Self as ConnR<ExtendedFloat<$float>, Extended<$Rung>>>::floor(&self, x)
             }
         }
     };
@@ -368,37 +368,37 @@ mod tests {
 
                     #[test]
                     fn galois_l(a in $arb_src(), b in $arb_tgt()) {
-                        prop_assert!(laws::galois_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, a, b));
+                        prop_assert!(laws::galois_l(&$conn.conn_l(), a, b));
                     }
 
                     #[test]
                     fn galois_r(a in $arb_src(), b in $arb_tgt()) {
-                        prop_assert!(laws::galois_r(&<$conn as ViewR<ExtendedFloat<f64>, Extended<$Rung>>>::R, a, b));
+                        prop_assert!(laws::galois_r(&$conn.conn_r(), a, b));
                     }
 
                     #[test]
                     fn closure_l(a in $arb_src()) {
-                        prop_assert!(laws::closure_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, a));
+                        prop_assert!(laws::closure_l(&$conn.conn_l(), a));
                     }
 
                     #[test]
                     fn closure_r(a in $arb_src()) {
-                        prop_assert!(laws::closure_r(&<$conn as ViewR<ExtendedFloat<f64>, Extended<$Rung>>>::R, a));
+                        prop_assert!(laws::closure_r(&$conn.conn_r(), a));
                     }
 
                     #[test]
                     fn kernel_l(b in $arb_tgt()) {
-                        prop_assert!(laws::kernel_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, b));
+                        prop_assert!(laws::kernel_l(&$conn.conn_l(), b));
                     }
 
                     #[test]
                     fn kernel_r(b in $arb_tgt()) {
-                        prop_assert!(laws::kernel_r(&<$conn as ViewR<ExtendedFloat<f64>, Extended<$Rung>>>::R, b));
+                        prop_assert!(laws::kernel_r(&$conn.conn_r(), b));
                     }
 
                     #[test]
                     fn monotone_l(a1 in $arb_src(), a2 in $arb_src()) {
-                        prop_assert!(laws::monotone_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, a1, a2));
+                        prop_assert!(laws::monotone_l(&$conn.conn_l(), a1, a2));
                     }
 
                     // Idempotence: inner∘ceil is idempotent on its
@@ -408,7 +408,7 @@ mod tests {
                     // right comparison here.
                     #[test]
                     fn idempotent(a in $arb_src()) {
-                        prop_assert!(laws::idempotent_l(&<$conn as ViewL<ExtendedFloat<f64>, Extended<$Rung>>>::L, a));
+                        prop_assert!(laws::idempotent_l(&$conn.conn_l(), a));
                     }
                 }
 

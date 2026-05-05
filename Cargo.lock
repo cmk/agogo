@@ -304,7 +304,7 @@ dependencies = [
 [[package]]
 name = "connections"
 version = "0.0.0"
-source = "git+https://gitlab.com/cmk/connections.git?rev=73722d9e081df81737e486b92de26800e9cc5d66#73722d9e081df81737e486b92de26800e9cc5d66"
+source = "git+https://gitlab.com/cmk/connections.git?rev=5bcc4ed798c7c2e28fe7644da8b0278ee16068a2#5bcc4ed798c7c2e28fe7644da8b0278ee16068a2"
 dependencies = [
  "fixed",
  "proptest",

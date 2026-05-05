@@ -17,7 +17,7 @@
 //! adjoint too: `floor(MAX)` maps to `u8::MAX`, while lower values
 //! embed exactly.
 
-use connections::conn::{ViewL, ViewR};
+use connections::conn::{ConnL, ConnR};
 
 // ── U7 — 7-bit unsigned (0..=127). ──
 
@@ -96,7 +96,7 @@ fn u7u8_floor(x: U7) -> u8 {
     if x.0 == U7::MAX { u8::MAX } else { x.0 }
 }
 
-connections::triple! {
+connections::conn_k! {
     #[allow(non_camel_case_types)]
     #[derive(Copy, Clone, Debug, Default)]
     pub U007U008 : U7 => u8 {
@@ -108,15 +108,15 @@ connections::triple! {
 
 impl U007U008 {
     pub fn ceil(self, x: U7) -> u8 {
-        <Self as ViewL<U7, u8>>::L.ceil(x)
+        <Self as ConnL<U7, u8>>::ceil(&self, x)
     }
 
     pub fn inner(self, x: u8) -> U7 {
-        <Self as ViewL<U7, u8>>::L.inner(x)
+        <Self as ConnL<U7, u8>>::upper(&self, x)
     }
 
     pub fn floor(self, x: U7) -> u8 {
-        <Self as ViewR<U7, u8>>::R.floor(x)
+        <Self as ConnR<U7, u8>>::floor(&self, x)
     }
 }
 
@@ -132,7 +132,7 @@ fn u4u8_floor(x: U4) -> u8 {
     if x.0 == U4::MAX { u8::MAX } else { x.0 }
 }
 
-connections::triple! {
+connections::conn_k! {
     #[allow(non_camel_case_types)]
     #[derive(Copy, Clone, Debug, Default)]
     pub U004U008 : U4 => u8 {
@@ -144,15 +144,15 @@ connections::triple! {
 
 impl U004U008 {
     pub fn ceil(self, x: U4) -> u8 {
-        <Self as ViewL<U4, u8>>::L.ceil(x)
+        <Self as ConnL<U4, u8>>::ceil(&self, x)
     }
 
     pub fn inner(self, x: u8) -> U4 {
-        <Self as ViewL<U4, u8>>::L.inner(x)
+        <Self as ConnL<U4, u8>>::upper(&self, x)
     }
 
     pub fn floor(self, x: U4) -> u8 {
-        <Self as ViewR<U4, u8>>::R.floor(x)
+        <Self as ConnR<U4, u8>>::floor(&self, x)
     }
 }
 

@@ -4,9 +4,9 @@
 //!
 //! | Rust            | Haskell      | Public API                                |
 //! |-----------------|--------------|-------------------------------------------|
-//! | [`TICKTIME`]    | `ticks`      | marker with `ViewL<Tick, Time>` + `ViewR<Tick, Time>` |
-//! | [`TIMETIME`]    | `time`       | marker with `ViewL<(Time, Time), Time>` + `ViewR<(Time, Time), Time>` |
-//! | [`GRIDGRID`]    | `tbase`      | marker with `ViewL<(Grid, Grid), Grid>` + `ViewR<(Grid, Grid), Grid>` |
+//! | [`TICKTIME`]    | `ticks`      | marker with `ConnL<Tick, Time>` + `ConnR<Tick, Time>` |
+//! | [`TIMETIME`]    | `time`       | marker with `ConnL<(Time, Time), Time>` + `ConnR<(Time, Time), Time>` |
+//! | [`GRIDGRID`]    | `tbase`      | marker with `ConnL<(Grid, Grid), Grid>` + `ConnR<(Grid, Grid), Grid>` |
 //!
 //! Naming: per CLAUDE.md, Conn accessors are 8-char identifiers
 //! built from two 4-char side names. Single-type-side Conns
@@ -31,7 +31,7 @@
 //! connection between `Tick` and `Time`, so tests that need magnitude
 //! comparison use [`TICKTIME::inner`] explicitly.
 
-use connections::conn::{ViewL, ViewR};
+use connections::conn::{ConnL, ConnR};
 use connections::fixed::u64::{I064U064, U128U064};
 
 use crate::conn::rate::{
@@ -107,7 +107,7 @@ fn ticktime_floor(n: Tick) -> Time {
 // the nearest representable `Time`; values above the finite horizon
 // ceil to `End`. The right adjoint maps only `Tick::MAX` to `End`;
 // lower overflow ticks floor to the greatest finite `Time`.
-connections::triple! {
+connections::conn_k! {
     #[allow(non_camel_case_types)]
     #[derive(Copy, Clone, Debug, Default)]
     pub TICKTIME : Tick => Time {
@@ -119,15 +119,15 @@ connections::triple! {
 
 impl TICKTIME {
     pub fn ceil(self, x: Tick) -> Time {
-        <Self as ViewL<Tick, Time>>::L.ceil(x)
+        <Self as ConnL<Tick, Time>>::ceil(&self, x)
     }
 
     pub fn inner(self, x: Time) -> Tick {
-        <Self as ViewL<Tick, Time>>::L.inner(x)
+        <Self as ConnL<Tick, Time>>::upper(&self, x)
     }
 
     pub fn floor(self, x: Tick) -> Time {
-        <Self as ViewR<Tick, Time>>::R.floor(x)
+        <Self as ConnR<Tick, Time>>::floor(&self, x)
     }
 }
 
@@ -180,7 +180,7 @@ fn timetime_floor(ab: (Time, Time)) -> Time {
 // `ceil = join (LCM)`, `floor = meet (GCD)`, `inner = diagonal`.
 // `Time::End` is top. LCM overflow or finite-horizon misses map to
 // `End`, making the upper adjoint total instead of hiding the gap.
-connections::triple! {
+connections::conn_k! {
     #[allow(non_camel_case_types)]
     #[derive(Copy, Clone, Debug, Default)]
     pub TIMETIME : (Time, Time) => Time {
@@ -192,15 +192,15 @@ connections::triple! {
 
 impl TIMETIME {
     pub fn ceil(self, x: (Time, Time)) -> Time {
-        <Self as ViewL<(Time, Time), Time>>::L.ceil(x)
+        <Self as ConnL<(Time, Time), Time>>::ceil(&self, x)
     }
 
     pub fn inner(self, x: Time) -> (Time, Time) {
-        <Self as ViewL<(Time, Time), Time>>::L.inner(x)
+        <Self as ConnL<(Time, Time), Time>>::upper(&self, x)
     }
 
     pub fn floor(self, x: (Time, Time)) -> Time {
-        <Self as ViewR<(Time, Time), Time>>::R.floor(x)
+        <Self as ConnR<(Time, Time), Time>>::floor(&self, x)
     }
 }
 
@@ -222,7 +222,7 @@ fn gridgrid_floor(ab: (Grid, Grid)) -> Grid {
 
 // Divisibility-lattice connection on `Grid`. `ceil = join (LCM of
 // tick counts)`, `floor = meet (GCD)`, `inner = diagonal`.
-connections::triple! {
+connections::conn_k! {
     #[allow(non_camel_case_types)]
     #[derive(Copy, Clone, Debug, Default)]
     pub GRIDGRID : (Grid, Grid) => Grid {
@@ -234,15 +234,15 @@ connections::triple! {
 
 impl GRIDGRID {
     pub fn ceil(self, x: (Grid, Grid)) -> Grid {
-        <Self as ViewL<(Grid, Grid), Grid>>::L.ceil(x)
+        <Self as ConnL<(Grid, Grid), Grid>>::ceil(&self, x)
     }
 
     pub fn inner(self, x: Grid) -> (Grid, Grid) {
-        <Self as ViewL<(Grid, Grid), Grid>>::L.inner(x)
+        <Self as ConnL<(Grid, Grid), Grid>>::upper(&self, x)
     }
 
     pub fn floor(self, x: (Grid, Grid)) -> Grid {
-        <Self as ViewR<(Grid, Grid), Grid>>::R.floor(x)
+        <Self as ConnR<(Grid, Grid), Grid>>::floor(&self, x)
     }
 }
 
