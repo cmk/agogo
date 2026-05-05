@@ -4,7 +4,7 @@ cpal back-end for `agogo::chan::sink::audio::AudioHost`. This is the
 first platform-audio integration; v0.1 wires the audio-in path, and
 Plan 2026-05-02-06 added output-only support for the generated audio
 metronome test feature, Plan 2026-05-04-04 added the CV pulse MVP,
-and Plan 2026-05-04 metronome cleanup makes generated output
+and Plan 2026-05-05-01 metronome cleanup makes generated output
 stereo-only on ch1-2. Per-output CV/gate routing remains part of the
 heterogeneous output layer.
 
