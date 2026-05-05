@@ -238,7 +238,10 @@ pub fn run(args: &DemoArgs) -> Result<(), String> {
         },
         args.buffer_frames as usize,
     );
-    let mut state = CallbackState::<R048> { playhead, producer };
+    let mut state = CallbackState::<R048> {
+        playhead,
+        midi_sink: Box::new(producer),
+    };
 
     // Open audio host.
     let host = if args.audio_in == "default" {

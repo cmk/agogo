@@ -19,12 +19,13 @@ use thiserror::Error;
 use crate::channel::{AudioRole, CvRole, ScheduledEvent};
 
 const AUDIO_CLICK_ACCENT_EVERY: u32 = 4;
-const AUDIO_CLICK_NORMAL_FREQ_HZ: u32 = 1_200;
-const AUDIO_CLICK_ACCENT_FREQ_HZ: u32 = 1_800;
-const AUDIO_CLICK_NORMAL_AMP_Q15: i32 = 14_000;
-const AUDIO_CLICK_ACCENT_AMP_Q15: i32 = 24_000;
+const AUDIO_CLICK_NORMAL_AMP_Q15: i32 = 4_000;
+const AUDIO_CLICK_ACCENT_AMP_Q15: i32 = 7_000;
 const AUDIO_CLICK_MIN_FRAMES: usize = 24;
 const AUDIO_CLICK_MAX_FRAMES: usize = 960;
+const AUDIO_CLICK_MIN_CUTOFF_HZ: u32 = 200;
+const AUDIO_CLICK_MAX_CUTOFF_HZ: u32 = 8_000;
+const AUDIO_CLICK_CUTOFF_SPAN_HZ: u32 = AUDIO_CLICK_MAX_CUTOFF_HZ - AUDIO_CLICK_MIN_CUTOFF_HZ + 1;
 const CV_PULSE_POSITIVE: f32 = 1.0_f32; // PCM ABI
 const CV_PULSE_NEGATIVE: f32 = -1.0_f32; // PCM ABI
 
@@ -45,14 +46,11 @@ pub trait AudioHost {
 
 /// Per-buffer callback payload.
 ///
-/// **Channel layout.** `input` and `output` are mono in the current
-/// host shape. Audio click and MVP CV pulse rendering both write to
-/// this mono output slice. Multi-channel support arrives with
-/// v0.4's heterogeneous output work, at which point this struct gains
-/// explicit `input_channels` / `output_channels` fields and the
-/// buffers carry interleaved frames. Pattern matches against
-/// `AudioIo` should use `..` to ride the `#[non_exhaustive]`
-/// forward-compat.
+/// **Channel layout.** `input` is mono in the current host shape.
+/// `output` is interleaved when `output_channels > 1`; renderers
+/// interpret `frames` as the number of frames, not the raw output
+/// slice length. Pattern matches against `AudioIo` should use `..`
+/// to ride the `#[non_exhaustive]` forward-compat.
 ///
 /// Marked `#[non_exhaustive]` so v0.3's Link work can add a cpal
 /// `timestamp().playback` field without breaking downstream pattern
@@ -75,16 +73,17 @@ pub struct AudioIo<'a> {
     pub sample_rate: u32,
     /// Number of frames (samples per channel) in this buffer.
     pub frames: usize,
+    /// Number of interleaved output channels in `output`. Zero when
+    /// the stream has no output buffer.
+    pub output_channels: u16,
 }
 
 impl<'a> AudioIo<'a> {
     /// Construct an `AudioIo` for a back-end's per-buffer callback.
-    /// Back-ends (like `host-cpal`) use this rather than the struct
-    /// literal because `AudioIo` is `#[non_exhaustive]` for
-    /// forward-compat with future fields (see the struct doc for
-    /// the v0.3 Link timestamp rationale). When a new field lands,
-    /// this constructor's signature breaks intentionally so every
-    /// back-end is forced to acknowledge it.
+    /// This preserves the original mono-output shorthand; stereo
+    /// and other interleaved output paths must call
+    /// [`Self::with_output_channels`] so the frame layout is
+    /// explicit.
     pub fn new(
         input: &'a [f32],
         output: &'a mut [f32],
@@ -92,12 +91,32 @@ impl<'a> AudioIo<'a> {
         sample_rate: u32,
         frames: usize,
     ) -> Self {
+        let output_channels = if output.is_empty() { 0 } else { 1 };
+        Self::with_output_channels(
+            input,
+            output,
+            buffer_start_sample,
+            sample_rate,
+            frames,
+            output_channels,
+        )
+    }
+
+    pub fn with_output_channels(
+        input: &'a [f32],
+        output: &'a mut [f32],
+        buffer_start_sample: u64,
+        sample_rate: u32,
+        frames: usize,
+        output_channels: u16,
+    ) -> Self {
         Self {
             input,
             output,
             buffer_start_sample,
             sample_rate,
             frames,
+            output_channels,
         }
     }
 }
@@ -146,6 +165,40 @@ pub enum CvPulseShape {
 pub struct CvPulseState {
     shape: CvPulseShape,
     pending_bipolar_reset: bool,
+}
+
+/// Per-channel generated metronome-click state.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct AudioClickState {
+    click_counter: u32,
+    rng_state: u32,
+    filter_q15: i32,
+    cutoff_hz: u32,
+}
+
+impl AudioClickState {
+    pub const fn new(channel_index: usize) -> Self {
+        let seed = seed_for_channel(channel_index);
+        Self {
+            click_counter: 0,
+            rng_state: seed,
+            filter_q15: 0,
+            cutoff_hz: cutoff_for_seed(seed),
+        }
+    }
+
+    pub const fn click_counter(&self) -> u32 {
+        self.click_counter
+    }
+
+    pub const fn cutoff_hz(&self) -> u32 {
+        self.cutoff_hz
+    }
+
+    pub fn reset(&mut self) {
+        self.click_counter = 0;
+        self.filter_q15 = 0;
+    }
 }
 
 impl CvPulseState {
@@ -226,7 +279,8 @@ pub enum AudioHostError {
 pub fn render_audio_click_block(
     events: &[ScheduledEvent],
     role: &AudioRole,
-    click_counter: &mut u32,
+    state: &mut AudioClickState,
+    output_channel: usize,
     io: &mut AudioIo<'_>,
 ) {
     if io.output.is_empty() {
@@ -235,7 +289,11 @@ pub fn render_audio_click_block(
 
     match role {
         AudioRole::Click => {
-            let writable = io.output.len().min(io.frames);
+            let channels = usize::from(io.output_channels);
+            if channels == 0 || output_channel >= channels {
+                return;
+            }
+            let writable = io.frames.min(io.output.len() / channels);
             for ev in events {
                 let Some(offset) = ev.sample_index.checked_sub(io.buffer_start_sample) else {
                     continue;
@@ -244,9 +302,17 @@ pub fn render_audio_click_block(
                 if offset >= writable {
                     continue;
                 }
-                let accent = (*click_counter).is_multiple_of(AUDIO_CLICK_ACCENT_EVERY);
-                *click_counter = click_counter.wrapping_add(1);
-                render_one_click(offset, accent, io.sample_rate, &mut io.output[..writable]);
+                let accent = state.click_counter.is_multiple_of(AUDIO_CLICK_ACCENT_EVERY);
+                state.click_counter = state.click_counter.wrapping_add(1);
+                render_one_click(
+                    offset,
+                    output_channel,
+                    channels,
+                    accent,
+                    io.sample_rate,
+                    state,
+                    io.output,
+                );
             }
         }
     }
@@ -271,7 +337,11 @@ pub fn render_cv_pulse_block(
 
     match role {
         CvRole::Pulse => {
-            let writable = io.output.len().min(io.frames);
+            let channels = usize::from(io.output_channels);
+            if channels == 0 {
+                return;
+            }
+            let writable = io.frames.min(io.output.len() / channels);
             if writable == 0 {
                 return;
             }
@@ -280,7 +350,7 @@ pub fn render_cv_pulse_block(
                 if !cv_positive_at(cv_positive_samples, 0)
                     && !events_contain_sample(events, io.buffer_start_sample)
                 {
-                    write_cv_negative(&mut io.output[0]);
+                    write_cv_frame(&mut io.output[..], channels, 0, CV_PULSE_NEGATIVE);
                 }
                 state.pending_bipolar_reset = false;
             }
@@ -293,7 +363,7 @@ pub fn render_cv_pulse_block(
                 if offset >= writable {
                     continue;
                 }
-                write_cv_positive(&mut io.output[offset]);
+                write_cv_frame(&mut io.output[..], channels, offset, CV_PULSE_POSITIVE);
                 mark_cv_positive(cv_positive_samples, offset);
                 if state.shape == CvPulseShape::Bipolar {
                     let reset = offset + 1;
@@ -304,7 +374,7 @@ pub fn render_cv_pulse_block(
                         continue;
                     }
                     if reset < writable {
-                        write_cv_negative(&mut io.output[reset]);
+                        write_cv_frame(&mut io.output[..], channels, reset, CV_PULSE_NEGATIVE);
                     } else {
                         state.pending_bipolar_reset = true;
                     }
@@ -326,12 +396,12 @@ fn events_contain_sample(events: &[ScheduledEvent], sample_index: u64) -> bool {
         .is_ok()
 }
 
-fn write_cv_positive(dst: &mut f32) {
-    *dst = CV_PULSE_POSITIVE; // PCM ABI
-}
-
-fn write_cv_negative(dst: &mut f32) {
-    *dst = CV_PULSE_NEGATIVE; // PCM ABI
+fn write_cv_frame(output: &mut [f32], channels: usize, frame: usize, sample: f32) {
+    let start = frame.saturating_mul(channels);
+    let Some(dst) = output.get_mut(start..start.saturating_add(channels)) else {
+        return;
+    };
+    dst.fill(sample); // PCM ABI
 }
 
 fn mark_cv_positive(mask: &mut [bool], offset: usize) {
@@ -344,31 +414,36 @@ fn cv_positive_at(mask: &[bool], offset: usize) -> bool {
     mask.get(offset).copied().unwrap_or(false)
 }
 
-fn render_one_click(start: usize, accent: bool, sample_rate: u32, output: &mut [f32]) {
+fn render_one_click(
+    start: usize,
+    output_channel: usize,
+    channels: usize,
+    accent: bool,
+    sample_rate: u32,
+    state: &mut AudioClickState,
+    output: &mut [f32],
+) {
     let len = click_len(sample_rate);
-    let freq = if accent {
-        AUDIO_CLICK_ACCENT_FREQ_HZ
-    } else {
-        AUDIO_CLICK_NORMAL_FREQ_HZ
-    };
     let amp = if accent {
         AUDIO_CLICK_ACCENT_AMP_Q15
     } else {
         AUDIO_CLICK_NORMAL_AMP_Q15
     };
-    let half_period = (sample_rate / freq.saturating_mul(2)).max(1) as usize;
+    let alpha_q15 = lowpass_alpha_q15(state.cutoff_hz, sample_rate);
 
     for i in 0..len {
-        let Some(dst) = output.get_mut(start + i) else {
+        let frame = start + i;
+        let sample_index = frame
+            .saturating_mul(channels)
+            .saturating_add(output_channel);
+        let Some(dst) = output.get_mut(sample_index) else {
             break;
         };
         let envelope = (len - i) as i32;
-        let signed = if (i / half_period).is_multiple_of(2) {
-            amp
-        } else {
-            -amp
-        };
-        let sample_q15 = signed * envelope / len as i32;
+        let noise_q15 = next_noise_q15(state);
+        let delta = noise_q15 - state.filter_q15;
+        state.filter_q15 += (delta * alpha_q15) >> 15;
+        let sample_q15 = state.filter_q15 * amp / 32_768 * envelope / len as i32;
         mix_q15(dst, sample_q15);
     }
 }
@@ -387,6 +462,30 @@ fn mix_q15(dst: &mut f32, sample_q15: i32) {
 
 fn mix_pcm(dst: &mut f32, sample: f32) {
     *dst = (*dst + sample).clamp(-1.0_f32, 1.0_f32); // PCM ABI
+}
+
+const fn seed_for_channel(channel_index: usize) -> u32 {
+    let n = channel_index as u32;
+    let seed = 0x9E37_79B9_u32 ^ n.wrapping_mul(0x85EB_CA6B);
+    if seed == 0 { 0xA5A5_5A5A } else { seed }
+}
+
+const fn cutoff_for_seed(seed: u32) -> u32 {
+    AUDIO_CLICK_MIN_CUTOFF_HZ + seed % AUDIO_CLICK_CUTOFF_SPAN_HZ
+}
+
+fn lowpass_alpha_q15(cutoff_hz: u32, sample_rate: u32) -> i32 {
+    let denom = cutoff_hz.saturating_add(sample_rate).max(1);
+    ((u64::from(cutoff_hz) * 32_768) / u64::from(denom)) as i32
+}
+
+fn next_noise_q15(state: &mut AudioClickState) -> i32 {
+    let mut x = state.rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    state.rng_state = if x == 0 { 0xA5A5_5A5A } else { x };
+    ((state.rng_state >> 16) as i32) - 32_768
 }
 
 #[cfg(test)]
@@ -447,12 +546,12 @@ mod tests {
         let input: [f32; 0] = []; // PCM ABI
         let mut output = vec![0.0_f32; 128]; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 1_000, 48_000, 128);
-        let mut counter = 0;
+        let mut state = AudioClickState::new(0);
 
-        render_audio_click_block(&[event(1_010)], &AudioRole::Click, &mut counter, &mut io);
+        render_audio_click_block(&[event(1_010)], &AudioRole::Click, &mut state, 0, &mut io);
 
         assert!(io.output.iter().any(|&s| s != 0.0));
-        assert_eq!(counter, 1);
+        assert_eq!(state.click_counter(), 1);
     }
 
     #[test]
@@ -460,17 +559,18 @@ mod tests {
         let input: [f32; 0] = []; // PCM ABI
         let mut output = vec![0.0_f32; 64]; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 1_000, 48_000, 64);
-        let mut counter = 0;
+        let mut state = AudioClickState::new(0);
 
         render_audio_click_block(
             &[event(999), event(1_064)],
             &AudioRole::Click,
-            &mut counter,
+            &mut state,
+            0,
             &mut io,
         );
 
         assert!(io.output.iter().all(|&s| s == 0.0));
-        assert_eq!(counter, 0);
+        assert_eq!(state.click_counter(), 0);
     }
 
     #[test]
@@ -478,18 +578,18 @@ mod tests {
         let input: [f32; 0] = []; // PCM ABI
         let mut accent_output = vec![0.0_f32; 64]; // PCM ABI
         let mut normal_output = vec![0.0_f32; 64]; // PCM ABI
-        let mut counter = 0;
+        let mut state = AudioClickState::new(0);
 
         {
             let mut io = AudioIo::new(&input, &mut accent_output, 0, 48_000, 64);
-            render_audio_click_block(&[event(0)], &AudioRole::Click, &mut counter, &mut io);
+            render_audio_click_block(&[event(0)], &AudioRole::Click, &mut state, 0, &mut io);
         }
         {
             let mut io = AudioIo::new(&input, &mut normal_output, 0, 48_000, 64);
-            render_audio_click_block(&[event(0)], &AudioRole::Click, &mut counter, &mut io);
+            render_audio_click_block(&[event(0)], &AudioRole::Click, &mut state, 0, &mut io);
         }
 
-        assert_eq!(counter, 2);
+        assert_eq!(state.click_counter(), 2);
         assert!(accent_output[0].abs() > normal_output[0].abs());
     }
 
@@ -500,23 +600,52 @@ mod tests {
         let mut combined = vec![0.0_f32; 500]; // PCM ABI
         let mut split = vec![0.0_f32; 500]; // PCM ABI
 
-        let mut combined_counter = 0;
+        let mut combined_state = AudioClickState::new(0);
         {
             let mut io = AudioIo::new(&input, &mut combined, 0, 48_000, 500);
-            render_audio_click_block(&events, &AudioRole::Click, &mut combined_counter, &mut io);
+            render_audio_click_block(&events, &AudioRole::Click, &mut combined_state, 0, &mut io);
         }
 
-        let mut split_counter = 0;
+        let mut split_state = AudioClickState::new(0);
         {
             let (left, right) = split.split_at_mut(240);
             let mut io = AudioIo::new(&input, left, 0, 48_000, 240);
-            render_audio_click_block(&events, &AudioRole::Click, &mut split_counter, &mut io);
+            render_audio_click_block(&events, &AudioRole::Click, &mut split_state, 0, &mut io);
             let mut io = AudioIo::new(&input, right, 240, 48_000, 260);
-            render_audio_click_block(&events, &AudioRole::Click, &mut split_counter, &mut io);
+            render_audio_click_block(&events, &AudioRole::Click, &mut split_state, 0, &mut io);
         }
 
-        assert_eq!(combined_counter, split_counter);
+        assert_eq!(combined_state.click_counter(), split_state.click_counter());
         assert_eq!(combined, split);
+    }
+
+    #[test]
+    fn audio_click_writes_only_selected_stereo_lane() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 128]; // PCM ABI
+        let mut io = AudioIo::with_output_channels(&input, &mut output, 0, 48_000, 64, 2);
+        let mut state = AudioClickState::new(1);
+
+        render_audio_click_block(&[event(0)], &AudioRole::Click, &mut state, 1, &mut io);
+
+        assert!(io.output.chunks_exact(2).any(|frame| frame[1] != 0.0));
+        assert!(io.output.chunks_exact(2).all(|frame| frame[0] == 0.0));
+    }
+
+    #[test]
+    fn audio_click_cutoff_is_stable_and_in_range() {
+        let left = AudioClickState::new(0);
+        let left_again = AudioClickState::new(0);
+        let right = AudioClickState::new(1);
+
+        assert_eq!(left.cutoff_hz(), left_again.cutoff_hz());
+        assert_ne!(left.cutoff_hz(), right.cutoff_hz());
+        assert!(
+            (AUDIO_CLICK_MIN_CUTOFF_HZ..=AUDIO_CLICK_MAX_CUTOFF_HZ).contains(&left.cutoff_hz())
+        );
+        assert!(
+            (AUDIO_CLICK_MIN_CUTOFF_HZ..=AUDIO_CLICK_MAX_CUTOFF_HZ).contains(&right.cutoff_hz())
+        );
     }
 
     #[test]
@@ -545,6 +674,21 @@ mod tests {
 
         assert_eq!(io.output[3], 1.0);
         assert_eq!(io.output[4], -1.0);
+        assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 2);
+    }
+
+    #[test]
+    fn cv_pulse_writes_dual_mono_in_stereo_output() {
+        let input: [f32; 0] = []; // PCM ABI
+        let mut output = vec![0.0_f32; 16]; // PCM ABI
+        let mut io = AudioIo::with_output_channels(&input, &mut output, 10, 48_000, 8, 2);
+        let mut state = CvPulseState::new(CvPulseShape::Monopolar);
+        let mut mask = cv_mask(8);
+
+        render_cv_pulse_block(&[event(13)], &CvRole::Pulse, &mut state, &mut mask, &mut io);
+
+        assert_eq!(io.output[6], 1.0);
+        assert_eq!(io.output[7], 1.0);
         assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 2);
     }
 

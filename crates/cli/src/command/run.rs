@@ -47,7 +47,7 @@ use agogo::chan::control::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSe
 use agogo::chan::sink::audio::{AudioHost, AudioIo, Config};
 use agogo::core::{Playhead, PlayheadStopHandle, TransportPolicy};
 use agogo::host::cpal::CpalHost;
-use agogo::host::cpal::callback::CallbackState;
+use agogo::host::cpal::callback::{CallbackState, NoopMidiSink};
 use agogo::host::cpal::control::spsc;
 use agogo::host::link::{
     HostTimeAnchor, LinkPhaseSource, LinkSession, LinkSessionHandle, LinkWriteConfig, Quantum,
@@ -247,6 +247,19 @@ fn channel_mix(channels: &[Channel]) -> ChannelMix {
     }
 }
 
+fn validate_audio_click_channel_count(channels: &[Channel]) -> Result<(), String> {
+    let n = channels
+        .iter()
+        .filter(|ch| matches!(ch, Channel::Audio { .. }))
+        .count();
+    if n <= 2 {
+        return Ok(());
+    }
+    Err(format!(
+        "generated audio metronome supports at most 2 audio click channels for stereo ch1-2; got {n}"
+    ))
+}
+
 fn single_target_output_request(
     named: &[(String, agogo::chan::channel::spec::ChannelSpec)],
     mut matches_target: impl FnMut(&ChannelSpecRole) -> bool,
@@ -297,10 +310,11 @@ macro_rules! def_run_with_rate {
         );
     }
 
-    // SPSC + optional MIDI drain thread.
-    let (producer, consumer) = spsc(1024);
-    let dropped_handle = producer.dropped_handle();
-    let (midi_port_name, drain, undrained_consumer) = if let Some(request) = midi_port_request {
+    validate_audio_click_channel_count(&channels)?;
+
+    // SPSC + MIDI drain thread only exist when MIDI output exists.
+    let (midi_port_name, drain, dropped_handle, midi_sink) =
+        if let Some(request) = midi_port_request {
         let midi_port_name = if request == "default" {
             MidirSink::list_output_ports()
                 .map_err(|e| format!("midi enumeration: {e}"))?
@@ -319,13 +333,21 @@ macro_rules! def_run_with_rate {
                 .map_err(|e| format!("midi open `{midi_port_name}`: {e}"))?,
         );
         let drain_sink: Arc<dyn agogo::chan::sink::midi::MidiSink + Send + Sync> = sink;
+        let (producer, consumer) = spsc(1024);
+        let dropped_handle = producer.dropped_handle();
         (
             Some(midi_port_name),
             Some(consumer.spawn_drain(drain_sink)),
-            None,
+            Some(dropped_handle),
+            Box::new(producer) as Box<dyn agogo::chan::sink::midi::MidiSink + Send>,
         )
     } else {
-        (None, None, Some(consumer))
+        (
+            None,
+            None,
+            None,
+            Box::new(NoopMidiSink) as Box<dyn agogo::chan::sink::midi::MidiSink + Send>,
+        )
     };
 
     // Build PhaseSource per --source. Link case mints a
@@ -405,7 +427,7 @@ macro_rules! def_run_with_rate {
         args.buffer_frames as usize,
     );
     let stop_handle = playhead.stop_handle();
-    let mut state = CallbackState::<$Rate> { playhead, producer };
+    let mut state = CallbackState::<$Rate> { playhead, midi_sink };
 
     // Open audio host. MIDI-only runs preserve the existing input
     // stream timing source; generated audio/CV output runs use
@@ -427,7 +449,7 @@ macro_rules! def_run_with_rate {
                 sample_rate: args.sr,
                 buffer_frames: args.buffer_frames,
                 input_channels: 0,
-                output_channels: 1,
+                output_channels: 2,
             },
             format!("audio out: {request}"),
         )
@@ -509,15 +531,16 @@ macro_rules! def_run_with_rate {
 
     drop(stream_handle); // pause cpal stream
     drop(drain); // flush ring + join optional MIDI drain thread
-    drop(undrained_consumer);
 
-    let dropped = dropped_handle.load(Ordering::Acquire);
-    if dropped > 0 {
-        eprintln!(
-            "warning: {} MIDI message(s) dropped (SPSC overrun); investigate \
-             ring capacity",
-            dropped
-        );
+    if let Some(dropped_handle) = dropped_handle {
+        let dropped = dropped_handle.load(Ordering::Acquire);
+        if dropped > 0 {
+            eprintln!(
+                "warning: {} MIDI message(s) dropped (SPSC overrun); investigate \
+                 ring capacity",
+                dropped
+            );
+        }
     }
     eprintln!("agogo run: clean exit");
     Ok(())
@@ -722,6 +745,39 @@ mod tests {
                 has_audio_output: true,
             }
         );
+    }
+
+    #[test]
+    fn run_accepts_two_audio_click_channels() {
+        let named = agogo::chan::channel::spec::parse_channels(&[
+            "dev=audio,mode=click,grid=t2t".into(),
+            "dev=audio,mode=click,grid=t2".into(),
+        ])
+        .unwrap();
+        let channels: Vec<Channel> = named
+            .into_iter()
+            .map(|(_, spec)| spec.into_channel().unwrap())
+            .collect();
+
+        assert!(validate_audio_click_channel_count(&channels).is_ok());
+    }
+
+    #[test]
+    fn run_rejects_three_audio_click_channels() {
+        let named = agogo::chan::channel::spec::parse_channels(&[
+            "dev=audio,mode=click,grid=t2t".into(),
+            "dev=audio,mode=click,grid=t2".into(),
+            "dev=audio,mode=click,grid=t4".into(),
+        ])
+        .unwrap();
+        let channels: Vec<Channel> = named
+            .into_iter()
+            .map(|(_, spec)| spec.into_channel().unwrap())
+            .collect();
+
+        let err = validate_audio_click_channel_count(&channels).unwrap_err();
+
+        assert!(err.contains("at most 2 audio click channels"), "got: {err}");
     }
 
     #[test]

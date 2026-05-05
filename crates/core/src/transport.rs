@@ -30,7 +30,9 @@ use crate::conn::rate::{R044, R048, R088, R096, R176, R192, SampleRate};
 use crate::conn::tempo::Tempo;
 use crate::control::PhaseSource;
 use crate::event::tick_stream_into;
-use crate::sink::audio::{AudioIo, CvPulseState, render_audio_click_block, render_cv_pulse_block};
+use crate::sink::audio::{
+    AudioClickState, AudioIo, CvPulseState, render_audio_click_block, render_cv_pulse_block,
+};
 use crate::sink::midi::{MidiRtByte, MidiSink, render_midi_channel};
 
 const COMMAND_TRANSPORT_CAPACITY: usize = 128;
@@ -81,10 +83,13 @@ pub struct Playhead<R> {
     /// counter parameter; advanced once per emitted Note On. Reset
     /// to 0 when transport stops.
     click_counters: Vec<u32>,
-    /// Per-channel emitted-click counter for fixed audio-click
-    /// accents. Index parallels `channels`; meaningful only for
-    /// `Channel::Audio { role: AudioRole::Click }` channels.
-    audio_click_counters: Vec<u32>,
+    /// Per-channel generated audio-click state. Index parallels
+    /// `channels`; meaningful only for `Channel::Audio { role:
+    /// AudioRole::Click }` channels.
+    audio_click_states: Vec<AudioClickState>,
+    /// Stereo lane for each audio-click channel by audio-channel
+    /// order. Non-audio slots carry 0 and are ignored.
+    audio_click_lanes: Vec<usize>,
     /// Per-channel CV pulse renderer state. Index parallels
     /// `channels`; meaningful only for `Channel::Cv { role:
     /// CvRole::Pulse }` channels.
@@ -374,6 +379,22 @@ impl<R> Playhead<R> {
     ) -> Self {
         let cap = crate::event::max_events_for_buffer(buffer_frames);
         let n = channels.len();
+        let mut next_audio_index = 0usize;
+        let mut audio_click_states = Vec::with_capacity(n);
+        let audio_click_lanes = channels
+            .iter()
+            .map(|ch| {
+                if matches!(ch, Channel::Audio { .. }) {
+                    let audio_index = next_audio_index;
+                    next_audio_index += 1;
+                    audio_click_states.push(AudioClickState::new(audio_index));
+                    audio_index % 2
+                } else {
+                    audio_click_states.push(AudioClickState::new(0));
+                    0
+                }
+            })
+            .collect();
         Self {
             channels,
             phase_source,
@@ -383,7 +404,8 @@ impl<R> Playhead<R> {
             events_pool: Vec::with_capacity(cap),
             bar_counters: vec![0; n],
             click_counters: vec![0; n],
-            audio_click_counters: vec![0; n],
+            audio_click_states,
+            audio_click_lanes,
             cv_pulse_states: vec![CvPulseState::bipolar(); n],
             cv_positive_mask: vec![false; buffer_frames],
             stop_flag: Arc::new(AtomicBool::new(false)),
@@ -540,7 +562,9 @@ impl<R> Playhead<R> {
         if !self.transport.running {
             self.bar_counters.iter_mut().for_each(|c| *c = 0);
             self.click_counters.iter_mut().for_each(|c| *c = 0);
-            self.audio_click_counters.iter_mut().for_each(|c| *c = 0);
+            self.audio_click_states
+                .iter_mut()
+                .for_each(AudioClickState::reset);
             self.cv_pulse_states
                 .iter_mut()
                 .for_each(CvPulseState::reset);
@@ -611,7 +635,8 @@ impl<R> Playhead<R> {
                         render_audio_click_block(
                             &self.events_pool,
                             role,
-                            &mut self.audio_click_counters[idx],
+                            &mut self.audio_click_states[idx],
+                            self.audio_click_lanes[idx],
                             io,
                         );
                     }
@@ -821,8 +846,36 @@ mod tests {
         buffer_frames: usize,
         n_buffers: u64,
     ) -> Vec<f32> {
+        render_audio_trace_48k_channels(vec![channel], bpm, buffer_frames, n_buffers)
+    }
+
+    fn render_audio_trace_48k_channels(
+        channels: Vec<Channel>,
+        bpm: Tempo,
+        buffer_frames: usize,
+        n_buffers: u64,
+    ) -> Vec<f32> {
+        render_audio_trace_48k_channels_with_output(channels, bpm, buffer_frames, n_buffers, 1)
+    }
+
+    fn render_audio_trace_48k_stereo_channels(
+        channels: Vec<Channel>,
+        bpm: Tempo,
+        buffer_frames: usize,
+        n_buffers: u64,
+    ) -> Vec<f32> {
+        render_audio_trace_48k_channels_with_output(channels, bpm, buffer_frames, n_buffers, 2)
+    }
+
+    fn render_audio_trace_48k_channels_with_output(
+        channels: Vec<Channel>,
+        bpm: Tempo,
+        buffer_frames: usize,
+        n_buffers: u64,
+        output_channels: u16,
+    ) -> Vec<f32> {
         let mut playhead = Playhead::<R048>::new(
-            vec![channel],
+            channels,
             PhaseSource::Internal { bpm },
             48_000,
             bpm,
@@ -833,17 +886,19 @@ mod tests {
         );
         let sink = TestSink::new();
         let input = vec![0.0_f32; buffer_frames]; // PCM ABI
-        let mut output = vec![0.0_f32; buffer_frames]; // PCM ABI
-        let mut trace = Vec::with_capacity(buffer_frames * n_buffers as usize);
+        let samples_per_buffer = buffer_frames * usize::from(output_channels);
+        let mut output = vec![0.0_f32; samples_per_buffer]; // PCM ABI
+        let mut trace = Vec::with_capacity(samples_per_buffer * n_buffers as usize);
 
         for b in 0..n_buffers {
             output.fill(0.0_f32); // PCM ABI
-            let mut io = AudioIo::new(
+            let mut io = AudioIo::with_output_channels(
                 &input,
                 &mut output,
                 b * buffer_frames as u64,
                 48_000,
                 buffer_frames,
+                output_channels,
             );
             playhead.on_buffer(&mut io, &sink);
             trace.extend_from_slice(&output);
@@ -1485,6 +1540,47 @@ mod tests {
         }
     }
 
+    #[test]
+    fn readme_three_two_audio_clicks_share_barline_sample() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let frames = 1_024usize;
+        let n_buffers = 188u64; // Two bars at 48 kHz / 120 BPM.
+        let stereo = render_audio_trace_48k_stereo_channels(
+            vec![
+                audio_click_channel(Grid::T2T, None),
+                audio_click_channel(Grid::T2, None),
+            ],
+            bpm,
+            frames,
+            n_buffers,
+        );
+
+        // T2T emits at 0, 32000, 64000, 96000; T2 emits at 0,
+        // 48000, 96000. The shared barline must start on the exact
+        // same frame in both stereo lanes, not adjacent separated
+        // impulses.
+        let before = 95_999 * 2;
+        let barline = 96_000 * 2;
+        assert_eq!(stereo[before], 0.0);
+        assert_eq!(stereo[before + 1], 0.0);
+        assert_ne!(stereo[barline], 0.0);
+        assert_ne!(stereo[barline + 1], 0.0);
+    }
+
+    #[test]
+    fn one_audio_click_channel_is_left_only_in_stereo_output() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let stereo = render_audio_trace_48k_stereo_channels(
+            vec![audio_click_channel(Grid::T4, None)],
+            bpm,
+            1_024,
+            24,
+        );
+
+        assert!(stereo.chunks_exact(2).any(|frame| frame[0] != 0.0));
+        assert!(stereo.chunks_exact(2).all(|frame| frame[1] == 0.0));
+    }
+
     fn cv_pulse_channel(divider: Grid, bar_multiplier: Option<NonZeroU16>) -> Channel {
         cv_pulse_channel_with_delay(divider, bar_multiplier, Micro::ZERO)
     }
@@ -1564,7 +1660,7 @@ mod tests {
         playhead.on_buffer(&mut io, &sink);
 
         assert!(io.output.iter().any(|&s| s != 0.0));
-        assert_eq!(playhead.audio_click_counters[0], 1);
+        assert_eq!(playhead.audio_click_states[0].click_counter(), 1);
     }
 
     #[test]
@@ -1590,6 +1686,22 @@ mod tests {
         assert_eq!(io.output[0], 1.0);
         assert_eq!(io.output[1], -1.0);
         assert_eq!(io.output.iter().filter(|&&s| s != 0.0).count(), 2);
+    }
+
+    #[test]
+    fn cv_pulse_channel_writes_dual_mono_in_stereo_output() {
+        let bpm = Tempo::from_bpm_integer(120);
+        let stereo = render_audio_trace_48k_stereo_channels(
+            vec![cv_pulse_channel(Grid::T4, None)],
+            bpm,
+            24_000,
+            1,
+        );
+
+        assert_eq!(stereo[0], 1.0);
+        assert_eq!(stereo[1], 1.0);
+        assert_eq!(stereo[2], -1.0);
+        assert_eq!(stereo[3], -1.0);
     }
 
     #[test]
@@ -1840,13 +1952,13 @@ mod tests {
         let mut output = vec![0.0_f32; 24_000]; // PCM ABI
         let mut io = AudioIo::new(&input, &mut output, 0, 48_000, 24_000);
         playhead.on_buffer(&mut io, &sink);
-        assert!(playhead.audio_click_counters[0] > 0);
+        assert!(playhead.audio_click_states[0].click_counter() > 0);
 
         playhead.stop_handle().request_stop();
         let mut io = AudioIo::new(&input, &mut output, 24_000, 48_000, 24_000);
         playhead.on_buffer(&mut io, &sink);
 
-        assert_eq!(playhead.audio_click_counters[0], 0);
+        assert_eq!(playhead.audio_click_states[0].click_counter(), 0);
     }
 
     /// Plan 2026-04-25-03 spot check: `bar_multiplier` interacts

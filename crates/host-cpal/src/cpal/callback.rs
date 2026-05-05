@@ -1,18 +1,19 @@
 //! Audio callback hot loop — `CallbackState::on_buffer`.
 //!
 //! This is a thin wrapper around an N-channel
-//! [`agogo::core::Playhead`] plus the [`RtProducer`] that
-//! pushes onto the SPSC ring. All scheduling +
+//! [`agogo::core::Playhead`] plus a MIDI sink. MIDI runs use an
+//! [`RtProducer`] that pushes onto the SPSC ring; audio-only runs
+//! use [`NoopMidiSink`] and allocate no ring. All scheduling +
 //! rendering logic now lives inside `Playhead::on_buffer`; the
-//! callback is left with `feed → schedule → render → enqueue`
-//! reduced to one delegating call.
+//! callback is left with one delegating call.
 //!
 //! No allocation, no locks. The audio thread spends time only in
-//! integer arithmetic and one ring-buffer push per emitted event.
+//! integer arithmetic and, for MIDI runs, one ring-buffer push per
+//! emitted event.
 
-use crate::cpal::control::RtProducer;
 use agogo::chan::conn::rate::{R044, R048, R088, R096, R176, R192};
 use agogo::chan::sink::audio::AudioIo;
+use agogo::chan::sink::midi::{MidiSink, MidiTimingCapabilities, MidiTimingCapability};
 use agogo::core::Playhead;
 
 /// State the audio thread owns by-value across the stream's
@@ -27,9 +28,22 @@ pub struct CallbackState<R> {
     /// N-channel orchestrator. Owns channels, phase source,
     /// transport policy, and the per-channel scratch buffer.
     pub playhead: Playhead<R>,
-    /// SPSC producer onto the drain thread's ring. `Playhead`
-    /// renders via this sink (`RtProducer: MidiSink`).
-    pub producer: RtProducer,
+    /// MIDI event sink used by `Playhead`. MIDI-capable runs use an
+    /// SPSC producer onto the drain thread's ring; audio-only runs
+    /// use [`NoopMidiSink`] and allocate no ring.
+    pub midi_sink: Box<dyn MidiSink + Send>,
+}
+
+pub struct NoopMidiSink;
+
+impl MidiSink for NoopMidiSink {
+    fn send_at(&self, _msg: &[u8], _sample_index: u64) {}
+}
+
+impl MidiTimingCapabilities for NoopMidiSink {
+    fn timing_capability(&self) -> MidiTimingCapability {
+        MidiTimingCapability::best_effort("noop-midi")
+    }
 }
 
 macro_rules! impl_callback_state_rate {
@@ -43,7 +57,7 @@ macro_rules! impl_callback_state_rate {
             /// parameter. `TransportPolicy` (Internal / LinkDriven / Scripted)
             /// decides what byte (if any) to emit each buffer.
             pub fn on_buffer(&mut self, io: &mut AudioIo) {
-                self.playhead.on_buffer(io, &self.producer);
+                self.playhead.on_buffer(io, self.midi_sink.as_ref());
             }
         }
     };
@@ -108,7 +122,10 @@ mod tests {
             },
             frames,
         );
-        let state = CallbackState::<R048> { playhead, producer };
+        let state = CallbackState::<R048> {
+            playhead,
+            midi_sink: Box::new(producer),
+        };
         (state, consumer)
     }
 
