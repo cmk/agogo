@@ -23,9 +23,7 @@ use agogo::chan::time::grid::Grid;
 use agogo::chan::time::swing::SwingConfig;
 use agogo::chan::time::tbase::TBase;
 use agogo::chan::time::tick::Tick;
-use agogo::core::{
-    OfflinePcm, OfflineRenderConfig, OfflineRenderError, render_offline_capture,
-};
+use agogo::core::{OfflinePcm, OfflineRenderConfig, OfflineRenderError, render_offline_capture};
 
 use proptest::prelude::*;
 
@@ -87,7 +85,11 @@ fn predict_onsets(grid: Grid, bpm: Tempo, sr: u32, total_frames: u64) -> Vec<u64
 /// `mask[i]` is true iff `i` is inside the predicted footprint
 /// `[onset, onset + click_len)` of any onset in `onsets` (clamped
 /// to `total_frames`).
-fn predicted_footprint_mask(onsets: &[u64], click_len_samples: usize, total_frames: u64) -> Vec<bool> {
+fn predicted_footprint_mask(
+    onsets: &[u64],
+    click_len_samples: usize,
+    total_frames: u64,
+) -> Vec<bool> {
     let n = total_frames as usize;
     let mut mask = vec![false; n];
     for &o in onsets {
@@ -136,8 +138,15 @@ fn render_lanes_ok(
     buffer_frames: u32,
     total_frames: u64,
 ) -> OfflinePcm {
-    let (pcm, _) = render_lanes(channels, output_channels, bpm, sr, buffer_frames, total_frames)
-        .expect("render_offline_capture should succeed for valid inputs");
+    let (pcm, _) = render_lanes(
+        channels,
+        output_channels,
+        bpm,
+        sr,
+        buffer_frames,
+        total_frames,
+    )
+    .expect("render_offline_capture should succeed for valid inputs");
     pcm
 }
 
