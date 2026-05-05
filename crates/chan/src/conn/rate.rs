@@ -49,7 +49,7 @@
 //! Plus one `Conn<FD12, Rxx>` per rate connecting the sample tier to
 //! the decimal SI-time tier from [`crate::conn::fixed`].
 //! Each `Rxx` type also has an explicit transparent iso to
-//! `FixedI64<U16>` (`R048Q016`) and a composed left connection to
+//! `FixedI64<U16>` (`R048Q016`) and a composed left connection const to
 //! whole `i64` sample counts (`R048I064`). Call sites that need a
 //! semantic sample-count conversion use those named conns; raw Q48.16
 //! representation access stays on the newtype.
@@ -330,25 +330,11 @@ macro_rules! sample_q016_conn {
 
 macro_rules! sample_i064_conn {
     ($CONN:ident, $Rate:ident, $Q016:ident) => {
-        pub struct $CONN;
-
-        impl ViewL<$Rate, i64> for $CONN {
-            const L: connections::conn::ConnL<$Rate, i64> = connections::compose_l!(
-                <$Q016 as ViewL<$Rate, Q48_16>>::L,
-                <Q016Q000 as ViewL<Q48_16, Q64_0>>::L,
-                <Q000I064 as ViewL<Q64_0, i64>>::L,
-            );
-        }
-
-        impl $CONN {
-            pub fn ceil(self, x: $Rate) -> i64 {
-                <Self as ViewL<$Rate, i64>>::L.ceil(x)
-            }
-
-            pub fn inner(self, x: i64) -> $Rate {
-                <Self as ViewL<$Rate, i64>>::L.inner(x)
-            }
-        }
+        pub const $CONN: connections::conn::ConnL<$Rate, i64> = connections::compose_l!(
+            <$Q016 as ViewL<$Rate, Q48_16>>::L,
+            <Q016Q000 as ViewL<Q48_16, Q64_0>>::L,
+            <Q000I064 as ViewL<Q64_0, i64>>::L,
+        );
     };
 }
 
@@ -706,13 +692,41 @@ mod tests {
                 cases: 64,
             }
 
-            connections::law_battery! {
-                mod $l_mod,
-                conn: $whole,
-                fine: any::<i64>().prop_map($Rate::from_bits),
-                coarse: any::<i64>(),
-                subset: l_only,
-                cases: 64,
+            mod $l_mod {
+                use super::*;
+                use connections::prop::conn as laws;
+
+                proptest! {
+                    #![proptest_config(ProptestConfig { cases: 64, .. ProptestConfig::default() })]
+
+                    #[test]
+                    fn galois_l(a in any::<i64>().prop_map($Rate::from_bits), b in any::<i64>()) {
+                        prop_assert!(laws::galois_l(&$whole, a, b));
+                    }
+
+                    #[test]
+                    fn closure_l(a in any::<i64>().prop_map($Rate::from_bits)) {
+                        prop_assert!(laws::closure_l(&$whole, a));
+                    }
+
+                    #[test]
+                    fn kernel_l(b in any::<i64>()) {
+                        prop_assert!(laws::kernel_l(&$whole, b));
+                    }
+
+                    #[test]
+                    fn monotone_l(
+                        a1 in any::<i64>().prop_map($Rate::from_bits),
+                        a2 in any::<i64>().prop_map($Rate::from_bits),
+                    ) {
+                        prop_assert!(laws::monotone_l(&$whole, a1, a2));
+                    }
+
+                    #[test]
+                    fn idempotent(a in any::<i64>().prop_map($Rate::from_bits)) {
+                        prop_assert!(laws::idempotent(&$whole, a));
+                    }
+                }
             }
         };
     }

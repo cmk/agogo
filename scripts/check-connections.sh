@@ -25,7 +25,8 @@ if [[ -s "$tmp" ]]; then
 check-connections.sh: direct connection construction found.
 
 Use upstream `connections` macros (`triple!`, `iso!`, `compose!`,
-`compose_l!`, `compose_r!`) or stop and design a lawful type/API.
+`conn_l!`, `conn_r!`, `compose_l!`, `compose_r!`) or stop and design
+a lawful type/API.
 Do not hide connection-domain failures with hand-built constructors.
 
 Offending sites:
