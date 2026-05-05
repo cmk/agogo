@@ -257,7 +257,6 @@ fn render_interleaved_output_chunks(
         let sample_start = rendered_frames * channels;
         let sample_end = sample_start + chunk_frames * channels;
         let output = &mut interleaved[sample_start..sample_end];
-        output.fill(0.0_f32); // PCM ABI
         let mut io = AudioIo::with_output_channels(
             input,
             output,

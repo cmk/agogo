@@ -273,9 +273,9 @@ pub enum AudioHostError {
 /// Render generated audio clicks into the current output buffer.
 ///
 /// Test-feature renderer: click shape is intentionally fixed in
-/// code rather than exposed through `--ch` parameters. The output
-/// buffer is mono in this feature slice, matching [`AudioIo`]'s
-/// current v0.1/v0.4 transition shape.
+/// code rather than exposed through `--ch` parameters. For interleaved
+/// output, `output_channel` selects the lane that this logical click
+/// channel writes.
 pub fn render_audio_click_block(
     events: &[ScheduledEvent],
     role: &AudioRole,

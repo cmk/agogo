@@ -105,3 +105,34 @@ Fixed the reference to the committed plan identifier: Plan 2026-05-05-01.
 #### ↳ cmk ([2026-05-05 06:40 UTC](https://github.com/cmk/agogo/pull/80#discussion_r3186478654))
 
 Leaving this as-is for this round per author direction. The important behavior here is stable channel identity and cutoff; restart-identical noise sequence is not required for the metronome cleanup.
+
+<!-- gh-id: 3186524668 -->
+### Copilot on [`crates/chan/src/sink/audio.rs:283`](https://github.com/cmk/agogo/pull/80#discussion_r3186524668) (2026-05-05 06:49 UTC)
+
+The doc comment immediately above `render_audio_click_block` still says the output buffer is mono, but this function now renders into interleaved output via `io.output_channels` and the `output_channel` lane parameter. Please update the comment to reflect the new interleaved/stereo contract to avoid misleading API readers.
+
+<!-- gh-id: 4225847329 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-05 06:49 UTC](https://github.com/cmk/agogo/pull/80#pullrequestreview-4225847329))
+
+## Pull request overview
+
+Copilot reviewed 10 out of 10 changed files in this pull request and generated 2 comments.
+
+
+
+
+
+<!-- gh-id: 3186524699 -->
+### Copilot on [`crates/host-cpal/src/cpal.rs:260`](https://github.com/cmk/agogo/pull/80#discussion_r3186524699) (2026-05-05 06:49 UTC)
+
+`render_interleaved_output_chunks` clears each chunk with `output.fill(0.0)` before invoking the callback, but the AudioIo contract says the callback must fully write the output buffer anyway (and `Playhead::on_buffer` also zeroes `io.output` up-front). This extra fill adds avoidable work on the realtime thread; consider removing the per-chunk clear and relying on the callback/Playhead to produce silence.
+
+<!-- gh-id: 3186541315 -->
+#### ↳ cmk ([2026-05-05 06:52 UTC](https://github.com/cmk/agogo/pull/80#discussion_r3186541315))
+
+Fixed: the doc comment now describes interleaved output and the selected output lane instead of the old mono feature-slice contract.
+
+<!-- gh-id: 3186542887 -->
+#### ↳ cmk ([2026-05-05 06:53 UTC](https://github.com/cmk/agogo/pull/80#discussion_r3186542887))
+
+Fixed: removed the normal-path per-chunk clear. The helper still clears the buffer before returning on invalid zero-channel or zero-scratch configurations.
