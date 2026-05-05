@@ -465,7 +465,6 @@ impl<R> Playhead<R> {
     ) -> Self {
         let cap = crate::event::max_events_for_buffer(buffer_frames);
         let n = channels.len();
-        let mut next_audio_index = 0usize;
         let mut audio_click_states = Vec::with_capacity(n);
         // Lane comes from each `Channel::Audio { lane, .. }` directly
         // — explicit per-channel routing replaces the earlier
@@ -475,14 +474,21 @@ impl<R> Playhead<R> {
         // validation, the live `run` path) are responsible for
         // rejecting collisions and out-of-range lanes before
         // construction reaches here.
+        //
+        // `AudioClickState::new(lane)` seeds each click renderer's
+        // deterministic cutoff from the LANE rather than the
+        // audio-channel ordinal. This makes per-lane PCM bit-
+        // identical regardless of how many other audio channels
+        // share the same render — the proptest property
+        // `prop_n_channel_independence` (plan 2026-05-05-02 T5)
+        // pins this behaviour.
         let audio_click_lanes: Vec<usize> = channels
             .iter()
             .map(|ch| match ch {
                 Channel::Audio { lane, .. } => {
-                    let audio_index = next_audio_index;
-                    next_audio_index += 1;
-                    audio_click_states.push(AudioClickState::new(audio_index));
-                    usize::from(*lane)
+                    let lane_usize = usize::from(*lane);
+                    audio_click_states.push(AudioClickState::new(lane_usize));
+                    lane_usize
                 }
                 _ => {
                     audio_click_states.push(AudioClickState::new(0));

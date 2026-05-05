@@ -26,5 +26,13 @@ cpal_impl = { package = "agogo-host-cpal", path = "../host-cpal", optional = tru
 link_impl = { package = "agogo-host-link", path = "../host-link", optional = true }
 midi_impl = { package = "agogo-host-midi", path = "../host-midi", optional = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+
+[[test]]
+name = "inter_channel_accuracy"
+path = "test/inter_channel_accuracy.rs"
+required-features = ["core"]
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(docsrs)"] }
