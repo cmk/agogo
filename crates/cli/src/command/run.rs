@@ -45,7 +45,7 @@ use agogo::chan::conn::rate::{R044, R048, R088, R096, R176, R192, SampleRate};
 use agogo::chan::conn::tempo::Tempo;
 use agogo::chan::control::{DetectorConfig, PeakDetector, PhaseSource, Pll, PllSettings};
 use agogo::chan::sink::audio::{AudioHost, AudioIo, Config};
-use agogo::core::{Playhead, PlayheadStopHandle, TransportPolicy};
+use agogo::core::{Playhead, PlayheadStopHandle, TransportPolicy, validate_audio_lanes};
 use agogo::host::cpal::CpalHost;
 use agogo::host::cpal::callback::{CallbackState, NoopMidiSink};
 use agogo::host::cpal::control::spsc;
@@ -154,11 +154,30 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
         |role| matches!(role, ChannelSpecRole::Midi(_)),
         "MIDI",
     )?;
-    let audio_output_request = single_target_output_request(
-        &named,
-        |role| matches!(role, ChannelSpecRole::Audio(_) | ChannelSpecRole::Cv(_)),
-        "audio",
-    )?;
+    // Audio click channels declare lanes via integer `out=N`; only
+    // CV channels still claim an audio output device by name.
+    // When a config has audio click channels but no CV (so no
+    // device name is requested), default to the host's default
+    // audio device — same surface as `out=default` historically.
+    // (Plan 2026-05-05-02 T2: `out=` namespace split for audio.)
+    let audio_output_request = {
+        let cv_request = single_target_output_request(
+            &named,
+            |role| matches!(role, ChannelSpecRole::Cv(_)),
+            "audio",
+        )?;
+        let has_any_audio_output = named.iter().any(|(_, spec)| {
+            matches!(
+                spec.role,
+                ChannelSpecRole::Audio(_) | ChannelSpecRole::Cv(_)
+            )
+        });
+        match (cv_request, has_any_audio_output) {
+            (Some(name), _) => Some(name),
+            (None, true) => Some("default".to_string()),
+            (None, false) => None,
+        }
+    };
 
     // Keep specs alongside channels so the link branch in
     // `run_with_rate` can call `apply_snap_offsets` after constructing
@@ -247,17 +266,16 @@ fn channel_mix(channels: &[Channel]) -> ChannelMix {
     }
 }
 
-fn validate_audio_click_channel_count(channels: &[Channel]) -> Result<(), String> {
-    let n = channels
-        .iter()
-        .filter(|ch| matches!(ch, Channel::Audio { .. }))
-        .count();
-    if n <= 2 {
-        return Ok(());
-    }
-    Err(format!(
-        "generated audio metronome supports at most 2 audio click channels for stereo ch1-2; got {n}"
-    ))
+/// Live render currently opens a stereo cpal stream
+/// (`output_channels = 2`); audio channels must declare lanes 0 or
+/// 1 with no collision. The shared offline/live validator from
+/// `agogo::core::validate_audio_lanes` is the one source of truth
+/// for the no-mix-bus rule (plan 2026-05-05-02 T3); the live path
+/// simply binds it against the live cpal channel count.
+const LIVE_OUTPUT_CHANNELS: u16 = 2;
+
+fn validate_live_audio_lanes(channels: &[Channel]) -> Result<(), String> {
+    validate_audio_lanes(channels, LIVE_OUTPUT_CHANNELS).map_err(|e| e.to_string())
 }
 
 fn single_target_output_request(
@@ -310,7 +328,7 @@ macro_rules! def_run_with_rate {
         );
     }
 
-    validate_audio_click_channel_count(&channels)?;
+    validate_live_audio_lanes(&channels)?;
 
     // SPSC + MIDI drain thread only exist when MIDI output exists.
     let (midi_port_name, drain, dropped_handle, midi_sink) =
@@ -720,7 +738,7 @@ mod tests {
 
     #[test]
     fn run_accepts_audio_click_internal_spec() {
-        let args = args_with(vec!["dev=audio,mode=click,grid=t4,out=default"], 22_050);
+        let args = args_with(vec!["dev=audio,mode=click,grid=t4,out=0"], 22_050);
         let err = run(&args).unwrap_err();
         assert!(
             err.contains("22050") && !err.contains("--ch"),
@@ -730,9 +748,10 @@ mod tests {
 
     #[test]
     fn run_audio_only_does_not_require_midi_port() {
-        let named =
-            agogo::chan::channel::spec::parse_channels(&["dev=audio,mode=click,grid=t4".into()])
-                .unwrap();
+        let named = agogo::chan::channel::spec::parse_channels(&[
+            "dev=audio,mode=click,grid=t4,out=0".into(),
+        ])
+        .unwrap();
         let channels: Vec<Channel> = named
             .into_iter()
             .map(|(_, spec)| spec.into_channel().unwrap())
@@ -750,8 +769,8 @@ mod tests {
     #[test]
     fn run_accepts_two_audio_click_channels() {
         let named = agogo::chan::channel::spec::parse_channels(&[
-            "dev=audio,mode=click,grid=t2t".into(),
-            "dev=audio,mode=click,grid=t2".into(),
+            "dev=audio,mode=click,grid=t2t,out=0".into(),
+            "dev=audio,mode=click,grid=t2,out=1".into(),
         ])
         .unwrap();
         let channels: Vec<Channel> = named
@@ -759,15 +778,20 @@ mod tests {
             .map(|(_, spec)| spec.into_channel().unwrap())
             .collect();
 
-        assert!(validate_audio_click_channel_count(&channels).is_ok());
+        assert!(validate_live_audio_lanes(&channels).is_ok());
     }
 
+    /// The live cpal stream is hardcoded to `output_channels=2`,
+    /// so an audio channel asking for `out=2` (lane 2) is
+    /// out-of-range. Replaces the historical "at most 2 audio
+    /// click channels" cap with the lane-bounds check shared
+    /// with the offline path. (Plan 2026-05-05-02 T2/T3.)
     #[test]
-    fn run_rejects_three_audio_click_channels() {
+    fn run_rejects_audio_lane_out_of_range_in_live_path() {
         let named = agogo::chan::channel::spec::parse_channels(&[
-            "dev=audio,mode=click,grid=t2t".into(),
-            "dev=audio,mode=click,grid=t2".into(),
-            "dev=audio,mode=click,grid=t4".into(),
+            "dev=audio,mode=click,grid=t2t,out=0".into(),
+            "dev=audio,mode=click,grid=t2,out=1".into(),
+            "dev=audio,mode=click,grid=t4,out=2".into(),
         ])
         .unwrap();
         let channels: Vec<Channel> = named
@@ -775,9 +799,33 @@ mod tests {
             .map(|(_, spec)| spec.into_channel().unwrap())
             .collect();
 
-        let err = validate_audio_click_channel_count(&channels).unwrap_err();
+        let err = validate_live_audio_lanes(&channels).unwrap_err();
+        assert!(
+            err.contains("out=2") && err.contains("output_channels=2"),
+            "got: {err}"
+        );
+    }
 
-        assert!(err.contains("at most 2 audio click channels"), "got: {err}");
+    /// Two audio channels claiming the same lane is rejected at
+    /// the live boundary by the same `validate_audio_lanes`
+    /// helper used by the offline path.
+    #[test]
+    fn run_rejects_audio_lane_collision_in_live_path() {
+        let named = agogo::chan::channel::spec::parse_channels(&[
+            "dev=audio,mode=click,grid=t2t,out=0".into(),
+            "dev=audio,mode=click,grid=t2,out=0".into(),
+        ])
+        .unwrap();
+        let channels: Vec<Channel> = named
+            .into_iter()
+            .map(|(_, spec)| spec.into_channel().unwrap())
+            .collect();
+
+        let err = validate_live_audio_lanes(&channels).unwrap_err();
+        assert!(
+            err.contains("out=0") && err.contains("no-mix-bus"),
+            "got: {err}"
+        );
     }
 
     #[test]
@@ -821,11 +869,16 @@ mod tests {
         );
     }
 
+    /// The live audio-device-name selection now sources the device
+    /// name only from CV channels' `out=` (audio channels declare
+    /// integer lanes, not device names — Plan 2026-05-05-02 T2).
+    /// Two CV channels asking for different audio output devices
+    /// still trips the same single-device-only validation.
     #[test]
     fn run_rejects_multiple_audio_outputs_until_routing_exists() {
         let args = args_with(
             vec![
-                "dev=audio,mode=click,grid=t4,out=speakers-a",
+                "dev=cv,mode=pulse,grid=t4,out=speakers-a",
                 "dev=cv,mode=pulse,grid=t8,out=speakers-b",
             ],
             48_000,

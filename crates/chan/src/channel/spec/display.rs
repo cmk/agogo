@@ -24,8 +24,24 @@ impl Display for ChannelSpec {
         if let Some(id) = &self.id {
             write!(f, ",id={}", quote_if_needed(id))?;
         }
-        if let Some(out) = &self.out {
-            write!(f, ",out={}", quote_if_needed(out))?;
+        // For audio channels the `out=` value is the integer lane,
+        // sourced from `audio_lane` (the typed mirror of the raw
+        // `out` string). For non-audio specs the raw `out` string
+        // keeps its device-name semantics. Falling back to the raw
+        // `out` for audio when `audio_lane` is somehow `None` keeps
+        // the Display impl total for hand-rolled specs.
+        match (&self.role, self.audio_lane) {
+            (ChannelSpecRole::Audio(_), Some(lane)) => write!(f, ",out={lane}")?,
+            (ChannelSpecRole::Audio(_), None) => {
+                if let Some(out) = &self.out {
+                    write!(f, ",out={}", quote_if_needed(out))?;
+                }
+            }
+            (_, _) => {
+                if let Some(out) = &self.out {
+                    write!(f, ",out={}", quote_if_needed(out))?;
+                }
+            }
         }
         // mode + click keys: emit only when non-default
         // (MidiRole::Clock is the implicit default, so it's omitted).
@@ -191,6 +207,7 @@ mod tests {
             let spec = ChannelSpec {
                 id: None,
                 out: None,
+                audio_lane: None,
                 grid: Grid::ALL[0],
                 role: ChannelSpecRole::Midi(MidiRole::Clock),
                 swing: SwingConfig {
@@ -306,12 +323,38 @@ mod tests {
             prop::option::of(any::<i64>()),
             arb_role(),
             arb_bars(),
+            any::<u16>(),
         )
             .prop_map(
-                |(grid, id, out, swing_res, swing_amt, offset_ticks, delay, snap, role, bars)| {
+                |(
+                    grid,
+                    id,
+                    raw_out,
+                    swing_res,
+                    swing_amt,
+                    offset_ticks,
+                    delay,
+                    snap,
+                    role,
+                    bars,
+                    audio_lane_seed,
+                )| {
+                    // For audio specs the `out=` field carries the
+                    // integer lane; the parser always populates both
+                    // `out: Some("N")` and `audio_lane: Some(N)`, so
+                    // the round-trip property requires the strategy
+                    // to do the same.
+                    let (out, audio_lane) = match role {
+                        ChannelSpecRole::Audio(_) => {
+                            let lane = audio_lane_seed;
+                            (Some(lane.to_string()), Some(lane))
+                        }
+                        _ => (raw_out, None),
+                    };
                     ChannelSpec {
                         id,
                         out,
+                        audio_lane,
                         grid,
                         role,
                         swing: SwingConfig {

@@ -6,7 +6,7 @@ use agogo::chan::conn::tempo::Tempo;
 use agogo::chan::time::conn::tick_to_whole_samples;
 use agogo::chan::time::grid::Grid;
 use agogo::chan::time::tick::Tick;
-use agogo::core::{OfflineRenderConfig, render_offline};
+use agogo::core::{MAX_OUTPUT_CHANNELS, OfflineRenderConfig, render_offline};
 use bpaf::Bpaf;
 use serde_json::json;
 
@@ -32,7 +32,15 @@ pub struct RenderArgs {
     /// Render duration in 4/4 bars.
     #[bpaf(long, argument("BARS"), parse(parse_positive_u32), fallback(1))]
     pub duration_bars: u32,
-    /// Per-channel spec, repeatable. Use `out=diag` for offline diagnostics.
+    /// Number of interleaved output channels in the rendered audio
+    /// buffer. Each `dev=audio` channel must declare a lane via
+    /// `out=N` with `0 <= N < output_channels`; lanes must be
+    /// unique (no mix bus). Range: 1..=16.
+    #[bpaf(long, argument("CHANNELS"), parse(parse_positive_u32), fallback(2))]
+    pub output_channels: u32,
+    /// Per-channel spec, repeatable. Audio channels must spell
+    /// `out=N` (lane index); MIDI/CV channels may use `out=diag`
+    /// for offline diagnostics.
     #[bpaf(long, argument("SPEC"), many)]
     pub ch: Vec<String>,
 }
@@ -55,6 +63,16 @@ pub fn render(args: &RenderArgs) -> Result<(), String> {
         other => format!("invalid scheduling parameters: {other}"),
     })?;
 
+    let output_channels: u16 = u16::try_from(args.output_channels)
+        .ok()
+        .filter(|&n| (1..=MAX_OUTPUT_CHANNELS).contains(&n))
+        .ok_or_else(|| {
+            format!(
+                "--output-channels {} not supported (must be 1..={MAX_OUTPUT_CHANNELS})",
+                args.output_channels
+            )
+        })?;
+
     let channels = parse_channels(&args.ch)?;
     let total_frames = frames_for_bars(args.duration_bars, args.bpm, args.sr)?;
     let report = render_offline(OfflineRenderConfig {
@@ -63,6 +81,7 @@ pub fn render(args: &RenderArgs) -> Result<(), String> {
         sample_rate: args.sr,
         buffer_frames: args.buffer_frames,
         total_frames,
+        output_channels,
     })
     .map_err(|e| e.to_string())?;
 
@@ -135,7 +154,15 @@ fn parse_channels(raw: &[String]) -> Result<Vec<Channel>, String> {
 fn validate_diagnostic_outputs(
     named: &[(String, agogo::chan::channel::spec::ChannelSpec)],
 ) -> Result<(), String> {
+    use agogo::chan::channel::spec::ChannelSpecRole;
     for (id, spec) in named {
+        // Audio channels use `out=N` (lane index, parsed and
+        // validated by the spec parser into `audio_lane`); MIDI/CV
+        // channels keep the legacy device-name semantics where
+        // only `diag`/`diagnostic` survives offline.
+        if matches!(spec.role, ChannelSpecRole::Audio(_)) {
+            continue;
+        }
         match spec.out.as_deref() {
             None | Some("diag" | "diagnostic") => {}
             Some(out) => {

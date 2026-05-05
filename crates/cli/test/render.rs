@@ -116,7 +116,11 @@ fn render_outputs_cv_pulse_audio_summary() {
 
     let stdout = String::from_utf8(output.stdout).expect("render stdout is utf8");
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("render stdout is JSON");
-    assert_eq!(json["audio"]["nonzero_samples"], 8);
+    // CV pulse writes to every output lane (dual-mono); the offline
+    // render path now defaults to --output-channels=2, so the
+    // four bipolar pulses (two samples each = 8 nonzero per lane)
+    // tally to 16 across both lanes. Plan 2026-05-05-02 T1.
+    assert_eq!(json["audio"]["nonzero_samples"], 16);
     assert_eq!(json["audio"]["positive_peak_q15"], 32_767);
     assert_eq!(json["audio"]["negative_peak_q15"], 32_767);
     assert_eq!(json["midi"].as_array().unwrap().len(), 1);

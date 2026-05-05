@@ -52,7 +52,20 @@ impl ChannelSpec {
 
         Ok(match self.role {
             ChannelSpecRole::Midi(role) => Channel::Midi { common, role },
-            ChannelSpecRole::Audio(role) => Channel::Audio { common, role },
+            ChannelSpecRole::Audio(role) => {
+                // Parser enforces audio_lane is Some when role is
+                // Audio; this match is unreachable for any spec
+                // produced through `ChannelSpec::parse`. Surfaces as
+                // a typed error for hand-rolled specs missing the
+                // lane.
+                let lane = self.audio_lane.ok_or_else(|| {
+                    ChannelSpecError::BadValue(
+                        "out",
+                        "dev=audio requires out=N (audio output channel index, 0..)".into(),
+                    )
+                })?;
+                Channel::Audio { common, role, lane }
+            }
             ChannelSpecRole::Cv(role) => Channel::Cv { common, role },
         })
     }
@@ -111,13 +124,17 @@ mod tests {
 
     #[test]
     fn into_channel_audio_click_returns_audio_variant() {
-        let spec = ChannelSpec::parse("dev=audio,mode=click,grid=t4,bars=4", &[]).unwrap();
+        let spec = ChannelSpec::parse("dev=audio,mode=click,grid=t4,bars=4,out=0", &[]).unwrap();
         let ch = spec.into_channel().unwrap();
         match ch {
             Channel::Audio {
                 role: AudioRole::Click,
                 common,
-            } => assert_eq!(common.bar_multiplier, NonZeroU16::new(4)),
+                lane,
+            } => {
+                assert_eq!(common.bar_multiplier, NonZeroU16::new(4));
+                assert_eq!(lane, 0);
+            }
             _ => panic!("expected Channel::Audio {{ role: Click }}"),
         }
     }
