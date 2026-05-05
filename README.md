@@ -175,6 +175,38 @@ treated as best effort at the host boundary. Version 0.2 and later roadmap docs
 separate this from future native timestamped backends such as CoreMIDI, JACK,
 or platform-specific equivalents.
 
+## Why Galois Connections?
+
+Agogo uses the [`connections`](https://gitlab.com/cmk/connections) crate for
+numeric conversions where the rounding direction is part of the correctness
+contract: microseconds to picoseconds, picoseconds to sample time, sample time
+to whole sample counts, BPM to fixed-point tempo, and similar boundaries.
+
+The practical idea is simple: a named connection carries the conversion and its
+rounding policy together.
+
+```rust
+let pico = FD12FD06.inner(micro); // exact Micro -> Pico refinement
+let samples = FD12R048.ceil(pico); // round Pico up to R048 sample time
+```
+
+For a connection `Fine => Coarse`:
+
+- `inner` embeds a coarse value into the finer representation;
+- `ceil` returns the smallest coarse value that covers a fine value;
+- `floor` returns the largest coarse value that does not exceed a fine value.
+
+That makes review questions concrete. Instead of asking whether an arithmetic
+formula happens to round correctly, the code names the source type, target type,
+and adjoint being used. Property tests then check the monotonicity, closure,
+and adjoint laws over the relevant domains.
+
+Not every transform in agogo is a connection. When a conversion is
+runtime-parameterized, intentionally one-sided, or has domain-specific boundary
+semantics, agogo uses a normal named helper and tests that helper directly. The
+goal is explicit rounding at timing boundaries, not forcing every function into
+the abstraction.
+
 ## Workspace Layout
 
 ```text

@@ -358,6 +358,7 @@ code based on it.
   wrapper macro such as `def_conn_marker!` to publish a connection.
   Declare connections with the upstream `connections::triple!`,
   `connections::iso!`, `connections::compose!`,
+  `connections::conn_l!`, `connections::conn_r!`,
   `connections::compose_l!`, or `connections::compose_r!` macros.
 
   A connection adjoint (`ceil`, `inner`, `floor`) must not contain
