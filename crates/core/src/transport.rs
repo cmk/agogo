@@ -815,15 +815,18 @@ pub fn render_offline_capture(
 ) -> Result<(OfflineRenderReport, OfflinePcm), OfflineRenderError> {
     let sample_rate = config.sample_rate;
     let total_frames = config.total_frames;
-    let output_channels = config.output_channels;
     let (report, pcm) = render_offline_dispatch(config, /*capture=*/ true)?;
+    // capture=true is an internal contract that
+    // `render_offline_dispatch` always honours. A `None` here would
+    // be an internal-invariant violation, not bad user input —
+    // surface it loudly rather than silently produce empty lanes
+    // that mismatch the report's `frames`/`sample_rate`.
+    // boundary-panic-ok: internal contract violation, not user input.
+    let lanes = pcm.expect("render_offline_dispatch returned no PCM despite capture=true");
     Ok((
         report,
         OfflinePcm {
-            // `render_offline_dispatch` always returns Some(Vec) when
-            // capture=true; the .unwrap_or_default() keeps the type
-            // total without panicking on an internal contract slip.
-            lanes: pcm.unwrap_or_else(|| vec![Vec::new(); usize::from(output_channels)]),
+            lanes,
             sample_rate,
             frames: total_frames,
         },

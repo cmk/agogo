@@ -346,13 +346,16 @@ pub fn render_audio_click_block(
                     io.output,
                 );
                 state.pending_samples = (pending - written) as u16;
-                if state.pending_samples > 0 {
-                    // Buffer was too short to finish the pending
-                    // click; new events for this buffer fall after
-                    // the pending region's end and would have
-                    // overlapped it anyway — we still process
-                    // them, but with reduced writable space.
-                }
+                // New events scheduled for this buffer are still
+                // processed against the full `writable` range below,
+                // even when the pending continuation consumed some
+                // of it — overlapping writes go through `mix_q15`'s
+                // additive path, matching the same-buffer behaviour
+                // when two non-truncated clicks overlap. We
+                // intentionally don't clip new events to `writable -
+                // written` since that would re-introduce the
+                // truncation the pending mechanism is designed to
+                // avoid.
             }
 
             for ev in events {

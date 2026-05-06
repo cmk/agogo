@@ -216,3 +216,56 @@ You're right — initial draft over-promised. Added the three useful missing pro
 #### ↳ cmk ([2026-05-06 00:14 UTC](https://github.com/cmk/agogo/pull/81#discussion_r3192287363))
 
 Same issue as the plan-side `LaneMissing` reference — fixed in this round by removing the `LaneMissing` mention from the review-00081 summary and noting that missing `out=` is rejected upstream by the spec parser instead.
+
+<!-- gh-id: 3193916298 -->
+### Copilot on [`crates/chan/src/sink/audio.rs:354`](https://github.com/cmk/agogo/pull/81#discussion_r3193916298) (2026-05-06 08:07 UTC)
+
+The comment says new events are processed "with reduced writable space" when a pending click tail still doesn't fit in the current buffer, but `writable` is never adjusted and events are still rendered against the original buffer range. Either update the comment to match the actual behavior (events may overlap the pending tail) or implement the reduced-writable behavior (e.g., clamp/offset event rendering until the tail completes).
+
+
+<!-- gh-id: 3193916355 -->
+### Copilot on [`crates/agogo/test/inter_channel_accuracy.rs:122`](https://github.com/cmk/agogo/pull/81#discussion_r3193916355) (2026-05-06 08:07 UTC)
+
+`render_lanes` returns `Result<(OfflinePcm, OfflineRenderError), OfflineRenderError>` but the second tuple element is a dummy value (never read). This makes the helper harder to understand and easy to misuse; consider returning `Result<OfflinePcm, OfflineRenderError>` (or returning the real `OfflineRenderReport` alongside `OfflinePcm`) and removing the dummy error value.
+
+<!-- gh-id: 3193916380 -->
+### Copilot on [`crates/agogo/test/inter_channel_accuracy.rs:547`](https://github.com/cmk/agogo/pull/81#discussion_r3193916380) (2026-05-06 08:07 UTC)
+
+`prop_sample_rate_doubling` currently compares the *first nonzero* sample index at 48k vs 96k, but every rendered lane has a click at tick 0 so `first_nonzero` is effectively always `Some(0)`, making the 2x assertion tautological and not actually testing tick→sample scaling for non-zero ticks. Consider asserting on a later predicted onset (e.g., the second onset from `predict_onsets`, or a fixed non-zero tick) so the property can catch rounding/dispatch regressions.
+
+<!-- gh-id: 4234302465 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-06 08:07 UTC](https://github.com/cmk/agogo/pull/81#pullrequestreview-4234302465))
+
+## Pull request overview
+
+Copilot reviewed 18 out of 19 changed files in this pull request and generated 4 comments.
+
+
+
+
+
+<!-- gh-id: 3193916406 -->
+### Copilot on [`crates/core/src/transport.rs:826`](https://github.com/cmk/agogo/pull/81#discussion_r3193916406) (2026-05-06 08:07 UTC)
+
+In `render_offline_capture`, if `render_offline_dispatch` ever returns `None` for captured PCM (despite `capture=true`), this silently produces empty `lanes` while still reporting non-zero `frames`/`sample_rate`. That would violate `OfflinePcm`'s implied invariants and make downstream failures confusing. Prefer turning this into an explicit internal error (or an `expect` with a clear message) rather than returning empty PCM.
+
+
+<!-- gh-id: 3193947011 -->
+#### ↳ cmk ([2026-05-06 08:12 UTC](https://github.com/cmk/agogo/pull/81#discussion_r3193947011))
+
+You're right, the comment was misleading. The actual behaviour is: new events still write against the full `writable` range, and any overlap with the pending continuation goes through `mix_q15`'s additive path (matching the same-buffer behaviour when two non-truncated clicks overlap). Rewrote the comment to describe what actually happens and to call out that we deliberately don't clip new events to `writable - written`, since clipping would re-introduce the truncation the pending mechanism was designed to fix. No code change beyond the comment.
+
+<!-- gh-id: 3193947528 -->
+#### ↳ cmk ([2026-05-06 08:12 UTC](https://github.com/cmk/agogo/pull/81#discussion_r3193947528))
+
+Agreed — the dummy second tuple element was the residue of an aborted earlier attempt to surface validation errors. Removed `render_lanes` entirely; the only caller (`render_lanes_ok`) now wraps `render_offline_capture` directly. Properties that need to assert specific `OfflineRenderError` variants already call `render_offline_capture` directly and match on the `Err`.
+
+<!-- gh-id: 3193947932 -->
+#### ↳ cmk ([2026-05-06 08:12 UTC](https://github.com/cmk/agogo/pull/81#discussion_r3193947932))
+
+Fair — `0 == 2 * 0` doesn't catch tick→sample rounding bugs at all. Rewrote the property to assert on the second predicted onset (first non-zero tick) instead, and to also confirm the renderer wrote the click at the doubled position in both buffers via a footprint scan over `click_len`. `prop_assume!` skips cases that produce fewer than two onsets per bar (none of the polyrhythm-pool grids do, but the assumption keeps the property total).
+
+<!-- gh-id: 3193948472 -->
+#### ↳ cmk ([2026-05-06 08:12 UTC](https://github.com/cmk/agogo/pull/81#discussion_r3193948472))
+
+Good catch. Replaced `unwrap_or_default()` with an `expect("render_offline_dispatch returned no PCM despite capture=true")` and annotated it `// boundary-panic-ok:` per `check-boundary-panics.sh`. Internal contract violation, not user input — surfacing it loudly beats silently producing empty `lanes` that mismatch the report's `frames`/`sample_rate`.
