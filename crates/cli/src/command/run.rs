@@ -62,7 +62,9 @@ use std::num::NonZeroU32;
 const PULSE_PPQ: u32 = 24;
 const SUPPORTED_SAMPLE_RATES: &str = "44100, 48000, 88200, 96000, 176400, 192000";
 
-use crate::parse::{parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats};
+use crate::parse::{
+    parse_bpm_to_tempo, parse_positive_u32, parse_quantum_from_beats, validate_output_channels,
+};
 
 /// Argv container for `agogo run`. Used by both the bpaf derive and
 /// the dispatcher in `main.rs`. The two formerly-`f64` fields
@@ -81,6 +83,13 @@ pub struct RunArgs {
     /// cpal buffer size in frames.
     #[bpaf(long, argument("FRAMES"), parse(parse_positive_u32), fallback(1024))]
     pub buffer_frames: u32,
+    /// Number of cpal output channels to open. Each `dev=audio`
+    /// channel must declare a lane via `out=N` with `0 <= N <
+    /// output_channels`; lanes must be unique (no mix bus). Range:
+    /// 1..=16. Fallback `2` matches the previous hardcoded behaviour;
+    /// existing live invocations work without the flag.
+    #[bpaf(long, argument("CHANNELS"), parse(parse_positive_u32), fallback(2))]
+    pub output_channels: u32,
     /// Phase source: `internal` (free-running from --bpm),
     /// `external` (PLL from audio input click train), `link`
     /// (Ableton Link session — requires `--features link`).
@@ -129,6 +138,8 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
         }
         other => format!("invalid scheduling parameters: {other}"),
     })?;
+
+    let output_channels: u16 = validate_output_channels(args.output_channels)?;
 
     // Parse all --ch specs eagerly (in order, so variable refs
     // resolve) before any device opens.
@@ -203,6 +214,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             channels,
             midi_port_request,
             audio_output_request,
+            output_channels,
         ),
         rate if rate == R048::HZ => run_s048(
             args,
@@ -211,6 +223,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             channels,
             midi_port_request,
             audio_output_request,
+            output_channels,
         ),
         rate if rate == R088::HZ => run_s088(
             args,
@@ -219,6 +232,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             channels,
             midi_port_request,
             audio_output_request,
+            output_channels,
         ),
         rate if rate == R096::HZ => run_s096(
             args,
@@ -227,6 +241,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             channels,
             midi_port_request,
             audio_output_request,
+            output_channels,
         ),
         rate if rate == R176::HZ => run_s176(
             args,
@@ -235,6 +250,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             channels,
             midi_port_request,
             audio_output_request,
+            output_channels,
         ),
         rate if rate == R192::HZ => run_s192(
             args,
@@ -243,6 +259,7 @@ pub fn run(args: &RunArgs) -> Result<(), String> {
             channels,
             midi_port_request,
             audio_output_request,
+            output_channels,
         ),
         other => Err(format!(
             "--sr {other} not supported (allowed: {SUPPORTED_SAMPLE_RATES})"
@@ -266,16 +283,15 @@ fn channel_mix(channels: &[Channel]) -> ChannelMix {
     }
 }
 
-/// Live render currently opens a stereo cpal stream
-/// (`output_channels = 2`); audio channels must declare lanes 0 or
-/// 1 with no collision. The shared offline/live validator from
-/// `agogo::core::validate_audio_lanes` is the one source of truth
-/// for the no-mix-bus rule (plan 2026-05-05-02 T3); the live path
-/// simply binds it against the live cpal channel count.
-const LIVE_OUTPUT_CHANNELS: u16 = 2;
-
-fn validate_live_audio_lanes(channels: &[Channel]) -> Result<(), String> {
-    validate_audio_lanes(channels, LIVE_OUTPUT_CHANNELS).map_err(|e| e.to_string())
+/// Live render opens a cpal stream with `--output-channels N`
+/// channels (default 2; cap `MAX_OUTPUT_CHANNELS = 16`). Audio
+/// channels must declare lanes via `out=N` with `0 <= N <
+/// output_channels`; lanes must be unique. The shared offline/live
+/// validator from `agogo::core::validate_audio_lanes` is the one
+/// source of truth for the no-mix-bus rule (plan 2026-05-05-02 T3
+/// + 2026-05-06-01 T3 — flag-driven channel count).
+fn validate_live_audio_lanes(channels: &[Channel], output_channels: u16) -> Result<(), String> {
+    validate_audio_lanes(channels, output_channels).map_err(|e| e.to_string())
 }
 
 fn single_target_output_request(
@@ -316,6 +332,7 @@ macro_rules! def_run_with_rate {
             mut channels: Vec<Channel>,
             midi_port_request: Option<String>,
             audio_output_request: Option<String>,
+            output_channels: u16,
         ) -> Result<(), String> {
     let mix = channel_mix(&channels);
     debug_assert_eq!(mix.has_midi, midi_port_request.is_some());
@@ -328,7 +345,7 @@ macro_rules! def_run_with_rate {
         );
     }
 
-    validate_live_audio_lanes(&channels)?;
+    validate_live_audio_lanes(&channels, output_channels)?;
 
     // SPSC + MIDI drain thread only exist when MIDI output exists.
     let (midi_port_name, drain, dropped_handle, midi_sink) =
@@ -467,7 +484,7 @@ macro_rules! def_run_with_rate {
                 sample_rate: args.sr,
                 buffer_frames: args.buffer_frames,
                 input_channels: 0,
-                output_channels: 2,
+                output_channels,
             },
             format!("audio out: {request}"),
         )
@@ -703,6 +720,7 @@ mod tests {
             bpm: Tempo::from_bpm_integer(120),
             sr,
             buffer_frames: 1024,
+            output_channels: 2,
             source: "internal".into(),
             audio_in: "default".into(),
             ch: ch.into_iter().map(|s| s.to_string()).collect(),
@@ -778,14 +796,14 @@ mod tests {
             .map(|(_, spec)| spec.into_channel().unwrap())
             .collect();
 
-        assert!(validate_live_audio_lanes(&channels).is_ok());
+        assert!(validate_live_audio_lanes(&channels, 2).is_ok());
     }
 
-    /// The live cpal stream is hardcoded to `output_channels=2`,
-    /// so an audio channel asking for `out=2` (lane 2) is
-    /// out-of-range. Replaces the historical "at most 2 audio
-    /// click channels" cap with the lane-bounds check shared
-    /// with the offline path. (Plan 2026-05-05-02 T2/T3.)
+    /// With `--output-channels 2` (default), an audio channel
+    /// asking for `out=2` (lane 2) is out-of-range. Replaces the
+    /// historical "at most 2 audio click channels" cap with the
+    /// lane-bounds check shared with the offline path. (Plan
+    /// 2026-05-05-02 T2/T3 + 2026-05-06-01 T3.)
     #[test]
     fn run_rejects_audio_lane_out_of_range_in_live_path() {
         let named = agogo::chan::channel::spec::parse_channels(&[
@@ -799,7 +817,7 @@ mod tests {
             .map(|(_, spec)| spec.into_channel().unwrap())
             .collect();
 
-        let err = validate_live_audio_lanes(&channels).unwrap_err();
+        let err = validate_live_audio_lanes(&channels, 2).unwrap_err();
         assert!(
             err.contains("out=2") && err.contains("output_channels=2"),
             "got: {err}"
@@ -821,11 +839,35 @@ mod tests {
             .map(|(_, spec)| spec.into_channel().unwrap())
             .collect();
 
-        let err = validate_live_audio_lanes(&channels).unwrap_err();
+        let err = validate_live_audio_lanes(&channels, 2).unwrap_err();
         assert!(
             err.contains("out=0") && err.contains("no-mix-bus"),
             "got: {err}"
         );
+    }
+
+    /// With `--output-channels 16`, the same `out=2` channel that
+    /// the previous default-2 test rejected is now in range. Pins
+    /// the flag's plumbing into the validator (Plan 2026-05-06-01
+    /// T3): if the live path silently kept its old `LIVE_OUTPUT_CHANNELS
+    /// = 2` constant after the flag was added, this assertion would
+    /// fail.
+    #[test]
+    fn run_accepts_audio_lane_15_when_output_channels_16() {
+        let named = agogo::chan::channel::spec::parse_channels(&[
+            "dev=audio,mode=click,grid=t2,out=15".into(),
+        ])
+        .unwrap();
+        let channels: Vec<Channel> = named
+            .into_iter()
+            .map(|(_, spec)| spec.into_channel().unwrap())
+            .collect();
+
+        assert!(validate_live_audio_lanes(&channels, 16).is_ok());
+        // Sanity: the same channel under output_channels=2 still
+        // fails (regression guard against accidentally widening the
+        // default cap).
+        assert!(validate_live_audio_lanes(&channels, 2).is_err());
     }
 
     #[test]

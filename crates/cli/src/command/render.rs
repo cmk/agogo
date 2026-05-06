@@ -7,15 +7,14 @@ use agogo::chan::time::conn::tick_to_whole_samples;
 use agogo::chan::time::grid::Grid;
 use agogo::chan::time::tick::Tick;
 use agogo::core::{
-    MAX_OUTPUT_CHANNELS, OfflinePcm, OfflineRenderConfig, OfflineRenderReport, render_offline,
-    render_offline_capture,
+    OfflinePcm, OfflineRenderConfig, OfflineRenderReport, render_offline, render_offline_capture,
 };
 use bpaf::Bpaf;
 use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::json;
 use std::path::Path;
 
-use crate::parse::{parse_bpm_to_tempo, parse_positive_u32};
+use crate::parse::{parse_bpm_to_tempo, parse_positive_u32, validate_output_channels};
 
 const SUPPORTED_SAMPLE_RATES: &str = "44100, 48000, 88200, 96000, 176400, 192000";
 
@@ -76,15 +75,7 @@ pub fn render(args: &RenderArgs) -> Result<(), String> {
         other => format!("invalid scheduling parameters: {other}"),
     })?;
 
-    let output_channels: u16 = u16::try_from(args.output_channels)
-        .ok()
-        .filter(|&n| (1..=MAX_OUTPUT_CHANNELS).contains(&n))
-        .ok_or_else(|| {
-            format!(
-                "--output-channels {} not supported (must be 1..={MAX_OUTPUT_CHANNELS})",
-                args.output_channels
-            )
-        })?;
+    let output_channels: u16 = validate_output_channels(args.output_channels)?;
 
     let channels = parse_channels(&args.ch)?;
     let total_frames = frames_for_bars(args.duration_bars, args.bpm, args.sr)?;

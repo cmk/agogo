@@ -75,5 +75,20 @@ pub(crate) fn parse_bpm_to_tempo(s: String) -> Result<agogo::chan::conn::tempo::
     Ok(f64_bpm_to_tempo(f))
 }
 
+/// Validate `--output-channels N` against the offline path's
+/// `MAX_OUTPUT_CHANNELS` cap. Shared by `agogo render` and `agogo
+/// run` so the offline and live paths can't drift on the channel
+/// count rule.
+#[cfg(feature = "core")]
+pub(crate) fn validate_output_channels(value: u32) -> Result<u16, String> {
+    use agogo::core::MAX_OUTPUT_CHANNELS;
+    u16::try_from(value)
+        .ok()
+        .filter(|&n| (1..=MAX_OUTPUT_CHANNELS).contains(&n))
+        .ok_or_else(|| {
+            format!("--output-channels {value} not supported (must be 1..={MAX_OUTPUT_CHANNELS})")
+        })
+}
+
 #[cfg(feature = "link")]
 pub(crate) use agogo::host::link::parse_quantum_from_beats;
