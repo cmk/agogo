@@ -888,8 +888,18 @@ impl OfflinePcm {
     /// `result.len() == self.channels` and each inner vec has
     /// `self.frames` samples. Allocates `channels` Vecs; preferred
     /// for tests that index per-lane repeatedly.
+    ///
+    /// Returns an empty `Vec` when `self.channels == 0` — the
+    /// renderer's `UnsupportedChannelCount` validator (range
+    /// `1..=MAX_OUTPUT_CHANNELS`) prevents that shape from ever
+    /// reaching here in practice, but `OfflinePcm` has public fields
+    /// so a hand-constructed instance is reachable. Returning empty
+    /// avoids the `idx % 0` panic at the modulo below.
     pub fn into_planar(self) -> Vec<Vec<f32>> {
         let channels = usize::from(self.channels);
+        if channels == 0 {
+            return Vec::new();
+        }
         let frames = self.frames as usize;
         let mut planar: Vec<Vec<f32>> = (0..channels).map(|_| Vec::with_capacity(frames)).collect();
         for (idx, sample) in self.interleaved.into_iter().enumerate() {

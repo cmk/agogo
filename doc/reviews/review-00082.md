@@ -102,3 +102,63 @@ Review comment:
 
   **Addressed in branch.** `crates/host-cpal/src/cpal.rs:188` guard relaxed from `output_channels != 2` to `output_channels == 0`; the device-capability check at `validate_output_channels` / `select_f32_channels_at_rate` is the source of truth for what the device actually supports. host-cpal's 19 unit tests still pass; the existing `output_channel_selection_*` tests cover both the accept-stereo and reject-out-of-range cases. Folded into the T3 commit via `git commit --fixup`.
 
+
+<!-- gh-id: 3194243479 -->
+### Copilot on [`crates/core/src/transport.rs:897`](https://github.com/cmk/agogo/pull/82#discussion_r3194243479) (2026-05-06 09:11 UTC)
+
+`OfflinePcm::into_planar` will panic on `channels == 0` because of `idx % channels`. Since `OfflinePcm` is a public struct with public fields, it’s possible for downstream code (or future internal code) to construct an invalid instance and hit this unexpectedly. Consider defensively handling `self.channels == 0` (e.g., return an empty `Vec`, or `debug_assert!(self.channels > 0)` plus a clear panic) before the modulo/push loop.
+
+<!-- gh-id: 3194243558 -->
+### Copilot on [`doc/plans/plan-2026-05-06-01.md:14`](https://github.com/cmk/agogo/pull/82#discussion_r3194243558) (2026-05-06 09:11 UTC)
+
+nit: This plan uses hard line-number references that will become stale once the PR is merged (e.g., `crates/core/src/transport.rs:963-971` here, plus `(lines 963-971)` in T1 and `crates/cli/src/command/run.rs:470` / `run.rs:275`). Consider switching these to symbol-based references (function names / snippets) or updating them to the post-change locations so readers don’t chase the wrong sites.
+
+<!-- gh-id: 4234723527 -->
+### copilot-pull-request-reviewer[bot] — COMMENTED ([2026-05-06 09:11 UTC](https://github.com/cmk/agogo/pull/82#pullrequestreview-4234723527))
+
+## Pull request overview
+
+This PR updates the offline capture representation to match the renderer’s native interleaved PCM layout, adds `agogo render --wav-out FILE` for emitting multi-channel float WAV output, and audits the live `agogo run` path so its output channel count is configurable (instead of stereo-only).
+
+**Changes:**
+- Refactor `OfflinePcm` from planar lanes to `interleaved: Vec<f32>` + `channels`, with `lane()`, `frame()`, and `into_planar()` accessors; offline capture loop now memcpy-extends the renderer buffer.
+- Add `--wav-out` to `agogo render`, writing 32-bit float multi-channel WAV via `hound` directly from interleaved samples.
+- Add `--output-channels` to `agogo run`, plumb through shared validation and into the cpal backend; relax host-cpal’s previous stereo-only guard.
+
+### Reviewed changes
+
+Copilot reviewed 11 out of 12 changed files in this pull request and generated 2 comments.
+
+<details>
+<summary>Show a summary per file</summary>
+
+| File | Description |
+| ---- | ----------- |
+| doc/reviews/review-00082.md | Local review record for PR #82 and its resolution notes. |
+| doc/plans/plan-2026-05-06-01.md | Sprint plan describing the interleaved refactor, WAV output, and live-channel audit. |
+| crates/core/src/transport.rs | Implements interleaved `OfflinePcm`, adds accessors, and switches capture to `extend_from_slice`. |
+| crates/agogo/test/inter_channel_accuracy.rs | Updates proptests/spot-checks to the interleaved storage + new layout properties. |
+| crates/cli/src/command/render.rs | Adds `--wav-out` and WAV writing logic; switches to capture path when enabled. |
+| crates/cli/test/render.rs | Adds CLI WAV round-trip tests and updates aggregate derivation to use interleaved PCM. |
+| crates/cli/src/parse.rs | Introduces shared `validate_output_channels` helper for CLI commands. |
+| crates/cli/src/command/run.rs | Adds `--output-channels` flag and plumbs it through validation and cpal config. |
+| crates/host-cpal/src/cpal.rs | Removes stereo-only restriction; defers channel support checks to device capability selection. |
+| crates/cli/Cargo.toml | Adds `hound` dependency for WAV output support. |
+| Cargo.toml | Adds workspace-level `hound` version pin. |
+| Cargo.lock | Locks `hound` and updates dependent crate entries. |
+</details>
+
+
+
+
+
+
+<!-- gh-id: 3194295719 -->
+#### ↳ cmk ([2026-05-06 09:18 UTC](https://github.com/cmk/agogo/pull/82#discussion_r3194295719))
+
+Hardened — added an early-return when channels == 0 so the modulo path can't panic on a hand-constructed instance. The renderer's UnsupportedChannelCount validator (1..=MAX_OUTPUT_CHANNELS) still rejects this shape at the boundary, but OfflinePcm has public fields so the defense is correct. New spot_into_planar_zero_channels_no_panic test pins the behaviour.
+
+<!-- gh-id: 3194296319 -->
+#### ↳ cmk ([2026-05-06 09:18 UTC](https://github.com/cmk/agogo/pull/82#discussion_r3194296319))
+
+Fixed — replaced the absolute line numbers with symbol-anchored references (function names, constant names, and field doc-comment anchors) so the plan stays readable as the code drifts. Verified with a final grep sweep that no :NNN line refs remain.
