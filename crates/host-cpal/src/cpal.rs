@@ -185,13 +185,22 @@ fn run_output_stream(
     cfg: Config,
     mut cb: Box<dyn FnMut(&mut AudioIo) + Send>,
 ) -> Result<Handle, AudioHostError> {
-    if cfg.input_channels != 0 || cfg.output_channels != 2 {
+    if cfg.input_channels != 0 || cfg.output_channels == 0 {
         return Err(AudioHostError::UnsupportedConfig(format!(
-            "cpal output stream supports input_channels=0, output_channels=2; got \
+            "cpal output stream supports input_channels=0, output_channels>=1; got \
              input_channels={}, output_channels={}",
             cfg.input_channels, cfg.output_channels
         )));
     }
+    // Whether the *device* supports the requested output_channels at
+    // the requested sample rate is the responsibility of
+    // `validate_output_channels` / `select_f32_channels_at_rate`
+    // below — they query cpal for the device's actual capabilities
+    // and surface a precise error if the requested count isn't
+    // available. Plan 2026-05-06-01 T3 audit (PR #82 local review):
+    // the previous `output_channels != 2` guard pre-dates the
+    // multi-channel CLI flag and would have silently rejected any
+    // 3+ channel run before the device-capability check ran.
 
     let supported: Vec<_> = device
         .supported_output_configs()
