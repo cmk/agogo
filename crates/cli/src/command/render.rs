@@ -6,9 +6,14 @@ use agogo::chan::conn::tempo::Tempo;
 use agogo::chan::time::conn::tick_to_whole_samples;
 use agogo::chan::time::grid::Grid;
 use agogo::chan::time::tick::Tick;
-use agogo::core::{MAX_OUTPUT_CHANNELS, OfflineRenderConfig, render_offline};
+use agogo::core::{
+    MAX_OUTPUT_CHANNELS, OfflinePcm, OfflineRenderConfig, OfflineRenderReport, render_offline,
+    render_offline_capture,
+};
 use bpaf::Bpaf;
+use hound::{SampleFormat, WavSpec, WavWriter};
 use serde_json::json;
+use std::path::Path;
 
 use crate::parse::{parse_bpm_to_tempo, parse_positive_u32};
 
@@ -43,6 +48,14 @@ pub struct RenderArgs {
     /// for offline diagnostics.
     #[bpaf(long, argument("SPEC"), many)]
     pub ch: Vec<String>,
+    /// Optional path to write a 32-bit float multi-channel WAV file
+    /// alongside the JSON report. The WAV's channel count matches
+    /// `--output-channels`; each `out=N` audio channel writes to
+    /// lane `N` and unrouted lanes are silence. When omitted, no
+    /// file is written and the JSON report is the only output
+    /// (back-compat with existing callers).
+    #[bpaf(long, argument("FILE"))]
+    pub wav_out: Option<String>,
 }
 
 pub fn render(args: &RenderArgs) -> Result<(), String> {
@@ -75,15 +88,21 @@ pub fn render(args: &RenderArgs) -> Result<(), String> {
 
     let channels = parse_channels(&args.ch)?;
     let total_frames = frames_for_bars(args.duration_bars, args.bpm, args.sr)?;
-    let report = render_offline(OfflineRenderConfig {
+    let cfg = OfflineRenderConfig {
         channels,
         bpm: args.bpm,
         sample_rate: args.sr,
         buffer_frames: args.buffer_frames,
         total_frames,
         output_channels,
-    })
-    .map_err(|e| e.to_string())?;
+    };
+    let report: OfflineRenderReport = if let Some(wav_path) = args.wav_out.as_deref() {
+        let (report, pcm) = render_offline_capture(cfg).map_err(|e| e.to_string())?;
+        write_wav(wav_path, &pcm)?;
+        report
+    } else {
+        render_offline(cfg).map_err(|e| e.to_string())?
+    };
 
     let midi: Vec<_> = report
         .midi
@@ -182,6 +201,33 @@ fn frames_for_bars(bars: u32, bpm: Tempo, sr: u32) -> Result<u64, String> {
         .ok_or_else(|| format!("--duration-bars {bars} overflows tick range"))?;
     tick_to_whole_samples(Tick(ticks), bpm, sr)
         .ok_or_else(|| format!("could not convert {bars} bars to samples at --sr {sr}"))
+}
+
+/// Write the captured offline PCM as a 32-bit float WAV file.
+///
+/// `pcm.interleaved` is consumed in its native interleaved layout
+/// (no transposition), which matches what `hound::WavWriter` wants
+/// for multi-channel writes. Float-PCM is lossless against the
+/// renderer's native sample format — no quantisation policy is
+/// needed (separate plan).
+fn write_wav(path: &str, pcm: &OfflinePcm) -> Result<(), String> {
+    let spec = WavSpec {
+        channels: pcm.channels,
+        sample_rate: pcm.sample_rate,
+        bits_per_sample: 32,
+        sample_format: SampleFormat::Float,
+    };
+    let mut writer = WavWriter::create(Path::new(path), spec)
+        .map_err(|e| format!("--wav-out {path}: create failed: {e}"))?;
+    for &sample in &pcm.interleaved {
+        writer
+            .write_sample(sample)
+            .map_err(|e| format!("--wav-out {path}: write failed: {e}"))?; // PCM ABI
+    }
+    writer
+        .finalize()
+        .map_err(|e| format!("--wav-out {path}: finalize failed: {e}"))?;
+    Ok(())
 }
 
 fn tempo_decimal(tempo: Tempo) -> String {

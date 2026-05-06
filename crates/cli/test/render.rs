@@ -250,3 +250,142 @@ fn render_4_channel_cli_matches_library_aggregates() {
         );
     }
 }
+
+/// `agogo render --wav-out FILE` writes a 32-bit float multi-channel
+/// WAV; reading it back with `hound` reproduces the exact same
+/// interleaved samples that `render_offline_capture` returns from
+/// the equivalent in-process config. Float-PCM is lossless so the
+/// equality is bit-identical, not approximate.
+#[test]
+fn render_wav_out_round_trip_matches_capture() {
+    let tmpdir = tempdir_path();
+    let wav_path = format!("{tmpdir}/agogo-render-wav.wav");
+    let ch_specs = [
+        "id=ch1,dev=audio,mode=click,grid=t2t,out=0",
+        "id=ch2,dev=audio,mode=click,grid=t2,out=1",
+        "id=ch3,dev=audio,mode=click,grid=t4,out=2",
+        "id=ch4,dev=audio,mode=click,grid=t4t,out=3",
+    ];
+    let mut cli_args: Vec<&str> = vec![
+        "render",
+        "--source",
+        "internal",
+        "--bpm",
+        "120",
+        "--sr",
+        "48000",
+        "--duration-bars",
+        "1",
+        "--buffer-frames",
+        "1024",
+        "--output-channels",
+        "4",
+        "--wav-out",
+        &wav_path,
+    ];
+    for spec in &ch_specs {
+        cli_args.push("--ch");
+        cli_args.push(spec);
+    }
+    let cli_output = Command::new(env!("CARGO_BIN_EXE_agogo"))
+        .args(&cli_args)
+        .output()
+        .expect("run agogo render");
+    assert!(
+        cli_output.status.success(),
+        "agogo render --wav-out failed: status={:?}, stderr={}",
+        cli_output.status.code(),
+        String::from_utf8_lossy(&cli_output.stderr),
+    );
+
+    // Drive the same render in-process to get the reference PCM.
+    let specs: Vec<String> = ch_specs.iter().map(|s| (*s).to_string()).collect();
+    let named = parse_channels(&specs).expect("parse channels");
+    let channels: Vec<Channel> = named
+        .into_iter()
+        .map(|(_, spec)| spec.into_channel().expect("into_channel"))
+        .collect();
+    let bpm = Tempo::from_bpm_integer(120);
+    let sr = 48_000_u32;
+    let total_frames: u64 = 96_000;
+    let cfg = OfflineRenderConfig {
+        channels,
+        bpm,
+        sample_rate: sr,
+        buffer_frames: 1024,
+        total_frames,
+        output_channels: 4,
+    };
+    let (_report, expected) = render_offline_capture(cfg).expect("render_offline_capture");
+
+    // Read the WAV back and compare interleaved samples.
+    let mut reader = hound::WavReader::open(&wav_path).expect("open wav");
+    let spec = reader.spec();
+    assert_eq!(spec.channels, 4);
+    assert_eq!(spec.sample_rate, sr);
+    assert_eq!(spec.bits_per_sample, 32);
+    assert_eq!(spec.sample_format, hound::SampleFormat::Float);
+    let actual: Vec<f32> = reader // PCM ABI
+        .samples::<f32>()
+        .map(|s| s.expect("read sample"))
+        .collect();
+    assert_eq!(
+        actual.len() as u64,
+        total_frames * u64::from(spec.channels),
+        "WAV sample count mismatch"
+    );
+    assert_eq!(
+        actual, expected.interleaved,
+        "WAV PCM does not match render_offline_capture"
+    );
+    let _ = std::fs::remove_file(&wav_path);
+}
+
+/// `--wav-out` pointing into a non-existent directory fails fast
+/// with a clean String error from the boundary, no panic.
+#[test]
+fn render_wav_out_path_error() {
+    let bogus = "/nonexistent-directory-for-agogo-test/agogo.wav";
+    let output = Command::new(env!("CARGO_BIN_EXE_agogo"))
+        .args([
+            "render",
+            "--source",
+            "internal",
+            "--bpm",
+            "120",
+            "--sr",
+            "48000",
+            "--duration-bars",
+            "1",
+            "--buffer-frames",
+            "1024",
+            "--output-channels",
+            "2",
+            "--wav-out",
+            bogus,
+            "--ch",
+            "id=ch1,dev=audio,mode=click,grid=t4,out=0",
+        ])
+        .output()
+        .expect("run agogo render");
+    assert!(
+        !output.status.success(),
+        "agogo render --wav-out should fail on bogus path"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--wav-out"),
+        "expected error to mention --wav-out, got: {stderr}"
+    );
+}
+
+/// Returns a per-test-process tempdir path. The wav round-trip test
+/// only writes a single file, so a stable path with a per-PID
+/// suffix avoids cross-test races without pulling in a tempdir
+/// dependency.
+fn tempdir_path() -> String {
+    let pid = std::process::id();
+    let dir = format!("{}/agogo-cli-render-{pid}", std::env::temp_dir().display());
+    std::fs::create_dir_all(&dir).expect("create tempdir");
+    dir
+}
