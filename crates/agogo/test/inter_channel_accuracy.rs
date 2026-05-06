@@ -404,6 +404,160 @@ proptest! {
         }
     }
 
+    /// For each predicted onset on the routed lane, the first
+    /// nonzero sample of that click run is at exactly the
+    /// scheduler's `tick_to_whole_samples` position. Catches any
+    /// off-by-one between the predicted tick→sample mapping and
+    /// the renderer's actual write offset. Together with
+    /// `prop_lane_separation_and_zero_outside_footprints`, the
+    /// "first nonzero in this click run" reduces to "first nonzero
+    /// at-or-after this onset, before the next onset's footprint
+    /// starts."
+    #[test]
+    fn prop_onset_sample_exact(
+        (grid_a, grid_b) in arb_polyrhythm_pair(),
+    ) {
+        let bpm = BPM_120;
+        let sr = SR_48K;
+        let total_frames = frames_for_bars(1, bpm, sr);
+        let pcm = render_lanes_ok(
+            vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
+            2,
+            bpm,
+            sr,
+            1024,
+            total_frames,
+        );
+        let click = click_len(sr);
+        for (lane_idx, grid) in [(0_usize, grid_a), (1_usize, grid_b)] {
+            let onsets = predict_onsets(grid, bpm, sr, total_frames);
+            for &o in &onsets {
+                let start = o as usize;
+                let end = (start + click).min(total_frames as usize);
+                let first_nonzero_in_run = pcm.lanes[lane_idx][start..end]
+                    .iter()
+                    .position(|&s| s != 0.0)
+                    .map(|i| start + i);
+                prop_assert_eq!(
+                    first_nonzero_in_run,
+                    Some(start),
+                    "lane {} onset run starting at predicted sample {} should have its first \
+                     nonzero sample at exactly {}, not {:?}",
+                    lane_idx, start, start, first_nonzero_in_run
+                );
+            }
+        }
+    }
+
+    /// The renderer writes exactly `click_len(sr)` consecutive
+    /// samples per click event (truncated only when the buffer
+    /// ends first). For each predicted onset, the sample one
+    /// position past the predicted footprint end must be exactly
+    /// 0 (no overflow), and the footprint itself must contain at
+    /// least one nonzero sample (no silent zeroing).
+    #[test]
+    fn prop_footprint_length_constant(
+        (grid_a, grid_b) in arb_polyrhythm_pair(),
+    ) {
+        let bpm = BPM_120;
+        let sr = SR_48K;
+        let total_frames = frames_for_bars(1, bpm, sr);
+        let pcm = render_lanes_ok(
+            vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
+            2,
+            bpm,
+            sr,
+            1024,
+            total_frames,
+        );
+        let click = click_len(sr);
+        for (lane_idx, grid) in [(0_usize, grid_a), (1_usize, grid_b)] {
+            let onsets = predict_onsets(grid, bpm, sr, total_frames);
+            for &o in &onsets {
+                let start = o as usize;
+                let expected_end = (start + click).min(total_frames as usize);
+                // Sample one past the predicted end is silent
+                // (renderer didn't write past click_len).
+                if expected_end < total_frames as usize {
+                    prop_assert_eq!(
+                        pcm.lanes[lane_idx][expected_end],
+                        0.0,
+                        "lane {} click at sample {} extends past click_len={}",
+                        lane_idx,
+                        start,
+                        click
+                    );
+                }
+                // Footprint contains at least one nonzero sample
+                // (renderer wrote something).
+                let any_nonzero = pcm.lanes[lane_idx][start..expected_end]
+                    .iter()
+                    .any(|&s| s != 0.0);
+                prop_assert!(
+                    any_nonzero,
+                    "lane {} footprint at sample {} contained no nonzero samples",
+                    lane_idx, start
+                );
+            }
+            // Spacing guard: the polyrhythm pool keeps event
+            // spacing at >= click_len, so footprints never overlap
+            // — multi-overlap-tail behaviour is documented as a
+            // known limitation in the renderer's doc and is not
+            // exercised here.
+            for window in onsets.windows(2) {
+                let span = window[1] - window[0];
+                prop_assert!(
+                    span >= click as u64,
+                    "lane {} grid {:?}: onsets {} and {} are {} samples apart, \
+                     less than click_len={click}",
+                    lane_idx, grid, window[0], window[1], span
+                );
+            }
+        }
+    }
+
+    /// For a fixed (channels, lanes, bpm, duration_bars) config,
+    /// the first onset on a routed lane at `sr=96_000` is at exactly
+    /// 2x the sample index of the same onset at `sr=48_000`. End-
+    /// to-end check on `tick_to_whole_samples` rounding through the
+    /// whole render path.
+    #[test]
+    fn prop_sample_rate_doubling(
+        (grid_a, grid_b) in arb_polyrhythm_pair(),
+    ) {
+        let bpm = BPM_120;
+        let render_at = |sr: u32| {
+            let total_frames = frames_for_bars(1, bpm, sr);
+            render_lanes_ok(
+                vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
+                2,
+                bpm,
+                sr,
+                1024,
+                total_frames,
+            )
+        };
+        let pcm_48 = render_at(48_000);
+        let pcm_96 = render_at(96_000);
+        for lane_idx in 0..2 {
+            let first_48 = pcm_48.lanes[lane_idx].iter().position(|&s| s != 0.0);
+            let first_96 = pcm_96.lanes[lane_idx].iter().position(|&s| s != 0.0);
+            prop_assert!(first_48.is_some(), "lane {} silent at 48k", lane_idx);
+            prop_assert!(first_96.is_some(), "lane {} silent at 96k", lane_idx);
+            // Tick 0 maps to sample 0 at every rate; both lanes
+            // include the bar-zero tick. Strictly checking
+            // `first_96 == 2 * first_48` is `0 == 0` here; pin it
+            // anyway so a future first-nonzero-at-N onset would be
+            // covered.
+            prop_assert_eq!(
+                first_96.unwrap(),
+                2 * first_48.unwrap(),
+                "lane {} onset position differs across rates",
+                lane_idx
+            );
+        }
+    }
+
     /// For polyrhythm pairs whose grids share a coincident tick at
     /// 0 (bar start), the two routed lanes' first onsets are at
     /// the same sample index. Generalises the original "3:2 at
