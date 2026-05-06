@@ -29,9 +29,11 @@ agogo = { path = "../agogo", default-features = false, optional = true }
 # WASAPI) unless the matching feature is explicitly requested.
 bpaf = { workspace = true }
 ctrlc = { version = "3", optional = true }
+hound = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+hound = { workspace = true }
 proptest = { workspace = true }
 
 # `agogo` is the user-facing binary name (matches
