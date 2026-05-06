@@ -1028,3 +1028,21 @@ fn spot_pcm_field_layout() {
     assert_eq!(f0[0], pcm.interleaved[0]);
     assert_eq!(f0[1], pcm.interleaved[1]);
 }
+
+/// `OfflinePcm::into_planar` returns an empty Vec when `channels`
+/// is 0 instead of panicking on `idx % 0`. The renderer never
+/// produces this shape (output_channels is validated 1..=16 at the
+/// boundary), but `OfflinePcm` exposes its fields so a
+/// hand-constructed instance is reachable from downstream code.
+/// Catches the regression PR #82's Copilot review flagged.
+#[test]
+fn spot_into_planar_zero_channels_no_panic() {
+    let pcm = OfflinePcm {
+        interleaved: Vec::new(), // PCM ABI
+        sample_rate: 48_000,
+        frames: 0,
+        channels: 0,
+    };
+    let planar = pcm.into_planar();
+    assert!(planar.is_empty());
+}
