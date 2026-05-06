@@ -377,6 +377,10 @@ pub enum OfflineRenderError {
     },
 }
 
+// `LaneMissing` deliberately not present: `Channel::Audio.lane` is a
+// total `u16`, so a missing `out=` value is rejected upstream by the
+// spec parser / `into_channel`, never reaches the offline boundary.
+
 impl std::fmt::Display for OfflineRenderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

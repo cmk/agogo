@@ -173,13 +173,23 @@ pub struct CvPulseState {
 /// in-progress click that was truncated by a buffer boundary; the
 /// next [`render_audio_click_block`] call resumes that click at
 /// output offset 0 before processing new events. This makes the
-/// rendered audio bit-identical regardless of buffer-frame size,
-/// per plan 2026-05-05-02 T5's `prop_buffer_boundary_invariance`.
-/// Only the most-recently-truncated click is preserved; rapid
-/// overlapping clicks that all straddle a single boundary lose
-/// the earlier tails (this matches the additive-mix design where
-/// each new event uses the shared filter / RNG state at its
-/// scheduled moment).
+/// rendered audio bit-identical across buffer-frame sizes for the
+/// musical configurations the proptest battery exercises (event
+/// spacing >= `click_len`).
+///
+/// **Known limitation — overlapping-click tails.** Only the
+/// most-recently-truncated click's tail is preserved across a
+/// boundary. If two or more clicks from the same channel both
+/// straddle the same boundary (possible for fine grids like
+/// `T256` / `T512P` at high BPM where event spacing drops below
+/// `click_len`), only the latest tail resumes and the earlier
+/// tails are silently lost. Properly fixing this requires a queue
+/// of pending tails *and* decoupling state advancement from
+/// output writing so the unsplit-rendering order is preserved
+/// (the shared filter / RNG state currently interleaves between
+/// overlapping clicks). Tracked as a follow-up; the proptest
+/// `prop_buffer_boundary_invariance` does not exercise grids in
+/// this regime.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct AudioClickState {
     click_counter: u32,
