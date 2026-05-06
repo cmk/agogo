@@ -293,15 +293,16 @@ proptest! {
     ) {
         prop_assume!(used_lane < output_channels);
         let total_frames = frames_for_bars(1, BPM_120, SR_48K);
-        let pcm = render_lanes_ok(
+        let lanes = render_lanes_ok(
             vec![audio_channel(grid, used_lane)],
             output_channels,
             BPM_120,
             SR_48K,
             512,
             total_frames,
-        );
-        for (lane_idx, lane_pcm) in pcm.lanes.iter().enumerate() {
+        )
+        .into_planar();
+        for (lane_idx, lane_pcm) in lanes.iter().enumerate() {
             if lane_idx as u16 == used_lane {
                 continue;
             }
@@ -328,14 +329,15 @@ proptest! {
         let bpm = BPM_120;
         let sr = SR_48K;
         let total_frames = frames_for_bars(1, bpm, sr);
-        let pcm = render_lanes_ok(
+        let lanes = render_lanes_ok(
             vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
             2,
             bpm,
             sr,
             1024,
             total_frames,
-        );
+        )
+        .into_planar();
         let click = click_len(sr);
         let onsets_a = predict_onsets(grid_a, bpm, sr, total_frames);
         let onsets_b = predict_onsets(grid_b, bpm, sr, total_frames);
@@ -343,7 +345,7 @@ proptest! {
         let mask_b = predicted_footprint_mask(&onsets_b, click, total_frames);
 
         // Outside footprints: exactly zero on the routed lane.
-        for (i, &s) in pcm.lanes[0].iter().enumerate() {
+        for (i, &s) in lanes[0].iter().enumerate() {
             if !mask_a[i] {
                 prop_assert!(
                     s == 0.0,
@@ -351,7 +353,7 @@ proptest! {
                 );
             }
         }
-        for (i, &s) in pcm.lanes[1].iter().enumerate() {
+        for (i, &s) in lanes[1].iter().enumerate() {
             if !mask_b[i] {
                 prop_assert!(
                     s == 0.0,
@@ -366,7 +368,7 @@ proptest! {
         for &o in &onsets_a {
             let start = o as usize;
             let end = (start + click).min(total_frames as usize);
-            let any_nonzero = pcm.lanes[0][start..end].iter().any(|&s| s != 0.0);
+            let any_nonzero = lanes[0][start..end].iter().any(|&s| s != 0.0);
             prop_assert!(
                 any_nonzero,
                 "lane 0 footprint at {start}..{end} all zero"
@@ -375,7 +377,7 @@ proptest! {
         for &o in &onsets_b {
             let start = o as usize;
             let end = (start + click).min(total_frames as usize);
-            let any_nonzero = pcm.lanes[1][start..end].iter().any(|&s| s != 0.0);
+            let any_nonzero = lanes[1][start..end].iter().any(|&s| s != 0.0);
             prop_assert!(
                 any_nonzero,
                 "lane 1 footprint at {start}..{end} all zero"
@@ -399,21 +401,22 @@ proptest! {
         let bpm = BPM_120;
         let sr = SR_48K;
         let total_frames = frames_for_bars(1, bpm, sr);
-        let pcm = render_lanes_ok(
+        let lanes = render_lanes_ok(
             vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
             2,
             bpm,
             sr,
             1024,
             total_frames,
-        );
+        )
+        .into_planar();
         let click = click_len(sr);
         for (lane_idx, grid) in [(0_usize, grid_a), (1_usize, grid_b)] {
             let onsets = predict_onsets(grid, bpm, sr, total_frames);
             for &o in &onsets {
                 let start = o as usize;
                 let end = (start + click).min(total_frames as usize);
-                let first_nonzero_in_run = pcm.lanes[lane_idx][start..end]
+                let first_nonzero_in_run = lanes[lane_idx][start..end]
                     .iter()
                     .position(|&s| s != 0.0)
                     .map(|i| start + i);
@@ -441,14 +444,15 @@ proptest! {
         let bpm = BPM_120;
         let sr = SR_48K;
         let total_frames = frames_for_bars(1, bpm, sr);
-        let pcm = render_lanes_ok(
+        let lanes = render_lanes_ok(
             vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
             2,
             bpm,
             sr,
             1024,
             total_frames,
-        );
+        )
+        .into_planar();
         let click = click_len(sr);
         for (lane_idx, grid) in [(0_usize, grid_a), (1_usize, grid_b)] {
             let onsets = predict_onsets(grid, bpm, sr, total_frames);
@@ -459,7 +463,7 @@ proptest! {
                 // (renderer didn't write past click_len).
                 if expected_end < total_frames as usize {
                     prop_assert_eq!(
-                        pcm.lanes[lane_idx][expected_end],
+                        lanes[lane_idx][expected_end],
                         0.0,
                         "lane {} click at sample {} extends past click_len={}",
                         lane_idx,
@@ -469,7 +473,7 @@ proptest! {
                 }
                 // Footprint contains at least one nonzero sample
                 // (renderer wrote something).
-                let any_nonzero = pcm.lanes[lane_idx][start..expected_end]
+                let any_nonzero = lanes[lane_idx][start..expected_end]
                     .iter()
                     .any(|&s| s != 0.0);
                 prop_assert!(
@@ -510,22 +514,24 @@ proptest! {
         let bpm = BPM_120;
         let total_48 = frames_for_bars(1, bpm, 48_000);
         let total_96 = frames_for_bars(1, bpm, 96_000);
-        let pcm_48 = render_lanes_ok(
+        let lanes_48 = render_lanes_ok(
             vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
             2,
             bpm,
             48_000,
             1024,
             total_48,
-        );
-        let pcm_96 = render_lanes_ok(
+        )
+        .into_planar();
+        let lanes_96 = render_lanes_ok(
             vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
             2,
             bpm,
             96_000,
             1024,
             total_96,
-        );
+        )
+        .into_planar();
         for (lane_idx, grid) in [(0_usize, grid_a), (1_usize, grid_b)] {
             let onsets_48 = predict_onsets(grid, bpm, 48_000, total_48);
             let onsets_96 = predict_onsets(grid, bpm, 96_000, total_96);
@@ -546,11 +552,11 @@ proptest! {
             // Renderer actually wrote there in both buffers.
             let click_48 = click_len(48_000);
             let click_96 = click_len(96_000);
-            let any_48 = pcm_48.lanes[lane_idx]
+            let any_48 = lanes_48[lane_idx]
                 [target_48 as usize..(target_48 as usize + click_48).min(total_48 as usize)]
                 .iter()
                 .any(|&s| s != 0.0);
-            let any_96 = pcm_96.lanes[lane_idx]
+            let any_96 = lanes_96[lane_idx]
                 [target_96 as usize..(target_96 as usize + click_96).min(total_96 as usize)]
                 .iter()
                 .any(|&s| s != 0.0);
@@ -571,19 +577,20 @@ proptest! {
     ) {
         let sr = SR_48K;
         let total_frames = frames_for_bars(1, bpm, sr);
-        let pcm = render_lanes_ok(
+        let lanes = render_lanes_ok(
             vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
             2,
             bpm,
             sr,
             1024,
             total_frames,
-        );
+        )
+        .into_planar();
         // Both grids include tick 0 (every grid divides bar 0), so
         // the first onset is at sample 0 on both lanes. Surface the
         // first nonzero sample on each lane and assert equality.
-        let first_a = pcm.lanes[0].iter().position(|&s| s != 0.0);
-        let first_b = pcm.lanes[1].iter().position(|&s| s != 0.0);
+        let first_a = lanes[0].iter().position(|&s| s != 0.0);
+        let first_b = lanes[1].iter().position(|&s| s != 0.0);
         prop_assert_eq!(first_a, Some(0));
         prop_assert_eq!(first_b, Some(0));
     }
@@ -612,9 +619,11 @@ proptest! {
         let b = render(256);
         let c = render(1024);
         let d = render(4096);
-        prop_assert_eq!(&a.lanes, &b.lanes);
-        prop_assert_eq!(&a.lanes, &c.lanes);
-        prop_assert_eq!(&a.lanes, &d.lanes);
+        // Compare interleaved Vecs directly: one allocation per
+        // render rather than `output_channels` per render.
+        prop_assert_eq!(&a.interleaved, &b.interleaved);
+        prop_assert_eq!(&a.interleaved, &c.interleaved);
+        prop_assert_eq!(&a.interleaved, &d.interleaved);
     }
 
     /// Per-lane PCM from a full N-channel render is bit-identical
@@ -643,7 +652,8 @@ proptest! {
             sr,
             buffer_frames,
             total_frames,
-        );
+        )
+        .into_planar();
         for (i, &g) in grids.iter().enumerate() {
             let solo = render_lanes_ok(
                 vec![audio_channel(g, i as u16)],
@@ -652,10 +662,11 @@ proptest! {
                 sr,
                 buffer_frames,
                 total_frames,
-            );
+            )
+            .into_planar();
             prop_assert_eq!(
-                &full.lanes[i],
-                &solo.lanes[i],
+                &full[i],
+                &solo[i],
                 "lane {} differs between full N-channel render and solo render",
                 i
             );
@@ -701,10 +712,103 @@ proptest! {
         );
         prop_assert_eq!(pcm.sample_rate, cfg.sr);
         prop_assert_eq!(pcm.frames, total_frames);
-        prop_assert_eq!(pcm.lanes.len(), usize::from(cfg.output_channels));
-        for lane in &pcm.lanes {
+        prop_assert_eq!(pcm.channels, cfg.output_channels);
+        prop_assert_eq!(
+            pcm.interleaved.len() as u64,
+            total_frames * u64::from(cfg.output_channels)
+        );
+        let lanes = pcm.into_planar();
+        prop_assert_eq!(lanes.len(), usize::from(cfg.output_channels));
+        for lane in &lanes {
             prop_assert_eq!(lane.len() as u64, total_frames);
         }
+    }
+
+    /// Interleaved layout invariant: `interleaved.len() == frames *
+    /// channels`, and the strided `lane(i)` accessor returns the
+    /// same samples as direct indexing.
+    #[test]
+    fn prop_interleaved_layout(cfg in arb_render_cfg()) {
+        let total_frames = frames_for_bars(cfg.duration_bars, cfg.bpm, cfg.sr);
+        let pcm = render_lanes_ok(
+            vec![audio_channel(Grid::T4, 0)],
+            cfg.output_channels,
+            cfg.bpm,
+            cfg.sr,
+            cfg.buffer_frames,
+            total_frames,
+        );
+        let channels = usize::from(pcm.channels);
+        prop_assert_eq!(
+            pcm.interleaved.len() as u64,
+            pcm.frames * u64::from(pcm.channels)
+        );
+        for lane in 0..pcm.channels {
+            let lane_idx = usize::from(lane);
+            let strided: Vec<f32> = pcm.lane(lane).collect();
+            prop_assert_eq!(strided.len() as u64, pcm.frames);
+            for (t, sample) in strided.iter().enumerate() {
+                prop_assert_eq!(
+                    *sample,
+                    pcm.interleaved[t * channels + lane_idx],
+                    "lane({}).nth({}) disagrees with interleaved[{}*{}+{}]",
+                    lane, t, t, channels, lane_idx
+                );
+            }
+        }
+    }
+
+    /// `into_planar` round-trips: planar[lane][t] equals
+    /// interleaved[t * channels + lane] for all in-range (lane, t).
+    #[test]
+    fn prop_into_planar_round_trip(cfg in arb_render_cfg()) {
+        let total_frames = frames_for_bars(cfg.duration_bars, cfg.bpm, cfg.sr);
+        let pcm = render_lanes_ok(
+            vec![audio_channel(Grid::T4, 0)],
+            cfg.output_channels,
+            cfg.bpm,
+            cfg.sr,
+            cfg.buffer_frames,
+            total_frames,
+        );
+        let channels = usize::from(pcm.channels);
+        let interleaved = pcm.interleaved.clone();
+        let planar = pcm.into_planar();
+        prop_assert_eq!(planar.len(), channels);
+        for (lane, lane_pcm) in planar.iter().enumerate() {
+            prop_assert_eq!(lane_pcm.len() as u64, total_frames);
+            for (t, &sample) in lane_pcm.iter().enumerate() {
+                prop_assert_eq!(
+                    sample,
+                    interleaved[t * channels + lane],
+                    "planar[{}][{}] disagrees with interleaved[{}*{}+{}]",
+                    lane, t, t, channels, lane
+                );
+            }
+        }
+    }
+
+    /// `lane(i).count() == frames` for every valid `i`, and
+    /// out-of-range `i` produces an empty iterator.
+    #[test]
+    fn prop_lane_iterator_length(cfg in arb_render_cfg()) {
+        let total_frames = frames_for_bars(cfg.duration_bars, cfg.bpm, cfg.sr);
+        let pcm = render_lanes_ok(
+            vec![audio_channel(Grid::T4, 0)],
+            cfg.output_channels,
+            cfg.bpm,
+            cfg.sr,
+            cfg.buffer_frames,
+            total_frames,
+        );
+        for lane in 0..pcm.channels {
+            prop_assert_eq!(pcm.lane(lane).count() as u64, pcm.frames);
+        }
+        // Out-of-range lane is an empty iterator (belt-and-braces;
+        // the renderer validator already rejects out-of-range lanes
+        // upstream).
+        prop_assert_eq!(pcm.lane(pcm.channels).count(), 0);
+        prop_assert_eq!(pcm.lane(u16::MAX).count(), 0);
     }
 }
 
@@ -719,7 +823,7 @@ fn spot_3_2_at_120bpm_48k_sample_perfect() {
     let bpm = BPM_120;
     let sr = SR_48K;
     let total_frames = frames_for_bars(1, bpm, sr);
-    let pcm = render_lanes_ok(
+    let lanes = render_lanes_ok(
         vec![
             audio_channel(Grid::T2T, 0), // 3 events per bar
             audio_channel(Grid::T2, 1),  // 2 events per bar
@@ -729,15 +833,16 @@ fn spot_3_2_at_120bpm_48k_sample_perfect() {
         sr,
         1024,
         total_frames,
-    );
+    )
+    .into_planar();
     // Tick 0 is the only coincident moment in a 1-bar render
     // (next coincident is at bar 0 + LCM(T2T, T2) = 1 bar).
     let onsets_a = predict_onsets(Grid::T2T, bpm, sr, total_frames);
     let onsets_b = predict_onsets(Grid::T2, bpm, sr, total_frames);
     assert_eq!(onsets_a[0], 0);
     assert_eq!(onsets_b[0], 0);
-    let first_a = pcm.lanes[0].iter().position(|&s| s != 0.0);
-    let first_b = pcm.lanes[1].iter().position(|&s| s != 0.0);
+    let first_a = lanes[0].iter().position(|&s| s != 0.0);
+    let first_b = lanes[1].iter().position(|&s| s != 0.0);
     assert_eq!(first_a, Some(0), "lane 0 first nonzero at sample 0");
     assert_eq!(first_b, Some(0), "lane 1 first nonzero at sample 0");
 }
@@ -756,13 +861,13 @@ fn spot_16_channel_unique_lanes() {
         .enumerate()
         .map(|(i, g)| audio_channel(*g, i as u16))
         .collect();
-    let pcm = render_lanes_ok(channels, 16, bpm, sr, 1024, total_frames);
+    let lanes = render_lanes_ok(channels, 16, bpm, sr, 1024, total_frames).into_planar();
     let click = click_len(sr);
     for (i, &g) in grids.iter().enumerate() {
         let onsets = predict_onsets(g, bpm, sr, total_frames);
         let mask = predicted_footprint_mask(&onsets, click, total_frames);
         // Every footprint sample is reachable by *this* lane only.
-        for (j, &s) in pcm.lanes[i].iter().enumerate() {
+        for (j, &s) in lanes[i].iter().enumerate() {
             if !mask[j] {
                 assert_eq!(
                     s, 0.0,
@@ -804,15 +909,16 @@ fn spot_event_at_sample_zero() {
     let bpm = BPM_120;
     let sr = SR_48K;
     let total_frames = frames_for_bars(1, bpm, sr);
-    let pcm = render_lanes_ok(
+    let lanes = render_lanes_ok(
         vec![audio_channel(Grid::T1, 0)],
         1,
         bpm,
         sr,
         1024,
         total_frames,
-    );
-    let first = pcm.lanes[0].iter().position(|&s| s != 0.0);
+    )
+    .into_planar();
+    let first = lanes[0].iter().position(|&s| s != 0.0);
     assert_eq!(first, Some(0));
 }
 
@@ -832,19 +938,20 @@ fn spot_event_at_buffer_end() {
     // the second click footprint truncates while the first footprint
     // is fully written.
     let total_frames = onset_period + (click as u64 / 2);
-    let pcm = render_lanes_ok(
+    let lanes = render_lanes_ok(
         vec![audio_channel(Grid::T4, 0)],
         1,
         bpm,
         sr,
         1024,
         total_frames,
-    );
-    assert_eq!(pcm.lanes[0].len() as u64, total_frames);
+    )
+    .into_planar();
+    assert_eq!(lanes[0].len() as u64, total_frames);
     // Region between first footprint end and second onset is silent.
     let pre = (onset_period as usize).saturating_sub(1);
     assert_eq!(
-        pcm.lanes[0][pre], 0.0,
+        lanes[0][pre], 0.0,
         "sample just before second onset must be silent (pre={pre})"
     );
 }
@@ -866,11 +973,58 @@ fn spot_192k_sample_rate() {
         total_frames,
     );
     assert_eq!(pcm.sample_rate, sr);
-    assert_eq!(pcm.lanes.len(), 2);
-    for lane in &pcm.lanes {
+    assert_eq!(pcm.channels, 2);
+    let lanes = pcm.into_planar();
+    assert_eq!(lanes.len(), 2);
+    for lane in &lanes {
         assert_eq!(lane.len() as u64, total_frames);
     }
     // Lane 0 carries the click; lane 1 is silent.
-    assert!(pcm.lanes[0].iter().any(|&s| s != 0.0));
-    assert!(pcm.lanes[1].iter().all(|&s| s == 0.0));
+    assert!(lanes[0].iter().any(|&s| s != 0.0));
+    assert!(lanes[1].iter().all(|&s| s == 0.0));
+}
+
+/// Field-layout invariant for the interleaved storage. Renders 4
+/// frames × 2 channels with a single audio click on lane 1; asserts
+/// that the interleaved Vec contains [L0,R0,L1,R1,L2,R2,L3,R3] in
+/// that exact order, with the click samples on the R positions
+/// (odd indices) and silence on the L positions (even indices).
+#[test]
+fn spot_pcm_field_layout() {
+    let bpm = BPM_120;
+    let sr = SR_48K;
+    // Pick a duration that's long enough to render at least one
+    // click footprint; T1 fires at tick 0 so the click starts on
+    // sample 0.
+    let total_frames: u64 = 8;
+    let pcm = render_lanes_ok(
+        vec![audio_channel(Grid::T1, 1)],
+        2,
+        bpm,
+        sr,
+        1024,
+        total_frames,
+    );
+    assert_eq!(pcm.channels, 2);
+    assert_eq!(pcm.frames, total_frames);
+    assert_eq!(pcm.interleaved.len(), (total_frames as usize) * 2);
+    // Even indices (lane 0 = L) must be exactly 0.0 — lane 0 is
+    // unrouted.
+    for (i, &s) in pcm.interleaved.iter().enumerate() {
+        if i % 2 == 0 {
+            assert_eq!(s, 0.0, "lane 0 sample at interleaved[{i}] = {s}");
+        }
+    }
+    // Odd indices (lane 1 = R) carry the click; at least one is
+    // nonzero (the click renderer writes click_len samples starting
+    // at sample 0).
+    let any_r_nonzero = pcm.interleaved.iter().enumerate()
+        .any(|(i, &s)| i % 2 == 1 && s != 0.0);
+    assert!(any_r_nonzero, "lane 1 footprint at sample 0 should write nonzero samples");
+    // `frame(0)` returns the [L0, R0] pair.
+    let f0 = pcm.frame(0);
+    assert_eq!(f0.len(), 2);
+    assert_eq!(f0[0], 0.0);
+    assert_eq!(f0[0], pcm.interleaved[0]);
+    assert_eq!(f0[1], pcm.interleaved[1]);
 }

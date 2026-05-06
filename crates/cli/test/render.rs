@@ -207,19 +207,17 @@ fn render_4_channel_cli_matches_library_aggregates() {
     let mut peak_q15 = 0_u16;
     let mut pos_peak_q15 = 0_u16;
     let mut neg_peak_q15 = 0_u16;
-    for lane in &pcm.lanes {
-        for &s in lane {
-            if s != 0.0 {
-                nonzero += 1;
-            }
-            let q15 = (s.abs().min(1.0) * 32767.0_f32).round() as u16; // PCM ABI
-            peak_q15 = peak_q15.max(q15);
-            if s > 0.0 {
-                pos_peak_q15 = pos_peak_q15.max(q15);
-            }
-            if s < 0.0 {
-                neg_peak_q15 = neg_peak_q15.max(q15);
-            }
+    for &s in &pcm.interleaved {
+        if s != 0.0 {
+            nonzero += 1;
+        }
+        let q15 = (s.abs().min(1.0) * 32767.0_f32).round() as u16; // PCM ABI
+        peak_q15 = peak_q15.max(q15);
+        if s > 0.0 {
+            pos_peak_q15 = pos_peak_q15.max(q15);
+        }
+        if s < 0.0 {
+            neg_peak_q15 = neg_peak_q15.max(q15);
         }
     }
 
@@ -234,15 +232,18 @@ fn render_4_channel_cli_matches_library_aggregates() {
         json["audio"]["negative_peak_q15"].as_u64(),
         Some(neg_peak_q15.into())
     );
-    // 4-lane render means lanes.len() == 4 and every lane has
-    // total_frames samples.
-    assert_eq!(pcm.lanes.len(), 4);
-    for lane in &pcm.lanes {
+    // 4-lane render means channels == 4 and the interleaved buffer
+    // has total_frames * 4 samples.
+    assert_eq!(pcm.channels, 4);
+    assert_eq!(pcm.interleaved.len() as u64, total_frames * 4);
+    let lanes = pcm.into_planar();
+    assert_eq!(lanes.len(), 4);
+    for lane in &lanes {
         assert_eq!(lane.len() as u64, total_frames);
     }
     // Every lane should have at least one nonzero sample (the
     // tick-0 click hit on every audio channel).
-    for (i, lane) in pcm.lanes.iter().enumerate() {
+    for (i, lane) in lanes.iter().enumerate() {
         assert!(
             lane.iter().any(|&s| s != 0.0),
             "lane {i} expected at least one nonzero sample"

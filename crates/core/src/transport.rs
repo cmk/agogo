@@ -806,52 +806,107 @@ pub fn render_offline(
 /// Render-and-capture variant of [`render_offline`].
 ///
 /// Returns the same [`OfflineRenderReport`] alongside an
-/// [`OfflinePcm`] split into one `Vec<f32>` per output channel.
-/// Substrate for end-to-end inter-channel sample-accuracy tests
-/// and (planned) `agogo render --wav-out FILE`. Plan
-/// 2026-05-05-02 T4.
+/// [`OfflinePcm`] holding the interleaved render output in the
+/// renderer's native PCM ABI layout. Substrate for end-to-end
+/// inter-channel sample-accuracy tests and `agogo render --wav-out
+/// FILE`. Plan 2026-05-05-02 T4 / Plan 2026-05-06-01 T1.
 pub fn render_offline_capture(
     config: OfflineRenderConfig,
 ) -> Result<(OfflineRenderReport, OfflinePcm), OfflineRenderError> {
     let sample_rate = config.sample_rate;
     let total_frames = config.total_frames;
+    let channels = config.output_channels;
     let (report, pcm) = render_offline_dispatch(config, /*capture=*/ true)?;
     // capture=true is an internal contract that
     // `render_offline_dispatch` always honours. A `None` here would
     // be an internal-invariant violation, not bad user input —
-    // surface it loudly rather than silently produce empty lanes
-    // that mismatch the report's `frames`/`sample_rate`.
+    // surface it loudly rather than silently produce an empty PCM
+    // that mismatches the report's `frames`/`sample_rate`.
     // boundary-panic-ok: internal contract violation, not user input.
-    let lanes = pcm.expect("render_offline_dispatch returned no PCM despite capture=true");
+    let interleaved = pcm.expect("render_offline_dispatch returned no PCM despite capture=true");
     Ok((
         report,
         OfflinePcm {
-            lanes,
+            interleaved,
             sample_rate,
             frames: total_frames,
+            channels,
         },
     ))
 }
 
-/// Per-lane PCM captured by [`render_offline_capture`].
+/// Captured offline render output in interleaved PCM ABI layout.
+///
+/// `interleaved.len() == frames * channels`. Sample at frame `t`,
+/// lane `l` is at index `t * channels + l`. Use [`Self::lane`] for
+/// strided per-lane iteration, [`Self::frame`] for per-frame slices,
+/// or [`Self::into_planar`] when an owned per-lane `Vec<f32>` view
+/// is more ergonomic.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OfflinePcm {
-    /// One Vec per output channel, in lane order. `lanes.len() ==
-    /// output_channels`. Each Vec has `frames` samples (truncated
-    /// for short renders).
-    pub lanes: Vec<Vec<f32>>, // PCM ABI
+    /// Interleaved PCM, length `frames * channels`. Layout matches
+    /// the cpal output buffer the renderer writes into.
+    pub interleaved: Vec<f32>, // PCM ABI
     pub sample_rate: u32,
     pub frames: u64,
+    pub channels: u16,
 }
 
-/// Per-lane PCM (`Vec<f32>` per output channel), present only when
-/// the offline dispatcher was asked to capture the rendered audio.
-type CapturedLanes = Vec<Vec<f32>>; // PCM ABI
+impl OfflinePcm {
+    /// Iterator over samples on a single lane, in frame order.
+    ///
+    /// Returns an empty iterator for `lane >= self.channels`. The
+    /// renderer's lane validator already rejects out-of-range
+    /// lanes, so this is belt-and-braces.
+    pub fn lane(&self, lane: u16) -> impl Iterator<Item = f32> + '_ {
+        let channels = usize::from(self.channels);
+        let lane_usize = usize::from(lane);
+        let start = if lane_usize < channels {
+            lane_usize
+        } else {
+            self.interleaved.len()
+        };
+        self.interleaved
+            .iter()
+            .skip(start)
+            .step_by(channels.max(1))
+            .copied()
+    }
+
+    /// Borrow the `channels`-wide slice for a single frame.
+    ///
+    /// Panics on `frame_idx >= self.frames` (internal indexing
+    /// error, not user input).
+    pub fn frame(&self, frame_idx: u64) -> &[f32] {
+        let channels = usize::from(self.channels);
+        let start = (frame_idx as usize) * channels;
+        &self.interleaved[start..start + channels]
+    }
+
+    /// Transpose into one owned `Vec<f32>` per lane, in lane order.
+    ///
+    /// `result.len() == self.channels` and each inner vec has
+    /// `self.frames` samples. Allocates `channels` Vecs; preferred
+    /// for tests that index per-lane repeatedly.
+    pub fn into_planar(self) -> Vec<Vec<f32>> {
+        let channels = usize::from(self.channels);
+        let frames = self.frames as usize;
+        let mut planar: Vec<Vec<f32>> = (0..channels).map(|_| Vec::with_capacity(frames)).collect();
+        for (idx, sample) in self.interleaved.into_iter().enumerate() {
+            planar[idx % channels].push(sample); // PCM ABI
+        }
+        planar
+    }
+}
+
+/// Interleaved PCM captured by the offline dispatcher when
+/// `capture=true`. `len() == total_frames * output_channels`.
+type CapturedPcm = Vec<f32>; // PCM ABI
 
 fn render_offline_dispatch(
     config: OfflineRenderConfig,
     capture: bool,
-) -> Result<(OfflineRenderReport, Option<CapturedLanes>), OfflineRenderError> {
+) -> Result<(OfflineRenderReport, Option<CapturedPcm>), OfflineRenderError> {
     if config.buffer_frames == 0 {
         return Err(OfflineRenderError::EmptyBuffer);
     }
@@ -900,7 +955,7 @@ impl_offline_rate!(R192);
 fn render_offline_with_rate<R: OfflineRate>(
     config: OfflineRenderConfig,
     capture: bool,
-) -> Result<(OfflineRenderReport, Option<CapturedLanes>), OfflineRenderError> {
+) -> Result<(OfflineRenderReport, Option<CapturedPcm>), OfflineRenderError> {
     let output_channels = config.output_channels;
     let channels_usize = usize::from(output_channels);
     let mut playhead = Playhead::<R>::new(
@@ -921,12 +976,9 @@ fn render_offline_with_rate<R: OfflineRate>(
     let mut audio_positive_peak_q15 = 0_u16;
     let mut audio_negative_peak_q15 = 0_u16;
 
-    let mut lanes: Option<CapturedLanes> = if capture {
-        let mut v = Vec::with_capacity(channels_usize);
-        for _ in 0..channels_usize {
-            v.push(Vec::with_capacity(config.total_frames as usize)); // PCM ABI
-        }
-        Some(v)
+    let mut captured: Option<CapturedPcm> = if capture {
+        let cap = (config.total_frames as usize).saturating_mul(channels_usize);
+        Some(Vec::with_capacity(cap)) // PCM ABI
     } else {
         None
     };
@@ -960,14 +1012,8 @@ fn render_offline_with_rate<R: OfflineRate>(
             }
         }
 
-        if let Some(lanes) = lanes.as_mut() {
-            // Split the interleaved buffer per lane for this batch.
-            for frame_idx in 0..frames {
-                let base = frame_idx * channels_usize;
-                for lane_idx in 0..channels_usize {
-                    lanes[lane_idx].push(output[base + lane_idx]); // PCM ABI
-                }
-            }
+        if let Some(captured) = captured.as_mut() {
+            captured.extend_from_slice(&output); // PCM ABI
         }
 
         sample = sample.saturating_add(frames as u64);
@@ -994,7 +1040,7 @@ fn render_offline_with_rate<R: OfflineRate>(
             audio_positive_peak_q15,
             audio_negative_peak_q15,
         },
-        lanes,
+        captured,
     ))
 }
 
