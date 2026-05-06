@@ -84,3 +84,21 @@ samples natively. Bundling the storage refactor with WAV (and the
 adjacent live channel-count audit) means PCM ABI work crosses the
 public-API boundary exactly once instead of once per follow-on
 sprint.
+
+## Local review (2026-05-06)
+
+**Branch:** plan/2026-05-06-01
+**Commits:** 5 (origin/main..plan/2026-05-06-01)
+**Reviewer:** Codex (`codex review --base origin/main`)
+
+---
+
+The offline WAV/interleaved capture path tests pass, but the live multi-channel CLI path advertises and accepts channel counts that the existing cpal backend still rejects. This breaks the new live `--output-channels` behavior for non-stereo output.
+
+Review comment:
+
+- [P2] Honor live output channel counts before advertising the flag — `crates/cli/src/command/run.rs:481-488`
+  When `agogo run` is invoked with audio output and `--output-channels` set to anything other than 2, this value is forwarded into `CpalHost::run`, but `crates/host-cpal/src/cpal.rs` still rejects output configs unless `output_channels == 2` before it queries supported formats. As a result the new documented 1..=16 live-channel flag only works for the old default stereo case; either keep the run-path validation at 2 until the backend is updated, or teach `host-cpal` to open the requested channel count.
+
+  **Addressed in branch.** `crates/host-cpal/src/cpal.rs:188` guard relaxed from `output_channels != 2` to `output_channels == 0`; the device-capability check at `validate_output_channels` / `select_f32_channels_at_rate` is the source of truth for what the device actually supports. host-cpal's 19 unit tests still pass; the existing `output_channel_selection_*` tests cover both the accept-stereo and reject-out-of-range cases. Folded into the T3 commit via `git commit --fixup`.
+
