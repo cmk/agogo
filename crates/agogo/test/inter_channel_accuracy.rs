@@ -108,28 +108,6 @@ fn frames_for_bars(bars: u32, bpm: Tempo, sr: u32) -> u64 {
     tick_to_whole_samples(Tick(ticks), bpm, sr).expect("sample rate must be supported")
 }
 
-fn render_lanes(
-    channels: Vec<Channel>,
-    output_channels: u16,
-    bpm: Tempo,
-    sr: u32,
-    buffer_frames: u32,
-    total_frames: u64,
-) -> Result<(OfflinePcm, OfflineRenderError), OfflineRenderError> {
-    let cfg = OfflineRenderConfig {
-        channels,
-        bpm,
-        sample_rate: sr,
-        buffer_frames,
-        total_frames,
-        output_channels,
-    };
-    match render_offline_capture(cfg) {
-        Ok((_report, pcm)) => Ok((pcm, OfflineRenderError::EmptyBuffer)), // dummy err never read
-        Err(e) => Err(e),
-    }
-}
-
 fn render_lanes_ok(
     channels: Vec<Channel>,
     output_channels: u16,
@@ -138,15 +116,16 @@ fn render_lanes_ok(
     buffer_frames: u32,
     total_frames: u64,
 ) -> OfflinePcm {
-    let (pcm, _) = render_lanes(
+    let cfg = OfflineRenderConfig {
         channels,
-        output_channels,
         bpm,
-        sr,
+        sample_rate: sr,
         buffer_frames,
         total_frames,
-    )
-    .expect("render_offline_capture should succeed for valid inputs");
+        output_channels,
+    };
+    let (_report, pcm) =
+        render_offline_capture(cfg).expect("render_offline_capture should succeed for valid inputs");
     pcm
 }
 
@@ -517,44 +496,66 @@ proptest! {
     }
 
     /// For a fixed (channels, lanes, bpm, duration_bars) config,
-    /// the first onset on a routed lane at `sr=96_000` is at exactly
-    /// 2x the sample index of the same onset at `sr=48_000`. End-
-    /// to-end check on `tick_to_whole_samples` rounding through the
-    /// whole render path.
+    /// every non-zero predicted onset at `sr=96_000` is at exactly
+    /// 2x the sample index of the same onset at `sr=48_000`.
+    /// Tick 0 trivially satisfies `0 == 2*0` and would mask
+    /// rounding bugs in `tick_to_whole_samples`, so the property
+    /// asserts on the *second* onset (first non-zero tick) and
+    /// also confirms the renderer actually wrote the click there
+    /// in both buffers.
     #[test]
     fn prop_sample_rate_doubling(
         (grid_a, grid_b) in arb_polyrhythm_pair(),
     ) {
         let bpm = BPM_120;
-        let render_at = |sr: u32| {
-            let total_frames = frames_for_bars(1, bpm, sr);
-            render_lanes_ok(
-                vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
-                2,
-                bpm,
-                sr,
-                1024,
-                total_frames,
-            )
-        };
-        let pcm_48 = render_at(48_000);
-        let pcm_96 = render_at(96_000);
-        for lane_idx in 0..2 {
-            let first_48 = pcm_48.lanes[lane_idx].iter().position(|&s| s != 0.0);
-            let first_96 = pcm_96.lanes[lane_idx].iter().position(|&s| s != 0.0);
-            prop_assert!(first_48.is_some(), "lane {} silent at 48k", lane_idx);
-            prop_assert!(first_96.is_some(), "lane {} silent at 96k", lane_idx);
-            // Tick 0 maps to sample 0 at every rate; both lanes
-            // include the bar-zero tick. Strictly checking
-            // `first_96 == 2 * first_48` is `0 == 0` here; pin it
-            // anyway so a future first-nonzero-at-N onset would be
-            // covered.
+        let total_48 = frames_for_bars(1, bpm, 48_000);
+        let total_96 = frames_for_bars(1, bpm, 96_000);
+        let pcm_48 = render_lanes_ok(
+            vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
+            2,
+            bpm,
+            48_000,
+            1024,
+            total_48,
+        );
+        let pcm_96 = render_lanes_ok(
+            vec![audio_channel(grid_a, 0), audio_channel(grid_b, 1)],
+            2,
+            bpm,
+            96_000,
+            1024,
+            total_96,
+        );
+        for (lane_idx, grid) in [(0_usize, grid_a), (1_usize, grid_b)] {
+            let onsets_48 = predict_onsets(grid, bpm, 48_000, total_48);
+            let onsets_96 = predict_onsets(grid, bpm, 96_000, total_96);
+            // Need at least one non-zero onset to make the doubling
+            // assertion meaningful; the polyrhythm pool always
+            // produces multiple onsets per bar, so this should
+            // hold for every generated case.
+            prop_assume!(onsets_48.len() >= 2 && onsets_96.len() >= 2);
+            let target_48 = onsets_48[1];
+            let target_96 = onsets_96[1];
+            prop_assert!(target_48 > 0, "second onset must be non-zero");
             prop_assert_eq!(
-                first_96.unwrap(),
-                2 * first_48.unwrap(),
-                "lane {} onset position differs across rates",
-                lane_idx
+                target_96,
+                2 * target_48,
+                "lane {} grid {:?}: 96k second onset {} should be 2x 48k second onset {}",
+                lane_idx, grid, target_96, target_48
             );
+            // Renderer actually wrote there in both buffers.
+            let click_48 = click_len(48_000);
+            let click_96 = click_len(96_000);
+            let any_48 = pcm_48.lanes[lane_idx]
+                [target_48 as usize..(target_48 as usize + click_48).min(total_48 as usize)]
+                .iter()
+                .any(|&s| s != 0.0);
+            let any_96 = pcm_96.lanes[lane_idx]
+                [target_96 as usize..(target_96 as usize + click_96).min(total_96 as usize)]
+                .iter()
+                .any(|&s| s != 0.0);
+            prop_assert!(any_48, "lane {} 48k second onset footprint silent", lane_idx);
+            prop_assert!(any_96, "lane {} 96k second onset footprint silent", lane_idx);
         }
     }
 
