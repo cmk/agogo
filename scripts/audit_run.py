@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-audit.py — recurring audit harness for the agogo repo.
+audit_run.py — recurring audit harness for the agogo repo.
 
 Orchestrates per-audit prompts under doc/audits/<name>.md, runs them
 via `codex exec -` (Codex in non-interactive mode) on a per-day schedule,
@@ -9,8 +9,8 @@ and appends findings to doc/audits/log.md.
 Each audit prompt is a markdown file with a YAML front-matter block:
 
     ---
-    name: proptest
-    day: mon          # mon|tue|wed|thu|fri|sat|sun  (when to run)
+    name: hygiene
+    day: wed          # mon|tue|wed|thu|fri|sat|sun  (when to run)
     paths: [crates/, tests/]   # path filter for early-exit
     cadence: weekly   # weekly (default) | biweekly | monthly
     ---
@@ -18,18 +18,18 @@ Each audit prompt is a markdown file with a YAML front-matter block:
 
 Subcommands:
   list                 List configured audits.
-  run <name>           Run one audit unconditionally (skips early-exit
-                       gate). Useful for manual / dev runs.
+  run <name>           Run one audit when relevant files changed; use
+                       --force to skip the early-exit gate.
   cron-tick            Decide which audits should run today and run
                        them. Honors per-audit `day`, `cadence`, and
-                       the early-exit gate (audit_state.sh). Intended
+                       the early-exit gate (audit_report.sh). Intended
                        cron entry point — runs daily, no-ops most days.
 
 Cron entry (in your crontab, fires daily at 9am):
   PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
-  0 9 * * *  cd /path/to/agogo && scripts/audit.py cron-tick
+  0 9 * * *  cd /path/to/agogo && scripts/audit_run.py cron-tick
 
-The early-exit gate uses scripts/audit_state.sh (small companion).
+The early-exit gate uses scripts/audit_report.sh (small companion).
 First-run audits the full path set; subsequent runs only audit if
 something under the path filter has changed since the last `mark`.
 
@@ -52,7 +52,7 @@ from shutil import which
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AUDITS_DIR = REPO_ROOT / "doc" / "audits"
 LOG_FILE = AUDITS_DIR / "log.md"
-STATE_SCRIPT = REPO_ROOT / "scripts" / "audit_state.sh"
+STATE_SCRIPT = REPO_ROOT / "scripts" / "audit_report.sh"
 
 DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 CADENCES = {"weekly", "biweekly", "monthly"}
@@ -96,7 +96,7 @@ class Audit:
 
 
 def parse_audit(path: Path) -> Audit:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         raise ValueError(f"{path}: missing YAML front-matter")
     end = text.find("\n---\n", 4)
@@ -161,7 +161,7 @@ def load_audits() -> list[Audit]:
 
 
 def changed_files_since_last(audit: Audit) -> list[str]:
-    """Run audit_state.sh since-last and return the changed paths."""
+    """Run audit_report.sh since-last and return the changed paths."""
     result = subprocess.run(
         [str(STATE_SCRIPT), "since-last", audit.name, *audit.paths],
         capture_output=True,
@@ -170,10 +170,22 @@ def changed_files_since_last(audit: Audit) -> list[str]:
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"audit_state.sh failed for audit '{audit.name}' "
+            f"audit_report.sh failed for audit '{audit.name}' "
             f"(exit {result.returncode}):\n{result.stderr.strip()}"
         )
     return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def tracked_files_for(audit: Audit) -> list[str]:
+    """Return all tracked files under an audit's pathspec."""
+    result = subprocess.run(
+        ["git", "ls-files", "--", *audit.paths],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    return result.stdout.splitlines()
 
 
 def mark_audited(audit: Audit) -> None:
@@ -208,7 +220,7 @@ def invoke_codex(audit: Audit, changed: list[str], dry_run: bool = False) -> str
     codex = which("codex")
     if codex is None:
         raise RuntimeError(
-            "audit.py: `codex` not on PATH. Cron must set PATH explicitly; "
+            "audit_run.py: `codex` not on PATH. Cron must set PATH explicitly; "
             "see doc/audits/README.md."
         )
 
@@ -254,11 +266,11 @@ def append_to_log(audit: Audit, output: str, today: dt.date) -> bool:
 
     AUDITS_DIR.mkdir(parents=True, exist_ok=True)
     header_exists = LOG_FILE.exists()
-    with LOG_FILE.open("a") as f:
+    with LOG_FILE.open("a", encoding="utf-8") as f:
         if not header_exists:
             f.write("# Audit log\n\n")
             f.write(
-                "Findings from `scripts/audit.py` runs. Each entry: "
+                "Findings from `scripts/audit_run.py` runs. Each entry: "
                 "audit name, date, then the agent's report verbatim.\n\n"
             )
         f.write(f"## {audit.name} — {today.isoformat()}\n\n")
@@ -284,31 +296,26 @@ def cmd_list(_args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     audits = {a.name: a for a in load_audits()}
     if args.name not in audits:
-        print(f"audit.py: no audit named {args.name!r}", file=sys.stderr)
+        print(f"audit_run.py: no audit named {args.name!r}", file=sys.stderr)
         return 2
     audit = audits[args.name]
     changed = changed_files_since_last(audit)
     if args.force:
         # Force mode: audit the full pathspec
-        changed = subprocess.run(
-            ["git", "ls-files", "--", *audit.paths],
-            capture_output=True,
-            text=True,
-            cwd=REPO_ROOT,
-        ).stdout.splitlines()
+        changed = tracked_files_for(audit)
     elif not changed:
-        print(f"audit.py: '{audit.name}' — no changed files since last run; skip")
+        print(f"audit_run.py: '{audit.name}' — no changed files since last run; skip")
         return 0
-    print(f"audit.py: running '{audit.name}' on {len(changed)} changed files")
+    print(f"audit_run.py: running '{audit.name}' on {len(changed)} changed files")
     output = invoke_codex(audit, changed, dry_run=args.dry_run)
     if args.dry_run:
         return 0  # don't append to log or move the pin in dry-run mode
     appended = append_to_log(audit, output, dt.date.today())
     mark_audited(audit)
     if appended:
-        print(f"audit.py: '{audit.name}' findings appended to {LOG_FILE.relative_to(REPO_ROOT)}")
+        print(f"audit_run.py: '{audit.name}' findings appended to {LOG_FILE.relative_to(REPO_ROOT)}")
     else:
-        print(f"audit.py: '{audit.name}' — no findings")
+        print(f"audit_run.py: '{audit.name}' — no findings")
     return 0
 
 
@@ -319,19 +326,26 @@ def cmd_cron_tick(_args: argparse.Namespace) -> int:
     if not due:
         # Silent on no-op days — cron mail stays quiet
         return 0
+    failures = []
     for audit in due:
-        changed = changed_files_since_last(audit)
-        if not changed:
-            continue  # early-exit; nothing changed under audit's paths
-        print(f"audit.py: cron-tick running '{audit.name}'")
-        output = invoke_codex(audit, changed)
-        append_to_log(audit, output, today)
-        mark_audited(audit)
+        try:
+            changed = changed_files_since_last(audit)
+            if not changed:
+                continue  # early-exit; nothing changed under audit's paths
+            print(f"audit_run.py: cron-tick running '{audit.name}'")
+            output = invoke_codex(audit, changed)
+            append_to_log(audit, output, today)
+            mark_audited(audit)
+        except Exception as exc:
+            failures.append(f"{audit.name}: {exc}")
+            print(f"audit_run.py: cron-tick failed for '{audit.name}': {exc}", file=sys.stderr)
+    if failures:
+        raise RuntimeError("cron-tick audit failures:\n" + "\n".join(failures))
     return 0
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(prog="audit.py", description=__doc__.strip().split("\n")[0])
+    p = argparse.ArgumentParser(prog="audit_run.py", description=__doc__.strip().split("\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list", help="list configured audits and which are due today")
@@ -364,5 +378,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as exc:
-        print(f"audit.py: error: {exc}", file=sys.stderr)
+        print(f"audit_run.py: error: {exc}", file=sys.stderr)
         sys.exit(1)

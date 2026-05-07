@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-connections.sh — gate for AGENTS.md connection-construction discipline.
+# check_connections.sh — gate for AGENTS.md connection-construction discipline.
 #
 # Agogo production code must not construct connections directly with
 # `Conn::new_l` / `Conn::new_r` or agogo-local wrappers when an upstream
@@ -22,7 +22,7 @@ rg -n \
 
 if [[ -s "$tmp" ]]; then
   cat >&2 <<'MSG'
-check-connections.sh: direct connection construction found.
+check_connections.sh: direct connection construction found.
 
 Use upstream `connections` macros (`triple!`, `iso!`, `compose!`,
 `conn_l!`, `conn_r!`, `compose_l!`, `compose_r!`) or stop and design
@@ -35,4 +35,4 @@ MSG
   exit 1
 fi
 
-echo "check-connections.sh: OK — connection construction is macro-backed."
+echo "check_connections.sh: OK — connection construction is macro-backed."

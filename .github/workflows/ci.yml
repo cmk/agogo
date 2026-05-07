@@ -23,6 +23,7 @@ jobs:
         run: cargo fmt --all -- --check
         continue-on-error: true
       - run: cargo test --workspace
+      - run: python3 -m unittest
       - run: cargo clippy --all-targets -- -D warnings
 
   deny:
@@ -48,15 +49,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: check-floats.sh
-        run: scripts/check-floats.sh
+      - name: check_floats.sh
+        run: scripts/check_floats.sh
 
   layers:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: check-layers.sh
-        run: scripts/check-layers.sh
+      - name: check_layers.sh
+        run: scripts/check_layers.sh
 
   facade-docs:
     runs-on: ubuntu-latest

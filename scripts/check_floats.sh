@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-floats.sh — CI gate for AGENTS.md's no-stored-float rule.
+# check_floats.sh — CI gate for AGENTS.md's no-stored-float rule.
 #
 # `f32` / `f64` may appear only in the documented exception
 # modules listed below. Each file is allowed because its contents
@@ -170,7 +170,7 @@ done < <(find crates -type f -name '*.rs' -path '*/src/*' -not -path '*/target/*
 if (( FAIL )); then
   cat >&2 <<'HINT'
 
-check-floats.sh: FAIL. Fix by one of:
+check_floats.sh: FAIL. Fix by one of:
 
   - Store the value in a fixed-point type (Micro, Pico, Tempo, Phase)
     and compose an existing Conn to do the conversion at the boundary.
@@ -183,4 +183,4 @@ HINT
   exit 1
 fi
 
-printf 'check-floats.sh: OK — all f32/f64 uses contained to allowlisted modules.\n'
+printf 'check_floats.sh: OK — all f32/f64 uses contained to allowlisted modules.\n'
