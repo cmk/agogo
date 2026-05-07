@@ -59,16 +59,16 @@ Do not skip, reorder, or replace a transition with an ad hoc command
 that merely looks equivalent. Use the repo scripts and commands for
 workflow-sensitive actions:
 
-- Local review: Claude Code uses `/sprint-review`; Codex and shell
-  users use `scripts/local_review.sh`. Claude Code's built-in
+- Local review: Claude Code uses `/pr-review`; Codex and shell
+  users use `scripts/pr_review.sh`. Claude Code's built-in
   `/review [PR]` is optional post-push review help, not the canonical
   pre-push transition.
-- PR body pathing: `scripts/review_path.sh` and
-  `scripts/extract_pr_body.sh`.
-- GitHub review ingestion: `scripts/pull_reviews.py`.
-- Review replies: `/reply-reviews` or the underlying
-  `scripts/reply_review.py` + `scripts/pull_reviews.py` flow.
-- Merge: `scripts/safe_merge.sh`, not raw `gh pr merge`.
+- PR body pathing: `scripts/pr_report.py path` and
+  `scripts/pr_report.py body`.
+- GitHub review ingestion: `scripts/pr_report.py reviews`.
+- Review replies: `/pr-reply` or the underlying
+  `scripts/pr_reply.py` + `scripts/pr_report.py reviews` flow.
+- Merge: `scripts/git_merge.sh`, not raw `gh pr merge`.
 
 ## Architecture
 
@@ -128,7 +128,7 @@ didn't write that."
 
 **What does NOT need surfacing.** Drift CI already catches: `cargo
 fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-`gitleaks`, `scripts/check-floats.sh`, `scripts/check-pii.sh`. The
+`gitleaks`, `scripts/check_floats.sh`, `scripts/check_pii.sh`. The
 gate is the safety net for those.
 
 **What MUST be surfaced.** Anything that lives below the CI gate
@@ -141,7 +141,7 @@ previous plan's Verification table that never got written. Those
 are exactly the weeds humans don't notice on a fast skim.
 
 This rule applies to every agent — `feat:`, `debt:`, `fix:`, the
-review agents, `/watch-pr` auto-fix. A `feat:` agent that walks past
+review agents, `/pr-watch` auto-fix. A `feat:` agent that walks past
 a stale comment in the file it's editing plants a weed that sprouts
 three sprints later, when somebody trusts the comment and writes
 code based on it.
@@ -161,7 +161,7 @@ code based on it.
 - **CI-repair commits must be fixups.** If a commit on this branch broke
   CI and the follow-up exists only to repair it, commit with
   `git commit --fixup=<broken-sha>` instead of a standalone `fix:`.
-  Before pushing, run `scripts/autosquash.sh` (a thin wrapper over
+  Before pushing, run `scripts/git_squash.sh` (a thin wrapper over
   `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash origin/main`) so the
   fixups collapse into their targets. This keeps main's linear history
   free of commits that temporarily broke the build. Review-round commits
@@ -220,7 +220,7 @@ code based on it.
       //! layer: time
       //! depends-on: conn
 
-  `scripts/check-layers.sh` parses these headers and fails on any
+  `scripts/check_layers.sh` parses these headers and fails on any
   `use crate::<top>`, `use agogo_chan::<top>`, or
   `use agogo_core::<top>` in production code (column-0 imports —
   including `pub use` re-exports and `use crate::{a, b}` grouped
@@ -283,7 +283,7 @@ code based on it.
      us `f64` tempo and phase; we convert to `Tempo` / `Phase`
      within 1–2 lines. Mark `// Link FFI`.
 
-  `scripts/check-floats.sh` (CI job) fails if a naked `f32` / `f64`
+  `scripts/check_floats.sh` (CI job) fails if a naked `f32` / `f64`
   lives outside the file-level allowlist. Plan 2026-04-28-03 T5
   reshuffled the entries when the old pure crate's `fxp.rs` was
   deleted: its argv + PI-exempt content moved to
@@ -319,7 +319,7 @@ code based on it.
   `crates/chan/src/sink/audio.rs` on the allowlist for `AudioIo`
   PCM slices and the generated audio-click renderer's output-boundary
   PCM writes. The current allowlist is the 21 entries in
-  `scripts/check-floats.sh::ALLOWED` (Plan 2026-04-28-06 T3 swapped
+  `scripts/check_floats.sh::ALLOWED` (Plan 2026-04-28-06 T3 swapped
   `machine/spec.rs` for `machine/spec/parser.rs` when the kitchen
   sink split — same `delay=ms` argv boundary, just lives in the
   parser submodule now); see that script's header for a one-line
@@ -371,7 +371,7 @@ code based on it.
   implement this connection lawfully" than to fake a connection and
   hide the failure in the generator.
 
-  `scripts/check-connections.sh` enforces the constructor side of this
+  `scripts/check_connections.sh` enforces the constructor side of this
   rule. Temporary migration allowlists are allowed only with a plan
   Review entry that names the remaining design problem.
 
@@ -385,7 +385,7 @@ code based on it.
   values that can originate from CLI args, host commands, config
   files, devices, or network peers.
 
-  `scripts/check-boundary-panics.sh` enforces the narrow production
+  `scripts/check_boundary_panics.sh` enforces the narrow production
   scope where this mistake is most damaging. A true internal invariant
   may be annotated with `// boundary-panic-ok: <reason>`, but the
   reason must state why the value is not user input and why returning
@@ -532,7 +532,7 @@ Keep subjects under 72 characters. Use the body for non-obvious decisions.
 ## Two-tier review workflow
 
 `doc/workflow.md` has mermaid state diagrams for the review-round
-lifecycle and the `/watch-pr` loop — useful when debugging an
+lifecycle and the `/pr-watch` loop — useful when debugging an
 unexpected situation (stuck fix commit, loop that won't quit). The
 prose below is authoritative; the diagrams are derived views.
 
@@ -544,11 +544,11 @@ The coding agent makes atomic commits as it works. Each commit must pass
 
 Step 7 of the TDD workflow creates the PR's review file with the
 sprint's PR description under a `## Summary` heading. The path comes
-from `scripts/review_path.sh` — no argument, it predicts the next PR
-number (via `scripts/next_pr_number.sh`) and emits the zero-padded
+from `scripts/pr_report.py path` — no argument, it predicts the next PR
+number (via `scripts/pr_request.sh`) and emits the zero-padded
 filename, e.g. `doc/reviews/review-00017.md`. The `## Summary`
 section is the single source of truth for the PR body: open the PR
-with `gh pr create --body-file <(scripts/extract_pr_body.sh N)` so
+with `gh pr create --body-file <(scripts/pr_report.py body N)` so
 the GitHub body is a direct copy of the file. Because the
 description is committed *before* push, a PR that gets no review
 comments merges without any extra round-trip — the body is already
@@ -556,7 +556,7 @@ in history. `review-00000.md` is a protected sentinel; real reviews
 start at `00001`.
 
 Before pushing, run the local review transition. Claude Code uses
-`/sprint-review`; Codex and shell users use `scripts/local_review.sh`.
+`/pr-review`; Codex and shell users use `scripts/pr_review.sh`.
 This spawns an independent reviewer that examines
 `git diff origin/main...HEAD` and the commit log. The reviewer flags
 must-fix issues and follow-ups, which the transition appends as a
@@ -566,7 +566,7 @@ section is missing — step 7 is a prerequisite.
 
 If another issue or PR is opened between running step 7 and opening
 this branch's PR, the predicted number can drift — re-run
-`scripts/review_path.sh` before pushing and `mv` the old file to the
+`scripts/pr_report.py path` before pushing and `mv` the old file to the
 new path if needed.
 
 If must-fix items exist, resolve them before pushing. If the review
@@ -588,29 +588,29 @@ appends new comments. The result is one file per PR containing the full
 local + GitHub review history in order.
 
 Once the findings are addressed as **uncommitted edits in the working
-tree**, run `/reply-reviews <N>`. The command does the whole round
+tree**, run `/pr-reply <N>`. The command does the whole round
 in order: posts replies to each unresolved thread, runs
-`scripts/pull_reviews.py` to mirror the replies into `review-NNNNN.md`,
+`scripts/pr_report.py reviews` to mirror the replies into `review-NNNNN.md`,
 then makes ONE atomic commit containing both the code edits and the
 mirrored doc. You then `git push` once — code + replies + review doc
 land in a single round trip.
 
-**Do not commit the fix yourself before running `/reply-reviews`.**
+**Do not commit the fix yourself before running `/pr-reply`.**
 The command runs on the `gh_review → items_pulled → round_unpushed`
 arrow per `doc/workflow.md` — it expects to start from `gh_review`
 (local at-or-behind origin) and produce the round commit itself.
 Pre-committing a fix would put the branch at an unpushed-state that
 breaks the precondition; if you have a stranded pre-existing fix
-commit, push it first, then re-run. `/reply-reviews` refuses to run
+commit, push it first, then re-run. `/pr-reply` refuses to run
 if the branch already has unpushed commits.
 
 **Do not merge before pushing the round commit.** Per
 `doc/workflow.md`'s state machine, the merge transition is
 `gh_review → merged` — there is no edge from `round_unpushed → merged`.
-Merging from `round_unpushed` (the state after `/reply-reviews`
+Merging from `round_unpushed` (the state after `/pr-reply`
 makes its commit but before push) silently drops the local commit
 because `gh pr merge` is GitHub-side and doesn't see local state.
-Use `scripts/safe_merge.sh <pr-args>` instead of `gh pr merge` —
+Use `scripts/git_merge.sh <pr-args>` instead of `gh pr merge` —
 the wrapper refuses to invoke the merge while the local branch
 is ahead of origin. Recovery (if a merge already dropped a round
 commit): cherry-pick the stranded SHA into the next plan branch's
@@ -633,15 +633,15 @@ conversational flow and keeps the review record in one place.
 ### Automated poll loop (optional)
 
 For PRs where you don't want to manually ping "check the replies", pair
-`/watch-pr <N>` with `/loop`:
+`/pr-watch <N>` with `/loop`:
 
 ```
-/loop 10m /watch-pr 17
+/loop 10m /pr-watch 17
 ```
 
 Each tick does one of: (a) heartbeat if no new activity, (b) one
 finish-the-round cycle — auto-fix the trivially-clear items, push back
-or defer the rest, run the `/reply-reviews` flow, **push the round
+or defer the rest, run the `/pr-reply` flow, **push the round
 commit**, or (c) `paused at round_unpushed: push failed` if the push
 itself errored (network, non-fast-forward).
 
@@ -653,7 +653,7 @@ is classified as **needs you** and surfaced in the round report with
 
 The command never **merges**. The merge is the user's safety gate:
 each PR is reviewed manually before `gh pr merge` /
-`scripts/safe_merge.sh`. Pushing the round commit advances the
+`scripts/git_merge.sh`. Pushing the round commit advances the
 branch to `gh_review` so CI re-runs and the reviewer sees replies
 attached to the right tip — that's normal mid-PR motion, not a risk
 worth gating on.
@@ -696,12 +696,12 @@ One slug, three places.
    - Append Deferred and Review sections to the plan document. If any
      property tests were `#[ignore]`d during implementation, document
      the reason and the re-enablement plan here.
-   - Create the review file at `$(scripts/review_path.sh)` (no
+   - Create the review file at `$(scripts/pr_report.py path)` (no
      argument predicts the next PR number and zero-pads the
      filename). Header is `# PR #<N> — <title>` followed by a
      `## Summary` section containing the PR body. This section is
      consumed verbatim by
-     `gh pr create --body-file <(scripts/extract_pr_body.sh N)`, so
+     `gh pr create --body-file <(scripts/pr_report.py body N)`, so
      write it as the PR description (what & why for a human
      reviewer) — not a ship-report.
 
@@ -710,8 +710,8 @@ One slug, three places.
    local review transition aborts if the review file is missing its
    `## Summary`. Commit as `doc: Finalize plan NN and PR description`.
 8. Run the local review transition against the branch before merging:
-   Claude Code uses `/sprint-review`; Codex and shell users use
-   `scripts/local_review.sh`.
+   Claude Code uses `/pr-review`; Codex and shell users use
+   `scripts/pr_review.sh`.
 9. Rebase and land on main. First, on the feature branch:
    `git fetch origin && git rebase origin/main`. Then fast-forward main:
    - **Branch case**: `git checkout main && git merge --ff-only plan/YYYY-MM-DD-NN`.
@@ -740,7 +740,7 @@ PII / float-discipline issues during agent iteration without
 invoking git for real. Limitation: `PreToolUse` runs *before* the
 matched Bash call's body executes, so a chained command like `git
 add file && git commit -m "..."` sees an empty pre-add staged diff
-at hook time and slips through `check-pii.sh` / `check-floats.sh`.
+at hook time and slips through `check_pii.sh` / `check_floats.sh`.
 Use separate `git add` and `git commit` calls to keep this layer
 effective.
 
@@ -761,17 +761,17 @@ chain:
    through. Keeping the fmt step blocking forces drift to be
    fixed at commit time when the cost is one `cargo fmt`
    invocation.)
-2. `scripts/check-pii.sh` — grep the staged diff for absolute
+2. `scripts/check_pii.sh` — grep the staged diff for absolute
    user-home paths (`/Users/...` on macOS, `/home/...` on Linux),
    private-key headers, and common API-token shapes. Fail fast on
    any match. Allow-list exceptions go in `.pii-allow`.
-3. `scripts/check-floats.sh` — fail if naked `f32`/`f64` appears
+3. `scripts/check_floats.sh` — fail if naked `f32`/`f64` appears
    in a non-allowlisted file. See "no stored f32/f64" rule above.
-4. `scripts/check-layers.sh` — fail if any `use crate::<top>` /
+4. `scripts/check_layers.sh` — fail if any `use crate::<top>` /
    `use agogo_chan::<top>` / `use agogo_core::<top>` (column-0
    imports) violates the partial order in each module-root's
    `//! depends-on:` sentinel. See the layering rule above.
-5. `scripts/check-connections.sh` — fail if production code constructs
+5. `scripts/check_connections.sh` — fail if production code constructs
    `Conn` values directly with `Conn::new_l`, `Conn::new_r`,
    `RuntimeConn::new`, or local marker wrappers instead of the upstream
    declaration/composition macros. Temporary allowlists must be named
@@ -791,8 +791,8 @@ autosquash workflow expects this for `fixup!` commits. The
 pre-push hook short-circuits with `exit 0` if no refs are being
 pushed (delete-only / no-op pushes don't pay the cost).
 
-This is the automated quality gate; `/sprint-review` and
-`scripts/local_review.sh` are the manual local-review gates. Bypass
+This is the automated quality gate; `/pr-review` and
+`scripts/pr_review.sh` are the manual local-review gates. Bypass
 with `--no-verify` (or `git push --no-verify`) only when explicitly
 authorized.
 

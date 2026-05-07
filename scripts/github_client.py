@@ -1,9 +1,9 @@
-"""Shared helpers for the scripts/pull_reviews.py and scripts/reply_review.py
+"""Shared helpers for the scripts/pr_report.py reviews and scripts/pr_reply.py
 GitHub-review CLIs.
 
 Private sibling module so updates land in one place. Scripts invoked as
 `scripts/foo.py` get `scripts/` on `sys.path[0]` automatically, which is
-enough for `from _gh import ...` to resolve without any package setup.
+enough for `from github_client import ...` to resolve without any package setup.
 """
 
 from __future__ import annotations

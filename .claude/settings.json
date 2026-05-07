@@ -2,26 +2,14 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash(git commit*)",
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(*git commit*)",
-            "command": "{ scripts/check-pii.sh && scripts/check-floats.sh; } || exit 2"
+            "command": "cargo fmt -p agogo-chan -p agogo-core -p agogo-cli -- --check && scripts/check_pii.sh && scripts/check_floats.sh && scripts/check_layers.sh && scripts/check_connections.sh && scripts/check_boundary_panics.sh"
           }
         ]
       }
-    ]
-  },
-  "permissions": {
-    "allow": [
-      "Bash(cargo test *)",
-      "Bash(cargo build *)",
-      "Bash(cargo clippy *)",
-      "Bash(cargo fmt --all -- --check)",
-      "Bash(scripts/extract_pr_body.sh *)",
-      "Bash(scripts/next_pr_number.sh)",
-      "Bash(scripts/review_path.sh *)"
     ]
   }
 }

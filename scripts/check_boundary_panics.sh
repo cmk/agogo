@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-boundary-panics.sh — gate user-input validation out of bridge/scheduler panics.
+# check_boundary_panics.sh — gate user-input validation out of bridge/scheduler panics.
 
 set -euo pipefail
 
@@ -64,7 +64,7 @@ for path in PATHS:
         violations.append((path, lineno, line.strip()))
 
 if violations:
-    print("check-boundary-panics.sh: bridge/scheduler panic-like calls found.", file=sys.stderr)
+    print("check_boundary_panics.sh: bridge/scheduler panic-like calls found.", file=sys.stderr)
     print(
         "Move user-reachable validation to a parser/config boundary, or annotate true "
         "internal invariants with `// boundary-panic-ok: ...`.",
@@ -74,5 +74,5 @@ if violations:
         print(f"{path}:{lineno}: {line}", file=sys.stderr)
     sys.exit(1)
 
-print("check-boundary-panics.sh: OK — bridge/scheduler panic-like calls are annotated or absent.")
+print("check_boundary_panics.sh: OK — bridge/scheduler panic-like calls are annotated or absent.")
 PY

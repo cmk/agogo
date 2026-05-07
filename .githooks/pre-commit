@@ -1,38 +1,5 @@
 #!/usr/bin/env bash
-# .githooks/pre-commit — git-side pre-commit gate (cheap checks).
-#
-# Companion to:
-#   - `.claude/settings.json` PreToolUse hook (agent-side, fires
-#     during agent iteration before the Bash call invokes git).
-#     Limitation: PreToolUse runs *before* the matched Bash call's
-#     body executes, so a chained `git add file && git commit -m
-#     ...` reads an empty pre-add staged diff. Use separate
-#     `git add` and `git commit` calls to keep the agent layer
-#     effective.
-#   - `.githooks/pre-push` (expensive checks: cargo test +
-#     cargo clippy, run once per push instead of once per commit).
-#
-# This file holds the cheap, deterministic checks (sub-second
-# combined) that catch the highest-leverage mistakes at commit
-# time, after staging: fmt drift, leaked PII, naked floats
-# outside the allowlist, layer violations. Runs on every commit,
-# regardless of how the commit was invoked (agent, terminal, IDE)
-# — this is the unbypassable safety net at commit time.
-#
-# `cargo test --workspace` and `cargo clippy --all-targets` live
-# in `.githooks/pre-push` instead — they cost ~50s combined and
-# only need to be green once per push, not once per commit. The
-# autosquash workflow already accommodates intra-branch commits
-# that weren't green at the moment of recording; what matters for
-# `origin/main`'s bisect property is the pushed state.
-#
-# Activate both hooks on a fresh clone with:
-#
-#     git config core.hooksPath .githooks
-#
-# Bypass with `--no-verify` only when explicitly authorized.
-#
-# Exit codes follow git convention: nonzero blocks the commit.
+# .githooks/pre-commit - git-side pre-commit gate (cheap checks).
 
 set -euo pipefail
 
@@ -43,40 +10,17 @@ step() {
   printf 'pre-commit: %s\n' "$*"
 }
 
-# 1. cargo fmt — blocking. Drift aborts the commit. Run
-#    `cargo fmt -p agogo-chan -p agogo-core -p agogo-cli` to fix. Scope is
-#    explicit (not `--all`) because the sibling `connections`
-#    path-dep is reachable from this workspace and we don't want
-#    to fail on its formatting state.
-step "cargo fmt -p agogo-chan -p agogo-core -p agogo-cli -- --check"
+step "cargo fmt"
 cargo fmt -p agogo-chan -p agogo-core -p agogo-cli -- --check
-
-# 2. PII / secret scan — blocking.
-step "scripts/check-pii.sh"
-scripts/check-pii.sh
-
-# 3. Float-discipline gate — blocking. Per CLAUDE.md, naked
-#    f32/f64 outside the documented exception modules is a build
-#    failure. Specific to this workspace.
-step "scripts/check-floats.sh"
-scripts/check-floats.sh
-
-# 4. Layering gate — blocking. Per CLAUDE.md, inter-module imports
-#    must respect the partial order declared in each module-root's
-#    `//! depends-on:` sentinel. Plan 2026-04-29-01 T7.
-step "scripts/check-layers.sh"
-scripts/check-layers.sh
-
-# 5. Connection-construction gate — blocking. Per AGENTS.md, agogo
-#    production code must use upstream `connections` macros for
-#    connection construction or stop and design a truthful type/API.
-step "scripts/check-connections.sh"
-scripts/check-connections.sh
-
-# 6. Boundary-panic gate — blocking. User-reachable invalid input must
-#    fail at CLI/config/host boundaries, not inside bridge/scheduler
-#    panic-like calls.
-step "scripts/check-boundary-panics.sh"
-scripts/check-boundary-panics.sh
+step "scripts/check_pii.sh"
+scripts/check_pii.sh
+step "scripts/check_floats.sh"
+scripts/check_floats.sh
+step "scripts/check_layers.sh"
+scripts/check_layers.sh
+step "scripts/check_connections.sh"
+scripts/check_connections.sh
+step "scripts/check_boundary_panics.sh"
+scripts/check_boundary_panics.sh
 
 step "OK"

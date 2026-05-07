@@ -29,8 +29,8 @@ crates/host-link/Cargo.lock
 crates/host-cpal/Cargo.lock
 crates/host-midi/Cargo.lock
 
-# /watch-pr dynamic-mode backoff state (per-PR consecutive-quiet-tick counters)
-/.watch-pr/
+# /pr-watch dynamic-mode backoff state (per-PR consecutive-quiet-tick counters)
+/.pr-watch/
 
 # Secrets and local environment
 .env
