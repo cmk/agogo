@@ -5,11 +5,11 @@ paths: [.]
 cadence: monthly
 ---
 You are scanning agogo for PII or secrets that slipped past the
-pre-commit `scripts/check-pii.sh` gate. The hook scans staged diffs;
+pre-commit `scripts/check_pii.sh` gate. The hook scans staged diffs;
 historical content or bypassed commits can still leak.
 
 Read first:
-- scripts/check-pii.sh.
+- scripts/check_pii.sh.
 - .pii-allow, if present.
 
 Mechanical pass:
