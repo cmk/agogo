@@ -17,16 +17,16 @@ doc/audits/
   pii.md              - Fridays, monthly: secret/PII scan
 
 scripts/
-  audit.py            - orchestrator, calendar, Codex dispatch, log
-  audit_state.sh      - early-exit gate, since-last/mark/last
+  audit_run.py        - orchestrator, calendar, Codex dispatch, log
+  audit_report.sh     - early-exit gate, since-last/mark/last
 ```
 
 ## How a run works
 
-1. Cron fires `scripts/audit.py cron-tick` daily.
+1. Cron fires `scripts/audit_run.py cron-tick` daily.
 2. The script reads each `*.md` under `doc/audits/`, parses front
    matter, and decides which audits are due today.
-3. For each due audit, it asks `audit_state.sh since-last <name>
+3. For each due audit, it asks `audit_report.sh since-last <name>
    <paths>` whether anything changed under the audit's path filter
    since the last successful run. If empty, it skips the audit.
 4. If non-empty, it invokes `codex exec -` with the audit body plus a
@@ -67,7 +67,7 @@ Cron does not load your interactive shell. Set PATH explicitly so the
 
 ```cron
 PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
-0 9 * * *  cd /path/to/agogo && scripts/audit.py cron-tick
+0 9 * * *  cd /path/to/agogo && scripts/audit_run.py cron-tick
 ```
 
 On no-due days, the command exits silently. On due days where nothing
@@ -78,17 +78,17 @@ failure exits nonzero so cron mail or the surrounding runner catches it.
 
 ```sh
 # List configured audits and which are due today.
-scripts/audit.py list
+scripts/audit_run.py list
 
 # Print the assembled prompt without invoking Codex or moving the pin.
-scripts/audit.py run proptest --force --dry-run
+scripts/audit_run.py run proptest --force --dry-run
 
 # Run one audit unconditionally.
-scripts/audit.py run proptest --force
+scripts/audit_run.py run proptest --force
 
 # Inspect or set the early-exit pin.
-scripts/audit_state.sh last proptest
-scripts/audit_state.sh mark proptest
+scripts/audit_report.sh last proptest
+scripts/audit_report.sh mark proptest
 ```
 
 First run has no `.git/audit-state/<name>` pin, so it audits every
@@ -112,7 +112,7 @@ commit.
 3. Test prompt assembly with:
 
 ```sh
-scripts/audit.py run <name> --force --dry-run
+scripts/audit_run.py run <name> --force --dry-run
 ```
 
 ## Cadence Accounting

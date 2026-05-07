@@ -579,7 +579,7 @@ Once pushed, CI runs `cargo test --workspace` and
 `.github/workflows/ci.yml`). Automated code review agents and/or GitHub Copilot
 perform a second-round review on the PR automatically.
 
-After GitHub review activity, run `/pull-reviews <N>` to fetch the PR's
+After GitHub review activity, run `/pr-report <N>` to fetch the PR's
 review bodies and inline comments and **append them chronologically to the
 same `doc/reviews/review-NNNNN.md`** used by Tier 1. The command is
 idempotent — it records `<!-- gh-id: NNNNN -->` markers for each appended
@@ -617,7 +617,7 @@ commit): cherry-pick the stranded SHA into the next plan branch's
 first commit per the bundle-into-next-plan convention; don't open
 a tiny standalone PR.
 
-`/pull-reviews <N>` remains available as a lower-level primitive for
+`/pr-report <N>` remains available as a lower-level primitive for
 fetching comments without posting. Use it standalone only to refresh
 the doc right before the final pre-merge push, to capture any trailing
 reviewer comments; its output rides with the next fix commit, never as
