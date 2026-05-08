@@ -767,10 +767,14 @@ chain:
    any match. Allow-list exceptions go in `.pii-allow`.
 3. `scripts/check_floats.sh` — fail if naked `f32`/`f64` appears
    in a non-allowlisted file. See "no stored f32/f64" rule above.
-4. `scripts/check_layers.sh` — fail if any `use crate::<top>` /
-   `use agogo_chan::<top>` / `use agogo_core::<top>` (column-0
-   imports) violates the partial order in each module-root's
-   `//! depends-on:` sentinel. See the layering rule above.
+4. `scripts/check_layers.sh` — fail if any column-0 module import
+   through a crate root (`use crate::<top>`,
+   `use agogo_chan::<top>`, `use agogo_core::<top>`,
+   `use agogo_host_*::<top>`, `use agogo_cli::<top>`) or facade
+   root (`use agogo::chan::<top>`, `use agogo::core::<top>`,
+   `use agogo::host::{cpal,link,midi}::<top>`) violates the partial
+   order in each module-root's `//! depends-on:` sentinel. See the
+   layering rule above.
 5. `scripts/check_connections.sh` — fail if production code constructs
    `Conn` values directly with `Conn::new_l`, `Conn::new_r`,
    `RuntimeConn::new`, or local marker wrappers instead of the upstream
