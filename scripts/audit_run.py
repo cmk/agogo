@@ -299,13 +299,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"audit_run.py: no audit named {args.name!r}", file=sys.stderr)
         return 2
     audit = audits[args.name]
-    changed = changed_files_since_last(audit)
     if args.force:
         # Force mode: audit the full pathspec
         changed = tracked_files_for(audit)
-    elif not changed:
-        print(f"audit_run.py: '{audit.name}' — no changed files since last run; skip")
-        return 0
+    else:
+        changed = changed_files_since_last(audit)
+        if not changed:
+            print(f"audit_run.py: '{audit.name}' — no changed files since last run; skip")
+            return 0
     print(f"audit_run.py: running '{audit.name}' on {len(changed)} changed files")
     output = invoke_codex(audit, changed, dry_run=args.dry_run)
     if args.dry_run:

@@ -46,7 +46,7 @@ class AuditRunTests(unittest.TestCase):
 
         with (
             mock.patch.object(audit_run, "load_audits", return_value=[broken]),
-            mock.patch.object(audit_run, "changed_files_since_last", return_value=[]),
+            mock.patch.object(audit_run, "changed_files_since_last") as changed_files_since_last,
             mock.patch.object(audit_run, "tracked_files_for", side_effect=error),
             mock.patch.object(audit_run, "invoke_codex") as invoke_codex,
             mock.patch.object(audit_run, "mark_audited") as mark_audited,
@@ -56,6 +56,7 @@ class AuditRunTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 audit_run.cmd_run(args)
 
+        changed_files_since_last.assert_not_called()
         invoke_codex.assert_not_called()
         mark_audited.assert_not_called()
 
