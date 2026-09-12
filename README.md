@@ -185,7 +185,7 @@ or platform-specific equivalents.
 
 ## Why Galois Connections?
 
-Agogo uses the [`connections`](https://gitlab.com/cmk/connections) crate for
+Agogo uses the [`connections`](https://github.com/cmk/connections) crate for
 numeric conversions where the rounding direction is part of the correctness
 contract: microseconds to picoseconds, picoseconds to sample time, sample time
 to whole sample counts, BPM to fixed-point tempo, and similar boundaries.
